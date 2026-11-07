@@ -12,6 +12,7 @@ publish.workspace = true
 [dependencies]
 nanobom-entity.workspace = true
 nanobom-migration.workspace = true
+nanobom-osv.workspace = true
 sea-orm.workspace = true
 serde.workspace = true
 serde_json.workspace = true

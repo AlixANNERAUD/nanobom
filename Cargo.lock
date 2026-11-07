@@ -2528,6 +2528,7 @@ dependencies = [
  "nanobom-domain",
  "nanobom-entity",
  "nanobom-migration",
+ "nanobom-osv",
  "packageurl",
  "password-auth",
  "sea-orm",
