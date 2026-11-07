@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use axum::extract::FromRef;
 use leptos::config::LeptosOptions;
+use nanobom_authentication::OpenId;
 use sea_orm::DatabaseConnection;
 use tokio::sync::Semaphore;
 
@@ -17,6 +18,8 @@ pub struct AppState {
     /// Bounds how many SBOMs are parsed at once, which bounds memory use.
     pub sbom_parsing: Arc<Semaphore>,
     pub runner: Runner,
+    /// The OpenID Connect provider, when configured.
+    pub openid: Option<Arc<OpenId>>,
 }
 
 /// SBOMs parsed concurrently; others wait their turn.
@@ -28,6 +31,7 @@ impl AppState {
         options: ServeOptions,
         leptos_options: LeptosOptions,
         runner: Runner,
+        openid: Option<OpenId>,
     ) -> Self {
         Self {
             database,
@@ -35,6 +39,7 @@ impl AppState {
             leptos_options,
             sbom_parsing: Arc::new(Semaphore::new(CONCURRENT_SBOM_PARSING)),
             runner,
+            openid: openid.map(Arc::new),
         }
     }
 }

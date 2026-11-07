@@ -1,6 +1,8 @@
 //! The nanobom server: command line, HTTP API, authentication and the web interface.
 
+pub mod administration;
 pub mod api;
+pub mod authentication;
 pub mod command_line;
 pub mod logging;
 pub mod metrics;
@@ -31,6 +33,14 @@ pub async fn run(command_line: CommandLine) -> Result<(), Failure> {
             database::backup(&connection, &destination).await?;
             tracing::info!(destination = %destination.display(), "backup written");
             Ok(())
+        }
+        Command::CreateAdministrator(options) => {
+            database::migrate(&connection).await?;
+            administration::create_administrator(&connection, options).await
+        }
+        Command::Token(command) => {
+            database::migrate(&connection).await?;
+            administration::token(&connection, command).await
         }
     }
 }

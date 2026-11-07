@@ -11,7 +11,7 @@ use nanobom_osv::OsvClient;
 use sea_orm::DatabaseConnection;
 
 use crate::{
-    api,
+    api, authentication,
     command_line::ServeOptions,
     metrics, operations,
     runner::{self, NotificationSettings, Runner},
@@ -32,11 +32,14 @@ pub fn leptos_options(options: &ServeOptions) -> LeptosOptions {
 pub fn router(state: AppState) -> Router {
     let routes = generate_route_list(App);
     let leptos_options = state.leptos_options.clone();
+    let interface = Router::new()
+        .leptos_routes(&state, routes, move || shell(leptos_options.clone()))
+        .fallback(leptos_axum::file_and_error_handler::<AppState, _>(shell));
+    let interface = authentication::layer(interface, &state);
     Router::new()
         .merge(api::router(&state))
         .merge(operations::router())
-        .leptos_routes(&state, routes, move || shell(leptos_options.clone()))
-        .fallback(leptos_axum::file_and_error_handler::<AppState, _>(shell))
+        .merge(interface)
         .with_state(state)
 }
 
@@ -50,6 +53,14 @@ pub async fn run(
         options.public_url.set_path(&path);
     }
     let schedule = runner::parse_schedule(&options.schedule)?;
+    let openid = authentication::openid(&options)?;
+    if !options.local_accounts && openid.is_none() {
+        return Err(
+            "no sign-in method: enable local accounts (NANOBOM_LOCAL_ACCOUNTS) or \
+             configure OpenID Connect (NANOBOM_OIDC_ISSUER and NANOBOM_OIDC_CLIENT_ID)"
+                .into(),
+        );
+    }
     let address = options.listen_address;
     metrics::initialize(&database).await;
 
@@ -70,12 +81,15 @@ pub async fn run(
     }
 
     let leptos_options = leptos_options(&options);
-    let state = AppState::new(database, options, leptos_options, runner);
+    let state = AppState::new(database, options, leptos_options, runner, openid);
     let listener = tokio::net::TcpListener::bind(address).await?;
     tracing::info!(%address, "listening");
-    axum::serve(listener, router(state).into_make_service())
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    axum::serve(
+        listener,
+        router(state).into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
     Ok(())
 }
 

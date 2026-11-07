@@ -16,6 +16,10 @@ path = "src/main.rs"
 [dependencies]
 nanobom-app = { workspace = true, features = ["ssr"] }
 nanobom-domain.workspace = true
+nanobom-authentication.workspace = true
+axum-login.workspace = true
+tower-sessions.workspace = true
+tower_governor.workspace = true
 nanobom-entity.workspace = true
 leptos = { workspace = true, features = ["ssr"] }
 leptos_axum.workspace = true

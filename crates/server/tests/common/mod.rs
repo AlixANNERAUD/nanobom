@@ -7,7 +7,9 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, Response},
 };
-use std::sync::Arc;
+use std::{net::SocketAddr, sync::Arc};
+
+use axum::extract::ConnectInfo;
 
 use clap::Parser;
 use nanobom::{
@@ -59,7 +61,14 @@ pub async fn server(arguments: &[&str]) -> TestServer {
         },
     );
     let leptos_options = serve::leptos_options(&options);
-    let state = AppState::new(database.clone(), options, leptos_options, runner.clone());
+    let openid = nanobom::authentication::openid(&options).expect("valid OpenID Connect options");
+    let state = AppState::new(
+        database.clone(),
+        options,
+        leptos_options,
+        runner.clone(),
+        openid,
+    );
     TestServer {
         database,
         router: serve::router(state),
@@ -69,7 +78,11 @@ pub async fn server(arguments: &[&str]) -> TestServer {
 }
 
 impl TestServer {
-    pub async fn send(&self, request: Request<Body>) -> Response<Body> {
+    /// Sends a request as if it came from one client address.
+    pub async fn send(&self, mut request: Request<Body>) -> Response<Body> {
+        request
+            .extensions_mut()
+            .insert(ConnectInfo(SocketAddr::from(([192, 0, 2, 1], 40000))));
         self.router
             .clone()
             .oneshot(request)
@@ -109,4 +122,20 @@ pub fn sbom_document(name: &str) -> Vec<u8> {
         env!("CARGO_MANIFEST_DIR")
     );
     std::fs::read(&path).unwrap_or_else(|error| panic!("read {path}: {error}"))
+}
+
+/// Creates a local account with a password.
+pub async fn local_user(database: &DatabaseConnection, username: &str, password: &str) -> Actor {
+    let user = users::create(
+        database,
+        NewUser {
+            username: username.to_owned(),
+            password_hash: Some(nanobom_domain::passwords::hash(password.to_owned()).await),
+            ..NewUser::default()
+        },
+        true,
+    )
+    .await
+    .expect("create the user");
+    Actor::from_user(&user)
 }

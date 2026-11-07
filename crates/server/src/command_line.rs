@@ -57,6 +57,66 @@ pub enum Command {
         #[arg(env = "NANOBOM_BACKUP_DESTINATION")]
         destination: PathBuf,
     },
+    /// Create a local instance administrator, typically the first one.
+    CreateAdministrator(CreateAdministratorOptions),
+    /// Manage upload tokens.
+    #[command(subcommand)]
+    Token(TokenCommand),
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct AccountOptions {
+    /// Give each new user a personal organization they own.
+    #[arg(long, env = "NANOBOM_PERSONAL_ORGANIZATIONS", default_value_t = true, action = ArgAction::Set)]
+    pub personal_organizations: bool,
+
+    /// Minimum length of local account passwords.
+    #[arg(long, env = "NANOBOM_PASSWORD_MINIMUM_LENGTH", default_value_t = 12)]
+    pub password_minimum_length: usize,
+}
+
+#[derive(Debug, Args)]
+pub struct CreateAdministratorOptions {
+    #[arg(long, env = "NANOBOM_ADMINISTRATOR_USERNAME")]
+    pub username: String,
+
+    #[arg(long, env = "NANOBOM_ADMINISTRATOR_EMAIL")]
+    pub email: Option<String>,
+
+    /// The password; read from standard input when not set.
+    #[arg(long, env = "NANOBOM_ADMINISTRATOR_PASSWORD", hide_env_values = true)]
+    pub password: Option<String>,
+
+    #[command(flatten)]
+    pub accounts: AccountOptions,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TokenCommand {
+    /// Create an upload token and print it; it cannot be shown again.
+    Create {
+        /// Organization slug.
+        #[arg(long, env = "NANOBOM_TOKEN_ORGANIZATION")]
+        organization: String,
+        /// Limit the token to this project; without it, the token covers the organization and
+        /// may create projects.
+        #[arg(long, env = "NANOBOM_TOKEN_PROJECT")]
+        project: Option<String>,
+        /// A name to recognize the token by.
+        #[arg(long, env = "NANOBOM_TOKEN_NAME")]
+        name: String,
+    },
+    /// List the upload tokens of an organization.
+    List {
+        #[arg(long, env = "NANOBOM_TOKEN_ORGANIZATION")]
+        organization: String,
+    },
+    /// Revoke an upload token.
+    Revoke {
+        /// Token identifier, as listed.
+        #[arg(long)]
+        id: i64,
+    },
 }
 
 #[derive(Debug, Clone, Args)]
@@ -98,4 +158,76 @@ pub struct ServeOptions {
     /// Webhook receiving a JSON payload when a run fails (OSV unreachable, for example).
     #[arg(long, env = "NANOBOM_FAILURE_WEBHOOK_URL")]
     pub failure_webhook_url: Option<reqwest::Url>,
+
+    /// Allow sign-in with local accounts (username or email address and password).
+    #[arg(long, env = "NANOBOM_LOCAL_ACCOUNTS", default_value_t = true, action = ArgAction::Set)]
+    pub local_accounts: bool,
+
+    /// Sign users out after this many days without activity.
+    #[arg(long, env = "NANOBOM_SESSION_INACTIVITY_DAYS", default_value_t = 7)]
+    pub session_inactivity_days: i64,
+
+    /// Read client addresses from X-Forwarded-For and similar headers, for sign-in rate
+    /// limiting. Enable only behind a reverse proxy that sets them.
+    #[arg(long, env = "NANOBOM_TRUST_FORWARDED_HEADERS", default_value_t = false, action = ArgAction::Set)]
+    pub trust_forwarded_headers: bool,
+
+    #[command(flatten)]
+    pub accounts: AccountOptions,
+
+    #[command(flatten)]
+    pub openid: OpenIdOptions,
+}
+
+/// OpenID Connect sign-in, enabled by setting the issuer and the client identifier.
+#[derive(Debug, Clone, Args)]
+pub struct OpenIdOptions {
+    /// Issuer URL of the provider (its discovery document is read from it).
+    #[arg(long, env = "NANOBOM_OIDC_ISSUER")]
+    pub oidc_issuer: Option<String>,
+
+    #[arg(long, env = "NANOBOM_OIDC_CLIENT_ID")]
+    pub oidc_client_id: Option<String>,
+
+    /// Client secret, for confidential clients; public clients rely on PKCE alone.
+    #[arg(long, env = "NANOBOM_OIDC_CLIENT_SECRET", hide_env_values = true)]
+    pub oidc_client_secret: Option<String>,
+
+    /// Scopes to request, separated by spaces.
+    #[arg(
+        long,
+        env = "NANOBOM_OIDC_SCOPES",
+        default_value = "openid profile email"
+    )]
+    pub oidc_scopes: String,
+
+    /// Create users at their first sign-in.
+    #[arg(long, env = "NANOBOM_OIDC_CREATE_USERS", default_value_t = true, action = ArgAction::Set)]
+    pub oidc_create_users: bool,
+
+    /// Claim granting instance administration (for example `groups` or
+    /// `urn:zitadel:iam:org:project:roles`); applied at each sign-in.
+    #[arg(long, env = "NANOBOM_OIDC_ADMINISTRATOR_CLAIM")]
+    pub oidc_administrator_claim: Option<String>,
+
+    /// Value the administrator claim must contain; without it, the claim must be `true`.
+    #[arg(long, env = "NANOBOM_OIDC_ADMINISTRATOR_VALUE")]
+    pub oidc_administrator_value: Option<String>,
+
+    /// Claim listing the user's groups or roles, for organization mapping.
+    #[arg(long, env = "NANOBOM_OIDC_GROUPS_CLAIM")]
+    pub oidc_groups_claim: Option<String>,
+
+    /// Organization roles granted by groups: `group=organization:role` entries separated by
+    /// `;`.
+    #[arg(long, env = "NANOBOM_OIDC_GROUP_MAPPING", default_value = "")]
+    pub oidc_group_mapping: String,
+
+    /// Label of the sign-in button.
+    #[arg(
+        long,
+        env = "NANOBOM_OIDC_BUTTON_LABEL",
+        default_value = "Sign in with single sign-on"
+    )]
+    pub oidc_button_label: String,
 }

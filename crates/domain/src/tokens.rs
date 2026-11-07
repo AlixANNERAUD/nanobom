@@ -6,7 +6,7 @@
 //! upload down.
 
 use chrono::Utc;
-use nanobom_entity::{projects, upload_tokens};
+use nanobom_entity::{organizations, projects, upload_tokens};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
     QueryOrder,
@@ -82,6 +82,23 @@ pub async fn create(
     actor
         .authorize(database, organization_id, Permission::ManageUploadTokens)
         .await?;
+    insert(
+        database,
+        organization_id,
+        project_slug,
+        name,
+        Some(actor.user_id),
+    )
+    .await
+}
+
+async fn insert(
+    database: &impl ConnectionTrait,
+    organization_id: i64,
+    project_slug: Option<&str>,
+    name: &str,
+    created_by: Option<i64>,
+) -> Result<CreatedToken> {
     let name = names::display_name("the token name", name)?;
     let project = match project_slug {
         Some(slug) => Some(
@@ -98,7 +115,7 @@ pub async fn create(
         name: Set(name),
         token_hash: Set(digest(&secret)),
         token_prefix: Set(secret[..DISPLAYED_CHARACTERS].to_owned()),
-        created_by_user_id: Set(Some(actor.user_id)),
+        created_by_user_id: Set(created_by),
         created_at: Set(Utc::now().fixed_offset()),
         last_used_at: Set(None),
         revoked_at: Set(None),
@@ -112,6 +129,49 @@ pub async fn create(
     })
 }
 
+async fn organization_by_slug(
+    database: &impl ConnectionTrait,
+    slug: &str,
+) -> Result<organizations::Model> {
+    organizations::Entity::find()
+        .filter(organizations::Column::Slug.eq(slug.trim().to_ascii_lowercase()))
+        .one(database)
+        .await?
+        .ok_or_else(|| Error::invalid(format!("no organization named {slug:?}")))
+}
+
+/// Creates a token from the command line, which has direct access to the database.
+pub async fn create_from_command_line(
+    database: &impl ConnectionTrait,
+    organization_slug: &str,
+    project_slug: Option<&str>,
+    name: &str,
+) -> Result<CreatedToken> {
+    let organization = organization_by_slug(database, organization_slug).await?;
+    insert(database, organization.id, project_slug, name, None).await
+}
+
+/// Lists the tokens of an organization from the command line.
+pub async fn list_from_command_line(
+    database: &impl ConnectionTrait,
+    organization_slug: &str,
+) -> Result<Vec<UploadToken>> {
+    let organization = organization_by_slug(database, organization_slug).await?;
+    list_models(database, organization.id).await
+}
+
+/// Revokes a token from the command line.
+pub async fn revoke_from_command_line(
+    database: &impl ConnectionTrait,
+    token_id: i64,
+) -> Result<()> {
+    let token = upload_tokens::Entity::find_by_id(token_id)
+        .one(database)
+        .await?
+        .ok_or(Error::NotFound)?;
+    mark_revoked(database, token).await
+}
+
 /// The tokens of an organization, newest first, including revoked ones.
 pub async fn list(
     database: &impl ConnectionTrait,
@@ -121,6 +181,13 @@ pub async fn list(
     actor
         .authorize(database, organization_id, Permission::ManageUploadTokens)
         .await?;
+    list_models(database, organization_id).await
+}
+
+async fn list_models(
+    database: &impl ConnectionTrait,
+    organization_id: i64,
+) -> Result<Vec<UploadToken>> {
     let rows = upload_tokens::Entity::find()
         .filter(upload_tokens::Column::OrganizationId.eq(organization_id))
         .find_also_related(projects::Entity)
@@ -147,6 +214,10 @@ pub async fn revoke(database: &impl ConnectionTrait, actor: &Actor, token_id: i6
             Permission::ManageUploadTokens,
         )
         .await?;
+    mark_revoked(database, token).await
+}
+
+async fn mark_revoked(database: &impl ConnectionTrait, token: upload_tokens::Model) -> Result<()> {
     if token.revoked_at.is_some() {
         return Ok(());
     }
