@@ -1,0 +1,17 @@
+[package]
+name = "nanobom-migration"
+description = "Database migrations of nanobom."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+sea-orm-migration.workspace = true
+async-trait = "0.1"
+
+[lints]
+workspace = true

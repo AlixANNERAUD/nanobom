@@ -1,0 +1,4 @@
+# Selected with MISE_ENV=ci: CI caches its target directory with rust-cache, so it does not route
+# Cargo through mr-boxington.
+[tools]
+rust = { version = "1.99.1", components = "rustfmt,clippy", targets = "wasm32-unknown-unknown", mr_boxington = false }

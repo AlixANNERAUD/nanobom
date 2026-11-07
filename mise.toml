@@ -1,0 +1,45 @@
+[tools]
+rust = { version = "1.99.1", components = "rustfmt,clippy", targets = "wasm32-unknown-unknown", mr_boxington = true }
+mr-boxington = "latest"
+"github:leptos-rs/cargo-leptos" = "0.3.11"
+"aqua:nextest-rs/nextest/cargo-nextest" = "0.9.149"
+"aqua:EmbarkStudios/cargo-deny" = "0.20.2"
+# Must match the wasm-bindgen version in Cargo.lock.
+"github:wasm-bindgen/wasm-bindgen" = "0.2.130"
+
+[env]
+# The browser bundle is built separately for wasm32, so server-side commands leave it out to
+# avoid unifying the `ssr` and `hydrate` features of the interface crate.
+NANOBOM_SERVER_PACKAGES = "--workspace --exclude nanobom-frontend"
+
+[tasks.format]
+description = "Format the code"
+run = "cargo fmt --all"
+
+[tasks.lint]
+description = "Check formatting and run clippy on the server and browser code"
+run = [
+  "cargo fmt --all --check",
+  "cargo clippy $NANOBOM_SERVER_PACKAGES --all-targets -- -D warnings",
+  "cargo clippy --package nanobom-frontend --target wasm32-unknown-unknown -- -D warnings",
+]
+
+[tasks.test]
+description = "Run the test suite"
+run = "cargo nextest run $NANOBOM_SERVER_PACKAGES --no-tests=pass"
+
+[tasks.deny]
+description = "Check advisories, licences, bans and sources"
+run = "cargo deny check"
+
+[tasks.check]
+description = "Everything CI checks, except the release build"
+depends = ["lint", "test", "deny"]
+
+[tasks.dev]
+description = "Run the server with live reload"
+run = "cargo leptos watch"
+
+[tasks.build]
+description = "Build the release binary and the site"
+run = "cargo leptos build --release"

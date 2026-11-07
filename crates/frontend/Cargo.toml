@@ -1,0 +1,22 @@
+[package]
+name = "nanobom-frontend"
+description = "Browser part of the nanobom web interface."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+nanobom-app = { workspace = true, features = ["hydrate"] }
+leptos = { workspace = true, features = ["hydrate"] }
+wasm-bindgen.workspace = true
+console_error_panic_hook.workspace = true
+
+[lints]
+workspace = true

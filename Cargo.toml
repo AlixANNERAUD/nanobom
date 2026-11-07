@@ -1,0 +1,84 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/AlixANNERAUD/nanobom"
+authors = ["Alix ANNERAUD <alix@anneraud.fr>"]
+publish = false
+
+[workspace.dependencies]
+nanobom-entity = { path = "crates/entity" }
+nanobom-migration = { path = "crates/migration" }
+nanobom-domain = { path = "crates/domain" }
+nanobom-app = { path = "crates/app", default-features = false }
+
+leptos = { version = "0.8.23", features = ["islands"] }
+leptos_axum = "0.8.10"
+leptos_router = "0.8.17"
+leptos_meta = "0.8.7"
+axum = { version = "0.8.9", features = ["macros"] }
+tower = { version = "0.5.3", features = ["util"] }
+tower-http = { version = "0.6.11", features = ["compression-gzip", "compression-br", "trace", "timeout", "fs", "set-header"] }
+axum-login = "0.18.0"
+tower-sessions = { version = "0.14.0", default-features = false, features = ["axum-core"] }
+password-auth = "1.0.0"
+openidconnect = { version = "4.1.0", default-features = false, features = ["reqwest", "rustls-tls"] }
+tower_governor = { version = "0.8.0", default-features = false, features = ["axum"] }
+sea-orm = { version = "2.0.4", default-features = false, features = ["sqlx-sqlite", "sqlx-postgres", "runtime-tokio", "macros", "with-chrono", "with-json"] }
+sea-orm-migration = { version = "2.0.4", default-features = false, features = ["sqlx-sqlite", "sqlx-postgres", "runtime-tokio"] }
+cyclonedx-bom = "0.9.0"
+packageurl = "0.7.1"
+cvss = "3.0.0"
+reqwest = { version = "0.12.28", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["json", "env-filter"] }
+metrics = "0.24.6"
+metrics-exporter-prometheus = { version = "0.18.3", default-features = false }
+clap = { version = "4.6.7", features = ["derive", "env"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "macros", "signal", "time", "sync"] }
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "serde", "std"] }
+thiserror = "2.0.21"
+sha2 = "0.11.1"
+getrandom = "0.4.3"
+croner = "4.0.3"
+wiremock = "0.6.5"
+wasm-bindgen = "0.2"
+console_error_panic_hook = "0.1"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[profile.release]
+codegen-units = 1
+lto = true
+strip = true
+
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+panic = "abort"
+
+[[workspace.metadata.leptos]]
+name = "nanobom"
+bin-package = "nanobom"
+lib-package = "nanobom-frontend"
+output-name = "nanobom"
+site-root = "target/site"
+site-pkg-dir = "pkg"
+tailwind-input-file = "style/main.css"
+assets-dir = "public"
+site-addr = "127.0.0.1:3000"
+reload-port = 3001
+browserquery = "defaults"
+env = "DEV"
+lib-profile-release = "wasm-release"
