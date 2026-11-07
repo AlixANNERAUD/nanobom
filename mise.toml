@@ -4,6 +4,7 @@ mr-boxington = "latest"
 "github:leptos-rs/cargo-leptos" = "0.3.11"
 "aqua:nextest-rs/nextest/cargo-nextest" = "0.9.149"
 "aqua:EmbarkStudios/cargo-deny" = "0.20.2"
+"github:SeaQL/sea-orm" = { version = "2.0.4", version_prefix = "sea-orm-cli@", bin = "sea-orm-cli" }
 # Must match the wasm-bindgen version in Cargo.lock.
 "github:wasm-bindgen/wasm-bindgen" = "0.2.130"
 
@@ -43,3 +44,14 @@ run = "cargo leptos watch"
 [tasks.build]
 description = "Build the release binary and the site"
 run = "cargo leptos build --release"
+
+[tasks.entities]
+description = "Regenerate the SeaORM entities from the migrations"
+run = '''
+directory=$(mktemp -d)
+cargo run --quiet --package nanobom -- --log-level warn migrate --database-url "sqlite://$directory/schema.db"
+rm -rf crates/entity/src/entities
+sea-orm-cli generate entity --database-url "sqlite://$directory/schema.db" --output-dir crates/entity/src/entities --with-serde both --date-time-crate chrono --ignore-tables seaql_migrations --banner-version off
+rm -rf "$directory"
+cargo fmt --package nanobom-entity
+'''

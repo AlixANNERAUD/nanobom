@@ -2323,6 +2323,7 @@ name = "nanobom-domain"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "nanobom-domain",
  "nanobom-entity",
  "nanobom-migration",
  "sea-orm",
@@ -2355,7 +2356,6 @@ dependencies = [
 name = "nanobom-migration"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "sea-orm-migration",
 ]
 
