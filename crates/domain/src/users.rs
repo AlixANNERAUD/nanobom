@@ -2,7 +2,7 @@
 //! have an identity instead, and may have both.
 
 use chrono::Utc;
-use nanobom_entity::{memberships, organizations, users};
+use nanobom_entity::{memberships, organizations, user_identities, users};
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
     QueryOrder, TransactionSession, TransactionTrait,
@@ -261,4 +261,87 @@ pub async fn synchronize_instance_administrator(
     let mut user: users::ActiveModel = user.into();
     user.is_instance_administrator = Set(administrator);
     Ok(user.update(database).await?)
+}
+
+/// Turns a name from an identity provider into a valid username: lower case, with characters
+/// outside `[a-z0-9._-]` replaced by `-`.
+fn sanitize_username(value: &str) -> Option<String> {
+    let mut name: String = value
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || "._-".contains(character) {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let trimmed = name.trim_start_matches(|character: char| !character.is_ascii_alphanumeric());
+    name = trimmed.to_owned();
+    name.truncate(names::MAXIMUM_LENGTH - 4);
+    names::slug("the username", &name).ok()
+}
+
+/// The first free username derived from the candidates, in order, falling back to `user`.
+pub async fn available_username(
+    database: &impl ConnectionTrait,
+    candidates: &[&str],
+) -> Result<String> {
+    let base = candidates
+        .iter()
+        .find_map(|candidate| sanitize_username(candidate))
+        .unwrap_or_else(|| "user".to_owned());
+    for suffix in 1.. {
+        let candidate = if suffix == 1 {
+            base.clone()
+        } else {
+            format!("{base}-{suffix}")
+        };
+        if find_by_username(database, &candidate).await?.is_none() {
+            return Ok(candidate);
+        }
+    }
+    unreachable!("an unbounded range always yields a free username")
+}
+
+/// The user linked to an identity provider account.
+pub async fn find_by_identity(
+    database: &impl ConnectionTrait,
+    issuer: &str,
+    subject: &str,
+) -> Result<Option<users::Model>> {
+    let identity = user_identities::Entity::find()
+        .filter(user_identities::Column::Issuer.eq(issuer))
+        .filter(user_identities::Column::Subject.eq(subject))
+        .one(database)
+        .await?;
+    match identity {
+        Some(identity) => find_by_id(database, identity.user_id).await,
+        None => Ok(None),
+    }
+}
+
+/// Creates a user linked to an identity provider account.
+pub async fn create_with_identity(
+    database: &(impl ConnectionTrait + TransactionTrait),
+    user: NewUser,
+    personal_organization: bool,
+    issuer: &str,
+    subject: &str,
+) -> Result<users::Model> {
+    let transaction = database.begin().await?;
+    let created = create(&transaction, user, personal_organization).await?;
+    user_identities::ActiveModel {
+        user_id: Set(created.id),
+        issuer: Set(issuer.to_owned()),
+        subject: Set(subject.to_owned()),
+        created_at: Set(Utc::now().fixed_offset()),
+        ..Default::default()
+    }
+    .insert(&transaction)
+    .await?;
+    transaction.commit().await?;
+    Ok(created)
 }

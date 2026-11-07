@@ -16,6 +16,7 @@ nanobom-entity = { path = "crates/entity" }
 nanobom-migration = { path = "crates/migration" }
 nanobom-domain = { path = "crates/domain" }
 nanobom-osv = { path = "crates/osv" }
+nanobom-authentication = { path = "crates/authentication" }
 nanobom-app = { path = "crates/app", default-features = false }
 
 leptos = { version = "0.8.23", features = ["islands"] }
@@ -26,6 +27,7 @@ axum = { version = "0.8.9", features = ["macros"] }
 tower = { version = "0.5.3", features = ["util"] }
 tower-http = { version = "0.6.11", features = ["compression-gzip", "compression-br", "trace", "timeout", "fs", "set-header"] }
 axum-login = "0.18.0"
+async-trait = "0.1"
 tower-sessions = { version = "0.14.0", default-features = false, features = ["axum-core"] }
 password-auth = "1.0.0"
 openidconnect = { version = "4.1.0", default-features = false, features = ["reqwest", "rustls-tls"] }
