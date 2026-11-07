@@ -50,7 +50,7 @@ pub enum Scope {
 }
 
 impl Scope {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Scope::All => "all",
             Scope::Organization(_) => "organization",
@@ -68,7 +68,7 @@ pub enum Trigger {
 }
 
 impl Trigger {
-    fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Trigger::Scheduled => "scheduled",
             Trigger::Manual => "manual",

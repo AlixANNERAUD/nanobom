@@ -30,6 +30,11 @@ serde_json.workspace = true
 thiserror.workspace = true
 sea-orm.workspace = true
 reqwest.workspace = true
+croner.workspace = true
+metrics.workspace = true
+metrics-exporter-prometheus.workspace = true
+nanobom-osv.workspace = true
+chrono.workspace = true
 
 [dev-dependencies]
 nanobom-domain = { workspace = true, features = ["testing"] }

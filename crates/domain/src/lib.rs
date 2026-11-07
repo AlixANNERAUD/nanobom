@@ -11,6 +11,7 @@ pub mod findings;
 pub mod inventory;
 pub mod memberships;
 pub mod names;
+pub mod notifications;
 pub mod organizations;
 pub mod passwords;
 pub mod projects;
