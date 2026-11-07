@@ -1,0 +1,323 @@
+//! The component inventory: parsing CycloneDX SBOMs and replacing a project's components with
+//! each new upload, keeping the upload history.
+
+use std::{collections::BTreeMap, str::FromStr};
+
+use chrono::Utc;
+use cyclonedx_bom::{
+    models::{
+        bom::SpecVersion,
+        component::{Classification, Component},
+    },
+    prelude::Bom,
+};
+use nanobom_entity::{components, organizations, projects, sbom_uploads, upload_tokens};
+use packageurl::PackageUrl;
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
+    QueryOrder, TransactionSession, TransactionTrait,
+};
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    access::{Actor, Permission},
+    error::{Error, Result},
+};
+
+/// Specification versions accepted at upload.
+pub const SUPPORTED_SPECIFICATION_VERSIONS: [&str; 5] = ["1.3", "1.4", "1.5", "1.6", "1.7"];
+
+/// At most this many skipped components are listed in an upload's response; all are counted.
+const MAXIMUM_LISTED_SKIPPED_COMPONENTS: usize = 100;
+
+/// A component of an SBOM, identified by its package URL.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InventoryComponent {
+    /// The package URL in canonical form, qualifiers included.
+    pub purl: String,
+    /// The package URL sent to OSV: without qualifiers or subpath.
+    pub query_purl: String,
+    /// The package URL type: `cargo`, `npm`, `pypi`, `deb`…
+    pub ecosystem: String,
+    /// The package name, with its namespace when it has one (`@scope/name`, `group/name`).
+    pub name: String,
+    pub version: Option<String>,
+}
+
+/// A component that cannot be tracked.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SkippedComponent {
+    pub name: String,
+    pub version: Option<String>,
+    pub reason: String,
+}
+
+/// The parts of an SBOM nanobom keeps.
+#[derive(Debug, Clone)]
+pub struct ParsedSbom {
+    pub specification_version: String,
+    pub serial_number: Option<String>,
+    pub components: Vec<InventoryComponent>,
+    /// Components without a usable package URL, which cannot be matched against OSV.
+    pub skipped_count: usize,
+    /// The first skipped components, for the upload's response.
+    pub skipped: Vec<SkippedComponent>,
+}
+
+#[derive(Deserialize)]
+struct Header {
+    #[serde(rename = "bomFormat")]
+    format: Option<String>,
+    #[serde(rename = "specVersion")]
+    specification_version: Option<String>,
+}
+
+/// Parses a CycloneDX JSON document. The document is deserialized once, straight into the model
+/// of its specification version, to keep memory use low on large SBOMs.
+pub fn parse(document: &[u8]) -> Result<ParsedSbom> {
+    let header: Header = serde_json::from_slice(document)
+        .map_err(|error| Error::invalid(format!("the SBOM is not valid JSON: {error}")))?;
+    if header.format.as_deref() != Some("CycloneDX") {
+        return Err(Error::invalid(
+            "the SBOM must be a CycloneDX JSON document (bomFormat \"CycloneDX\")",
+        ));
+    }
+    let specification_version = header.specification_version.unwrap_or_default();
+    if !SUPPORTED_SPECIFICATION_VERSIONS.contains(&specification_version.as_str()) {
+        return Err(Error::invalid(format!(
+            "unsupported CycloneDX version {specification_version:?}; supported versions are {}",
+            SUPPORTED_SPECIFICATION_VERSIONS.join(", ")
+        )));
+    }
+    let version = SpecVersion::from_str(&specification_version)
+        .map_err(|error| Error::invalid(error.to_string()))?;
+    let bom = Bom::parse_from_json_with_version(document, version)
+        .map_err(|error| Error::invalid(format!("invalid CycloneDX document: {error}")))?;
+
+    let mut parsed = ParsedSbom {
+        specification_version,
+        serial_number: bom.serial_number.as_ref().map(ToString::to_string),
+        components: Vec::new(),
+        skipped_count: 0,
+        skipped: Vec::new(),
+    };
+    let mut by_purl = BTreeMap::new();
+    if let Some(components) = &bom.components {
+        collect(&components.0, &mut by_purl, &mut parsed);
+    }
+    parsed.components = by_purl.into_values().collect();
+    Ok(parsed)
+}
+
+fn collect(
+    components: &[Component],
+    by_purl: &mut BTreeMap<String, InventoryComponent>,
+    parsed: &mut ParsedSbom,
+) {
+    for component in components {
+        // Files and the operating system describe what was scanned; they are not packages.
+        let is_package = !matches!(
+            component.component_type,
+            Classification::File | Classification::OperatingSystem
+        );
+        if is_package {
+            match inventory_component(component) {
+                Ok(inventory) => {
+                    by_purl.entry(inventory.purl.clone()).or_insert(inventory);
+                }
+                Err(reason) => {
+                    parsed.skipped_count += 1;
+                    if parsed.skipped.len() < MAXIMUM_LISTED_SKIPPED_COMPONENTS {
+                        parsed.skipped.push(SkippedComponent {
+                            name: component.name.to_string(),
+                            version: component.version.as_ref().map(ToString::to_string),
+                            reason,
+                        });
+                    }
+                }
+            }
+        }
+        if let Some(children) = &component.components {
+            collect(&children.0, by_purl, parsed);
+        }
+    }
+}
+
+fn inventory_component(component: &Component) -> std::result::Result<InventoryComponent, String> {
+    let purl = component
+        .purl
+        .as_ref()
+        .ok_or_else(|| "no package URL".to_owned())?;
+    let purl = purl.to_string();
+    let parsed = PackageUrl::from_str(&purl)
+        .map_err(|error| format!("invalid package URL {purl:?}: {error}"))?;
+    let mut query = parsed.clone();
+    query.clear_qualifiers().without_subpath();
+    let name = match parsed.namespace() {
+        Some(namespace) => format!("{namespace}/{}", parsed.name()),
+        None => parsed.name().to_owned(),
+    };
+    Ok(InventoryComponent {
+        purl: parsed.to_string(),
+        query_purl: query.to_string(),
+        ecosystem: parsed.ty().to_owned(),
+        name,
+        version: parsed.version().map(str::to_owned),
+    })
+}
+
+/// Where an upload comes from, as given by CI.
+#[derive(Debug, Clone, Default)]
+pub struct UploadSource {
+    pub source_commit: Option<String>,
+    pub image_tag: Option<String>,
+}
+
+/// The result of an upload, returned to CI.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UploadOutcome {
+    pub organization: String,
+    pub project: String,
+    pub project_id: i64,
+    pub project_created: bool,
+    pub upload_id: i64,
+    pub component_count: usize,
+    pub components_without_purl: usize,
+    pub skipped: Vec<SkippedComponent>,
+}
+
+fn optional_label(kind: &str, value: Option<String>) -> Result<Option<String>> {
+    match value.map(|value| value.trim().to_owned()) {
+        Some(value) if value.is_empty() => Ok(None),
+        Some(value) if value.chars().count() > 300 || value.chars().any(char::is_control) => {
+            Err(Error::invalid(format!(
+                "the {kind} must be at most 300 printable characters"
+            )))
+        }
+        other => Ok(other),
+    }
+}
+
+/// Replaces the components of a project with those of an SBOM uploaded with `token`, creating
+/// the project first when the token is organization-wide.
+pub async fn ingest(
+    database: &(impl ConnectionTrait + TransactionTrait),
+    token: &upload_tokens::Model,
+    organization_slug: &str,
+    project_slug: &str,
+    sbom: ParsedSbom,
+    source: UploadSource,
+) -> Result<UploadOutcome> {
+    let source_commit = optional_label("source commit", source.source_commit)?;
+    let image_tag = optional_label("image tag", source.image_tag)?;
+    let organization = organizations::Entity::find()
+        .filter(organizations::Column::Slug.eq(organization_slug.trim().to_ascii_lowercase()))
+        .one(database)
+        .await?
+        .filter(|organization| organization.id == token.organization_id)
+        .ok_or(Error::NotFound)?;
+
+    let transaction = database.begin().await?;
+    let existing = crate::projects::find_model(&transaction, organization.id, project_slug).await?;
+    let (project, project_created) = match (existing, token.project_id) {
+        (Some(project), None) => (project, false),
+        (Some(project), Some(allowed)) if project.id == allowed => (project, false),
+        (Some(_), Some(_)) => return Err(Error::Forbidden),
+        (None, None) => (
+            crate::projects::insert(&transaction, organization.id, project_slug, None).await?,
+            true,
+        ),
+        (None, Some(_)) => return Err(Error::NotFound),
+    };
+
+    let now = Utc::now().fixed_offset();
+    components::Entity::delete_many()
+        .filter(components::Column::ProjectId.eq(project.id))
+        .exec(&transaction)
+        .await?;
+    let component_count = sbom.components.len();
+    let rows: Vec<components::ActiveModel> = sbom
+        .components
+        .into_iter()
+        .map(|component| components::ActiveModel {
+            project_id: Set(project.id),
+            purl: Set(component.purl),
+            query_purl: Set(component.query_purl),
+            ecosystem: Set(component.ecosystem),
+            name: Set(component.name),
+            version: Set(component.version),
+            ..Default::default()
+        })
+        .collect();
+    // Bounded batches stay under the bind parameter limits of every database.
+    for batch in rows.chunks(500) {
+        components::Entity::insert_many(batch.to_vec())
+            .exec(&transaction)
+            .await?;
+    }
+    let upload = sbom_uploads::ActiveModel {
+        project_id: Set(project.id),
+        upload_token_id: Set(Some(token.id)),
+        uploaded_at: Set(now),
+        specification_version: Set(sbom.specification_version),
+        serial_number: Set(sbom.serial_number),
+        source_commit: Set(source_commit),
+        image_tag: Set(image_tag),
+        component_count: Set(i64::try_from(component_count).unwrap_or(i64::MAX)),
+        components_without_purl: Set(i64::try_from(sbom.skipped_count).unwrap_or(i64::MAX)),
+        ..Default::default()
+    }
+    .insert(&transaction)
+    .await?;
+    let mut updated: projects::ActiveModel = project.clone().into();
+    updated.last_upload_at = Set(Some(now));
+    updated.update(&transaction).await?;
+    transaction.commit().await?;
+
+    tracing::info!(
+        organization = %organization.slug,
+        project = %project.slug,
+        components = component_count,
+        without_purl = sbom.skipped_count,
+        "SBOM uploaded"
+    );
+    Ok(UploadOutcome {
+        organization: organization.slug,
+        project: project.slug,
+        project_id: project.id,
+        project_created,
+        upload_id: upload.id,
+        component_count,
+        components_without_purl: sbom.skipped_count,
+        skipped: sbom.skipped,
+    })
+}
+
+/// The upload history of a project, newest first.
+pub async fn uploads(
+    database: &impl ConnectionTrait,
+    actor: &Actor,
+    project_id: i64,
+) -> Result<Vec<sbom_uploads::Model>> {
+    crate::projects::authorize(database, actor, project_id, Permission::View).await?;
+    Ok(sbom_uploads::Entity::find()
+        .filter(sbom_uploads::Column::ProjectId.eq(project_id))
+        .order_by_desc(sbom_uploads::Column::UploadedAt)
+        .order_by_desc(sbom_uploads::Column::Id)
+        .all(database)
+        .await?)
+}
+
+/// The current components of a project, sorted by package URL.
+pub async fn components(
+    database: &impl ConnectionTrait,
+    actor: &Actor,
+    project_id: i64,
+) -> Result<Vec<components::Model>> {
+    crate::projects::authorize(database, actor, project_id, Permission::View).await?;
+    Ok(components::Entity::find()
+        .filter(components::Column::ProjectId.eq(project_id))
+        .order_by_asc(components::Column::Purl)
+        .all(database)
+        .await?)
+}

@@ -20,6 +20,10 @@ thiserror.workspace = true
 tracing.workspace = true
 tokio.workspace = true
 password-auth.workspace = true
+cyclonedx-bom.workspace = true
+packageurl.workspace = true
+sha2.workspace = true
+getrandom.workspace = true
 
 [features]
 # Test helpers shared with the server crate's tests.

@@ -6,11 +6,13 @@
 pub mod access;
 pub mod database;
 pub mod error;
+pub mod inventory;
 pub mod memberships;
 pub mod names;
 pub mod organizations;
 pub mod passwords;
 pub mod projects;
+pub mod tokens;
 pub mod users;
 
 pub use error::{Error, Result};
