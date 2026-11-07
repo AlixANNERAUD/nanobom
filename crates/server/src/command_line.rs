@@ -1,6 +1,6 @@
 //! Command line and configuration. Every option can also be set with an environment variable.
 
-use std::path::PathBuf;
+use std::{net::SocketAddr, path::PathBuf};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 
@@ -48,7 +48,7 @@ pub enum LogFormat {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Apply pending migrations, then serve the web interface and the API.
-    Serve,
+    Serve(ServeOptions),
     /// Apply pending database migrations and exit.
     Migrate,
     /// Write a consistent copy of the live SQLite database to a new file.
@@ -57,4 +57,28 @@ pub enum Command {
         #[arg(env = "NANOBOM_BACKUP_DESTINATION")]
         destination: PathBuf,
     },
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct ServeOptions {
+    /// Address and port to listen on.
+    #[arg(long, env = "NANOBOM_LISTEN_ADDRESS", default_value = "0.0.0.0:8080")]
+    pub listen_address: SocketAddr,
+
+    /// The address users reach nanobom at, used for links, OpenID Connect redirects, secure
+    /// cookies and cross-site request checks.
+    #[arg(
+        long,
+        env = "NANOBOM_PUBLIC_URL",
+        default_value = "http://localhost:8080"
+    )]
+    pub public_url: reqwest::Url,
+
+    /// Directory holding the web interface's assets (the `site` directory of the build).
+    #[arg(long, env = "NANOBOM_SITE_ROOT", default_value = "site")]
+    pub site_root: PathBuf,
+
+    /// Largest accepted SBOM, in mebibytes. Parsing needs a few times this much memory.
+    #[arg(long, env = "NANOBOM_MAXIMUM_SBOM_SIZE", default_value_t = 16)]
+    pub maximum_sbom_size: usize,
 }
