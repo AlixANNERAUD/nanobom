@@ -20,8 +20,12 @@ thiserror.workspace = true
 tracing.workspace = true
 tokio.workspace = true
 
+[features]
+# Test helpers shared with the server crate's tests.
+testing = []
+
 [dev-dependencies]
-tokio.workspace = true
+nanobom-domain = { path = ".", features = ["testing"] }
 
 [lints]
 workspace = true

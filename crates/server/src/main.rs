@@ -1,25 +1,47 @@
 //! The nanobom server and its command line.
 
-use axum::Router;
-use leptos::prelude::*;
-use leptos_axum::{LeptosRoutes, generate_route_list};
-use nanobom_app::{App, shell};
+mod command_line;
+mod logging;
+mod serve;
+
+use std::process::ExitCode;
+
+use clap::Parser;
+use nanobom_domain::database;
+
+use crate::command_line::{Command, CommandLine};
 
 #[tokio::main]
-async fn main() {
-    let configuration = get_configuration(None).expect("Leptos configuration");
-    let options = configuration.leptos_options;
-    let address = options.site_addr;
-    let routes = generate_route_list(App);
-    let application = Router::new()
-        .leptos_routes(&options, routes, {
-            let options = options.clone();
-            move || shell(options.clone())
-        })
-        .fallback(leptos_axum::file_and_error_handler(shell))
-        .with_state(options);
-    let listener = tokio::net::TcpListener::bind(&address).await.expect("bind");
-    axum::serve(listener, application.into_make_service())
-        .await
-        .expect("serve");
+async fn main() -> ExitCode {
+    let command_line = CommandLine::parse();
+    logging::initialize(&command_line.logging);
+    match run(command_line).await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            tracing::error!(%error, "nanobom stopped");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+type Failure = Box<dyn std::error::Error + Send + Sync>;
+
+async fn run(command_line: CommandLine) -> Result<(), Failure> {
+    let connection = database::connect(&command_line.database_url).await?;
+    match command_line.command {
+        Command::Serve => {
+            database::migrate(&connection).await?;
+            serve::run().await
+        }
+        Command::Migrate => {
+            database::migrate(&connection).await?;
+            tracing::info!("database migrated");
+            Ok(())
+        }
+        Command::Backup { destination } => {
+            database::backup(&connection, &destination).await?;
+            tracing::info!(destination = %destination.display(), "backup written");
+            Ok(())
+        }
+    }
 }
