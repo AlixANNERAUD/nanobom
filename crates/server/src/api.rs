@@ -9,12 +9,13 @@ use axum::{
     routing::put,
 };
 use nanobom_domain::{
+    evaluation::{Scope, Trigger},
     inventory::{self, UploadOutcome, UploadSource},
     tokens,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::state::AppState;
+use crate::{runner::RunRequest, state::AppState};
 
 /// An API error, returned as `{"error": "message"}`.
 #[derive(Debug)]
@@ -141,6 +142,13 @@ async fn upload_sbom(
         },
     )
     .await?;
+    if state.options.run_after_upload {
+        state.runner.request(RunRequest {
+            trigger: Trigger::Upload,
+            scope: Scope::Project(outcome.project_id),
+            triggered_by: None,
+        });
+    }
     let status = if outcome.project_created {
         StatusCode::CREATED
     } else {

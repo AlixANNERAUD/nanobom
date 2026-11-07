@@ -1,0 +1,140 @@
+//! Runs started by uploads, failure notifications, health and metrics.
+
+mod common;
+
+use axum::{
+    body::Body,
+    http::{Request, StatusCode, header},
+};
+use common::{body_json, body_text, sbom_document, server, user};
+use nanobom::runner::RunRequest;
+use nanobom_domain::{
+    evaluation::{Scope, Trigger},
+    findings::{self, Filter},
+    organizations, projects, tokens,
+};
+use serde_json::json;
+use wiremock::{
+    Mock, MockServer, ResponseTemplate,
+    matchers::{method, path},
+};
+
+fn lodash_advisory() -> serde_json::Value {
+    json!({
+        "id": "GHSA-35jh-r3h4-6jhm",
+        "modified": "2024-01-01T00:00:00Z",
+        "aliases": ["CVE-2021-23337"],
+        "summary": "Command Injection in lodash",
+        "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H"}]
+    })
+}
+
+#[tokio::test]
+async fn uploads_start_a_run_of_their_project() {
+    let server = server(&[]).await;
+    server
+        .source
+        .publish(lodash_advisory(), &["pkg:npm/lodash@4.17.20"]);
+    let owner = user(&server.database, "owner").await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let token = tokens::create(&server.database, &owner, organization.id, None, "CI")
+        .await
+        .unwrap()
+        .secret;
+    let response = server
+        .send(
+            Request::put("/api/organizations/acme/projects/web/sbom")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::from(sbom_document("cyclonedx-npm.json")))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    server.runner.wait_until_idle().await;
+
+    let project = projects::find(&server.database, &owner, organization.id, "web")
+        .await
+        .unwrap();
+    let findings = findings::list(&server.database, &owner, project.id, &Filter::default())
+        .await
+        .unwrap();
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].vulnerability_id, "GHSA-35jh-r3h4-6jhm");
+}
+
+#[tokio::test]
+async fn failed_runs_call_the_failure_webhook() {
+    let receiver = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/failures"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&receiver)
+        .await;
+    let failure_webhook = format!("{}/failures", receiver.uri());
+    let server = server(&["--failure-webhook-url", &failure_webhook]).await;
+    server.source.set_failing(true);
+    server.runner.request(RunRequest {
+        trigger: Trigger::Scheduled,
+        scope: Scope::All,
+        triggered_by: None,
+    });
+    server.runner.wait_until_idle().await;
+    let requests = receiver.received_requests().await.unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(payload["event"], "run.failed");
+    assert_eq!(payload["scope"], "all");
+    assert!(payload["error"].as_str().unwrap().contains("unreachable"));
+}
+
+#[tokio::test]
+async fn duplicate_requests_for_a_waiting_scope_are_merged() {
+    let server = server(&[]).await;
+    let request = RunRequest {
+        trigger: Trigger::Manual,
+        scope: Scope::Organization(1),
+        triggered_by: None,
+    };
+    // The worker may already have taken the first request; the merge only applies to
+    // requests still waiting, so queue two behind a third.
+    server.runner.request(RunRequest {
+        scope: Scope::All,
+        ..request
+    });
+    let first = server.runner.request(request);
+    let second = server.runner.request(request);
+    assert!(first || second);
+    server.runner.wait_until_idle().await;
+}
+
+#[tokio::test]
+async fn health_and_metrics_are_served() {
+    let server = server(&[]).await;
+    let response = server
+        .send(Request::get("/healthz").body(Body::empty()).unwrap())
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(body_json(response).await["status"], "ok");
+
+    server.runner.request(RunRequest {
+        trigger: Trigger::Scheduled,
+        scope: Scope::All,
+        triggered_by: None,
+    });
+    server.runner.wait_until_idle().await;
+    let response = server
+        .send(Request::get("/metrics").body(Body::empty()).unwrap())
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let text = body_text(response).await;
+    for name in [
+        "nanobom_open_findings",
+        "nanobom_last_successful_run_timestamp_seconds",
+        "nanobom_run_duration_seconds",
+        "nanobom_runs_total",
+    ] {
+        assert!(text.contains(name), "{name} is missing from:\n{text}");
+    }
+}

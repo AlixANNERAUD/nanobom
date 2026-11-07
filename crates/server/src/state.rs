@@ -7,7 +7,7 @@ use leptos::config::LeptosOptions;
 use sea_orm::DatabaseConnection;
 use tokio::sync::Semaphore;
 
-use crate::command_line::ServeOptions;
+use crate::{command_line::ServeOptions, runner::Runner};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -16,6 +16,7 @@ pub struct AppState {
     pub leptos_options: LeptosOptions,
     /// Bounds how many SBOMs are parsed at once, which bounds memory use.
     pub sbom_parsing: Arc<Semaphore>,
+    pub runner: Runner,
 }
 
 /// SBOMs parsed concurrently; others wait their turn.
@@ -26,12 +27,14 @@ impl AppState {
         database: DatabaseConnection,
         options: ServeOptions,
         leptos_options: LeptosOptions,
+        runner: Runner,
     ) -> Self {
         Self {
             database,
             options: Arc::new(options),
             leptos_options,
             sbom_parsing: Arc::new(Semaphore::new(CONCURRENT_SBOM_PARSING)),
+            runner,
         }
     }
 }

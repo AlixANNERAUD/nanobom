@@ -2,7 +2,7 @@
 
 use std::{net::SocketAddr, path::PathBuf};
 
-use clap::{Args, Parser, Subcommand, ValueEnum};
+use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 
 #[derive(Debug, Parser)]
 #[command(name = "nanobom", version, about)]
@@ -48,7 +48,7 @@ pub enum LogFormat {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Apply pending migrations, then serve the web interface and the API.
-    Serve(ServeOptions),
+    Serve(Box<ServeOptions>),
     /// Apply pending database migrations and exit.
     Migrate,
     /// Write a consistent copy of the live SQLite database to a new file.
@@ -81,4 +81,21 @@ pub struct ServeOptions {
     /// Largest accepted SBOM, in mebibytes. Parsing needs a few times this much memory.
     #[arg(long, env = "NANOBOM_MAXIMUM_SBOM_SIZE", default_value_t = 16)]
     pub maximum_sbom_size: usize,
+
+    /// When every project is re-evaluated: a cron expression in UTC (minute hour day month
+    /// weekday), or `off`.
+    #[arg(long, env = "NANOBOM_SCHEDULE", default_value = "0 3 * * *")]
+    pub schedule: String,
+
+    /// Evaluate a project right after each SBOM upload.
+    #[arg(long, env = "NANOBOM_RUN_AFTER_UPLOAD", default_value_t = true, action = ArgAction::Set)]
+    pub run_after_upload: bool,
+
+    /// Address of the OSV API.
+    #[arg(long, env = "NANOBOM_OSV_URL", default_value = "https://api.osv.dev/")]
+    pub osv_url: reqwest::Url,
+
+    /// Webhook receiving a JSON payload when a run fails (OSV unreachable, for example).
+    #[arg(long, env = "NANOBOM_FAILURE_WEBHOOK_URL")]
+    pub failure_webhook_url: Option<reqwest::Url>,
 }

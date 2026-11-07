@@ -3,6 +3,9 @@
 pub mod api;
 pub mod command_line;
 pub mod logging;
+pub mod metrics;
+pub mod operations;
+pub mod runner;
 pub mod serve;
 pub mod state;
 
@@ -17,7 +20,7 @@ pub async fn run(command_line: CommandLine) -> Result<(), Failure> {
     match command_line.command {
         Command::Serve(options) => {
             database::migrate(&connection).await?;
-            serve::run(connection, options).await
+            serve::run(connection, *options).await
         }
         Command::Migrate => {
             database::migrate(&connection).await?;

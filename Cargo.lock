@@ -2636,6 +2636,7 @@ dependencies = [
  "metrics-exporter-prometheus",
  "nanobom-app",
  "nanobom-domain",
+ "nanobom-entity",
  "nanobom-osv",
  "reqwest",
  "sea-orm",
@@ -2647,6 +2648,7 @@ dependencies = [
  "tower-http",
  "tracing",
  "tracing-subscriber",
+ "wiremock",
 ]
 
 [[package]]

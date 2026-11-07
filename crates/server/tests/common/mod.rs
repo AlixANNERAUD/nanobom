@@ -7,11 +7,20 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, Response},
 };
+use std::sync::Arc;
+
 use clap::Parser;
-use nanobom::{command_line::ServeOptions, serve, state::AppState};
+use nanobom::{
+    command_line::ServeOptions,
+    runner::{NotificationSettings, Runner},
+    serve,
+    state::AppState,
+};
 use nanobom_domain::{
     access::Actor,
-    testing,
+    evaluation::Evaluator,
+    notifications::Notifier,
+    testing::{self, FakeSource},
     users::{self, NewUser},
 };
 use sea_orm::DatabaseConnection;
@@ -31,16 +40,31 @@ pub fn options(arguments: &[&str]) -> ServeOptions {
 pub struct TestServer {
     pub database: DatabaseConnection,
     pub router: Router,
+    pub source: Arc<FakeSource>,
+    pub runner: Runner,
 }
 
+/// A server on a fresh database, with an in-memory vulnerability source.
 pub async fn server(arguments: &[&str]) -> TestServer {
     let database = testing::database().await;
     let options = options(arguments);
+    let source = Arc::new(FakeSource::default());
+    let runner = Runner::start(
+        database.clone(),
+        Arc::new(Evaluator::new(database.clone(), Arc::clone(&source))),
+        Notifier::new().expect("an HTTP client"),
+        NotificationSettings {
+            public_url: options.public_url.clone(),
+            failure_webhook: options.failure_webhook_url.clone(),
+        },
+    );
     let leptos_options = serve::leptos_options(&options);
-    let state = AppState::new(database.clone(), options, leptos_options);
+    let state = AppState::new(database.clone(), options, leptos_options, runner.clone());
     TestServer {
         database,
         router: serve::router(state),
+        source,
+        runner,
     }
 }
 
