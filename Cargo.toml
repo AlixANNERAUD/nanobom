@@ -15,6 +15,7 @@ publish = false
 nanobom-entity = { path = "crates/entity" }
 nanobom-migration = { path = "crates/migration" }
 nanobom-domain = { path = "crates/domain" }
+nanobom-osv = { path = "crates/osv" }
 nanobom-app = { path = "crates/app", default-features = false }
 
 leptos = { version = "0.8.23", features = ["islands"] }

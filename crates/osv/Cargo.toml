@@ -1,0 +1,27 @@
+[package]
+name = "nanobom-osv"
+description = "OSV.dev client, record types and severity scoring used by nanobom."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+chrono.workspace = true
+cvss.workspace = true
+metrics.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+wiremock.workspace = true
+
+[lints]
+workspace = true
