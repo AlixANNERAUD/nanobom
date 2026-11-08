@@ -1,4 +1,10 @@
 //! Where vulnerabilities come from, and the client for OSV.dev's API.
+//!
+//! [`OsvClient`] batches queries ([`MAXIMUM_BATCH_SIZE`] per request), follows page tokens, and
+//! retries network errors, HTTP 429 and server errors with a linear backoff, three attempts in
+//! all. Failures increment the `nanobom_osv_request_errors_total` counter, labelled by kind
+//! (`request`, `status` or `invalid_response`), so an operator sees OSV trouble before runs
+//! start failing.
 
 use std::{collections::BTreeMap, future::Future, time::Duration};
 
@@ -12,24 +18,32 @@ use crate::schema::Vulnerability;
 /// separately and cached, refreshed when `modified` changes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VulnerabilityReference {
+    /// The record's identifier in OSV (`GHSA-…`, `RUSTSEC-…`, `CVE-…`).
     pub id: String,
+    /// When the record last changed; a cached copy older than this is fetched again.
     pub modified: DateTime<Utc>,
 }
 
+/// Why a vulnerability source could not answer. Messages name the URL, and response bodies are
+/// cut to 200 characters; they end up in the run's error.
 #[derive(Debug, thiserror::Error)]
 pub enum SourceError {
+    /// The request did not complete: connection, timeout or body read error.
     #[error("request to {url} failed: {source}")]
     Request {
         url: String,
         #[source]
         source: reqwest::Error,
     },
+    /// The server answered with an unsuccessful status, after retries when it was retryable.
     #[error("{url} answered {status}: {body}")]
     Status {
         url: String,
         status: StatusCode,
         body: String,
     },
+    /// The answer could not be used: not the expected JSON, a result count that does not match
+    /// the queries, or endless pagination. Never retried.
     #[error("unexpected response from {url}: {message}")]
     InvalidResponse { url: String, message: String },
 }
@@ -39,13 +53,14 @@ pub enum SourceError {
 pub trait VulnerabilitySource: Send + Sync {
     /// Returns, for each package URL (with a version), the vulnerabilities affecting it, in the
     /// same order. Fails as a whole if any part fails, so a partial answer is never mistaken
-    /// for "no vulnerabilities".
+    /// for "no vulnerabilities". Each inner list is sorted by identifier, without duplicates.
     fn query(
         &self,
         purls: &[String],
     ) -> impl Future<Output = Result<Vec<Vec<VulnerabilityReference>>, SourceError>> + Send;
 
-    /// Returns the full record of a vulnerability.
+    /// Returns the full record of a vulnerability. The evaluator calls it concurrently for
+    /// several identifiers.
     fn vulnerability(
         &self,
         id: &str,
@@ -58,9 +73,27 @@ pub const DEFAULT_URL: &str = "https://api.osv.dev/";
 pub const MAXIMUM_BATCH_SIZE: usize = 1000;
 /// A guard against a server that would paginate forever.
 const MAXIMUM_PAGES: usize = 100;
+/// Requests are sent at most this many times.
 const ATTEMPTS: u32 = 3;
 
 /// Client for OSV.dev's API (`/v1/querybatch` and `/v1/vulns/{id}`).
+///
+/// Cloning is cheap and clones share the connection pool. Requests time out after 120 seconds
+/// (10 to connect).
+///
+/// ```no_run
+/// use nanobom_osv::{OsvClient, VulnerabilitySource, client::DEFAULT_URL};
+///
+/// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+/// let client = OsvClient::new(DEFAULT_URL.parse()?)?;
+/// let purls = ["pkg:cargo/time@0.1.40".to_owned()];
+/// for reference in &client.query(&purls).await?[0] {
+///     let record = client.vulnerability(&reference.id).await?;
+///     println!("{}: {:?}", record.id, record.summary);
+/// }
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Debug, Clone)]
 pub struct OsvClient {
     http: reqwest::Client,
@@ -101,7 +134,9 @@ struct BatchResult {
 }
 
 impl OsvClient {
-    /// A client for the API at `base_url` (normally [`DEFAULT_URL`]).
+    /// A client for the API at `base_url` (normally [`DEFAULT_URL`]). The URL should end with
+    /// `/`: API paths are joined to it, so a base path without the slash loses its last
+    /// segment. Fails only if the TLS backend cannot be initialized.
     pub fn new(base_url: Url) -> Result<Self, reqwest::Error> {
         let http = reqwest::Client::builder()
             .user_agent(concat!(
@@ -120,7 +155,7 @@ impl OsvClient {
         })
     }
 
-    /// Uses smaller batches, for tests.
+    /// Uses smaller batches, for tests. The size is clamped to 1..=[`MAXIMUM_BATCH_SIZE`].
     pub fn with_batch_size(mut self, batch_size: usize) -> Self {
         self.batch_size = batch_size.clamp(1, MAXIMUM_BATCH_SIZE);
         self
