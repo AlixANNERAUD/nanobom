@@ -464,6 +464,14 @@ async fn an_attempt_does_not_overwrite_a_cancellation_or_a_newer_claim() {
     let cancelled = row(&database, cancelled.id).await;
     assert_eq!(cancelled.next_attempt_at, None, "no retry is scheduled");
     assert_eq!(cancelled.attempts, 0);
+    let recent = deliveries::recent(&database, &owner, acme.id, 10)
+        .await
+        .unwrap();
+    assert_eq!(
+        recent[0].state,
+        State::Cancelled,
+        "not a failure: the receiver may have got it"
+    );
 
     // An attempt outlives its lease and another one takes over.
     let id = enqueue(&database, now).await;

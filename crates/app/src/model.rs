@@ -393,6 +393,8 @@ pub enum DeliveryState {
     Delivered,
     /// Refused by the receiver, or every retry failed.
     Failed,
+    /// Cancelled before any attempt was recorded.
+    Cancelled,
 }
 
 impl DeliveryState {
@@ -403,6 +405,7 @@ impl DeliveryState {
             DeliveryState::Pending => t!("settings.delivery_pending"),
             DeliveryState::Delivered => t!("settings.delivery_delivered"),
             DeliveryState::Failed => t!("settings.delivery_failed"),
+            DeliveryState::Cancelled => t!("settings.delivery_cancelled"),
         }
     }
 }

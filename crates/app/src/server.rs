@@ -272,6 +272,7 @@ pub fn delivery_state(value: nanobom_domain::deliveries::State) -> model::Delive
         State::Pending => model::DeliveryState::Pending,
         State::Delivered => model::DeliveryState::Delivered,
         State::Failed => model::DeliveryState::Failed,
+        State::Cancelled => model::DeliveryState::Cancelled,
     }
 }
 

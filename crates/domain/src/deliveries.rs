@@ -10,7 +10,8 @@
 //!
 //! - pending: `next_attempt_at` is set, the time of its next attempt;
 //! - delivered: `delivered_at` is set;
-//! - failed: neither, after a permanent failure or once the retries are exhausted.
+//! - abandoned: neither, after a permanent failure, once the retries are exhausted, or when it
+//!   is cancelled ([`State`] tells a cancellation before any recorded attempt apart).
 //!
 //! An attempt first claims its row by moving `next_attempt_at` [`ATTEMPT_LEASE`] ahead, so the
 //! attempt made right after a run and the retry loop never post the same row at once, and a
@@ -61,8 +62,13 @@ pub enum State {
     /// Not delivered yet; another attempt is scheduled.
     Pending,
     Delivered,
-    /// Abandoned: the receiver refused it, or every retry failed.
+    /// Abandoned: the receiver refused it, every retry failed, or it was cancelled after a failed
+    /// attempt.
     Failed,
+    /// Cancelled (its webhook removed, disabled or moved) before any attempt was recorded. An
+    /// attempt in progress at that moment may still have reached the receiver: its result is
+    /// not recorded.
+    Cancelled,
 }
 
 fn state(model: &webhook_deliveries::Model) -> State {
@@ -74,6 +80,9 @@ fn state(model: &webhook_deliveries::Model) -> State {
         } else {
             State::Pending
         }
+    } else if model.attempts == 0 {
+        // Every recorded attempt counts, so an unfinished row without one was cancelled.
+        State::Cancelled
     } else {
         State::Failed
     }

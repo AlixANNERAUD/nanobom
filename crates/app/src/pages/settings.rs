@@ -344,7 +344,9 @@ fn Deliveries(deliveries: Vec<WebhookDelivery>) -> impl IntoView {
         .map(|delivery| {
             let variant = match delivery.state {
                 DeliveryState::Delivered => BadgeVariant::Secondary,
-                DeliveryState::Sending | DeliveryState::Pending => BadgeVariant::Outline,
+                DeliveryState::Sending | DeliveryState::Pending | DeliveryState::Cancelled => {
+                    BadgeVariant::Outline
+                }
                 DeliveryState::Failed => BadgeVariant::Destructive,
             };
             let last_attempt = delivery.last_attempt_at.map_or_else(
