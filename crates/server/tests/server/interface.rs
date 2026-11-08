@@ -269,6 +269,93 @@ async fn findings_show_the_direct_dependency_that_introduces_them() {
 }
 
 #[tokio::test]
+async fn spdx_findings_say_when_links_of_the_graph_were_lost() {
+    let server = server(&[]).await;
+    server.source.publish(
+        json!({
+            "id": "GHSA-35jh-r3h4-6jhm",
+            "modified": "2024-01-01T00:00:00Z",
+            "summary": "Command Injection in lodash",
+            "database_specific": {"severity": "HIGH"}
+        }),
+        &["pkg:npm/lodash@4.17.20"],
+    );
+    let owner = local_user(&server.database, "alice", PASSWORD).await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let secret = tokens::create(&server.database, &owner, organization.id, None, "CI")
+        .await
+        .unwrap()
+        .secret;
+    let package = |id: &str, name: &str, version: &str, purl: Option<&str>| {
+        let mut package = json!({"SPDXID": id, "name": name, "versionInfo": version});
+        if let Some(purl) = purl {
+            package["externalRefs"] = json!([{"referenceCategory": "PACKAGE-MANAGER",
+                "referenceType": "purl", "referenceLocator": purl}]);
+        }
+        package
+    };
+    let depends = |from: &str, to: &str| json!({"spdxElementId": from, "relationshipType": "DEPENDS_ON", "relatedSpdxElement": to});
+    let mut document = json!({
+        "spdxVersion": "SPDX-2.3",
+        "SPDXID": "SPDXRef-DOCUMENT",
+        "name": "shop",
+        "documentDescribes": ["SPDXRef-shop"],
+        "packages": [
+            package("SPDXRef-shop", "shop", "1.0.0", Some("pkg:npm/shop@1.0.0")),
+            package("SPDXRef-framework", "web-framework", "2.1.0", Some("pkg:npm/web-framework@2.1.0")),
+            package("SPDXRef-engine", "template-engine", "0.9.0", Some("pkg:npm/template-engine@0.9.0")),
+            package("SPDXRef-lodash", "lodash", "4.17.20", Some("pkg:npm/lodash@4.17.20")),
+        ],
+        "relationships": [
+            depends("SPDXRef-shop", "SPDXRef-framework"),
+            depends("SPDXRef-framework", "SPDXRef-engine"),
+            depends("SPDXRef-engine", "SPDXRef-lodash"),
+        ]
+    });
+    let upload = |document: &serde_json::Value| {
+        Request::put("/api/organizations/acme/projects/shop/sbom")
+            .header(header::AUTHORIZATION, format!("Bearer {secret}"))
+            .body(Body::from(document.to_string()))
+            .unwrap()
+    };
+    server.send(upload(&document)).await;
+    server.runner.wait_until_idle().await;
+    let alice = Browser::sign_in(&server, "alice").await;
+    let project = projects::find(&server.database, &owner, organization.id, "shop")
+        .await
+        .unwrap();
+    let finding = findings::list(&server.database, &owner, project.id, &Filter::default())
+        .await
+        .unwrap()[0]
+        .id;
+    let page = format!("/findings/{finding}");
+    let html = alice.page(&page).await;
+    assert!(
+        html.contains("web-framework 2.1.0 → template-engine 0.9.0 → lodash 4.17.20"),
+        "{html}"
+    );
+    assert!(!html.contains("Some links of the dependency graph could not be followed"));
+
+    // A package without a package URL that the graph reaches and leaves loses links.
+    document["packages"].as_array_mut().unwrap().push(package(
+        "SPDXRef-vendored",
+        "vendored",
+        "1.0",
+        None,
+    ));
+    let relationships = document["relationships"].as_array_mut().unwrap();
+    relationships.push(depends("SPDXRef-framework", "SPDXRef-vendored"));
+    relationships.push(depends("SPDXRef-vendored", "SPDXRef-lodash"));
+    server.send(upload(&document)).await;
+    server.runner.wait_until_idle().await;
+    let html = alice.page(&page).await;
+    assert!(html.contains("web-framework 2.1.0 → template-engine 0.9.0 → lodash 4.17.20"));
+    assert!(html.contains("Some links of the dependency graph could not be followed"));
+}
+
+#[tokio::test]
 async fn findings_are_shown_and_ignored_from_the_interface() {
     let server = server(&[]).await;
     server.source.publish(

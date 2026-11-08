@@ -68,7 +68,7 @@ The project defaults to the repository's name. Useful inputs:
 | Input | Default | |
 | --- | --- | --- |
 | `project` | repository name | Project slug |
-| `sbom` | | An existing CycloneDX JSON file; without it, Syft generates one |
+| `sbom` | | An existing CycloneDX or SPDX JSON file; without it, Syft generates one |
 | `scan-path` | `.` | Directory Syft scans |
 | `scan-image` | | Container image Syft scans instead |
 | `fail-on` | | `critical`, `high`, `medium`, `low` or `exploited` |

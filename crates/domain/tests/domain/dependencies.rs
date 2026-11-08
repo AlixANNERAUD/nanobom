@@ -15,7 +15,7 @@ use nanobom_domain::{
     tokens,
     users::{self, NewUser},
 };
-use nanobom_entity::component_dependencies;
+use nanobom_entity::{component_dependencies, projects};
 use nanobom_osv::Severity;
 use sea_orm::{DatabaseConnection, EntityTrait, PaginatorTrait};
 use serde_json::json;
@@ -185,6 +185,246 @@ fn a_reference_shared_by_two_packages_is_dropped() {
     assert!(!sbom.dependencies_partial);
 }
 
+/// [`shop_document`] in SPDX, as relationships: `shop` is the package the document
+/// describes. The project also contains `lodash`, as a scanned directory contains every
+/// package, which is not a dependency.
+fn shop_spdx() -> serde_json::Value {
+    let package = |id: &str, name: &str, version: &str, purl: Option<&str>| {
+        let mut package = json!({"SPDXID": id, "name": name, "versionInfo": version});
+        if let Some(purl) = purl {
+            package["externalRefs"] = json!([{"referenceCategory": "PACKAGE-MANAGER",
+                "referenceType": "purl", "referenceLocator": purl}]);
+        }
+        package
+    };
+    let relationship = |from: &str, kind: &str, to: &str| json!({"spdxElementId": from, "relationshipType": kind, "relatedSpdxElement": to});
+    json!({
+        "spdxVersion": "SPDX-2.3",
+        "SPDXID": "SPDXRef-DOCUMENT",
+        "name": "shop",
+        "packages": [
+            package("SPDXRef-shop", "shop", "1.0.0", Some("pkg:npm/shop@1.0.0")),
+            package("SPDXRef-framework", "web-framework", "2.1.0", Some(FRAMEWORK)),
+            package("SPDXRef-engine", "template-engine", "0.9.0", Some(ENGINE)),
+            package("SPDXRef-lodash", "lodash", "4.17.20", Some(LODASH)),
+            package("SPDXRef-vendored", "vendored", "1.0", None),
+            package("SPDXRef-left-pad", "left-pad", "1.0.0", Some(LEFT_PAD)),
+        ],
+        "relationships": [
+            relationship("SPDXRef-DOCUMENT", "DESCRIBES", "SPDXRef-shop"),
+            relationship("SPDXRef-shop", "DEPENDS_ON", "SPDXRef-framework"),
+            relationship("SPDXRef-shop", "DEPENDS_ON", "SPDXRef-vendored"),
+            relationship("SPDXRef-left-pad", "DEPENDENCY_OF", "SPDXRef-shop"),
+            relationship("SPDXRef-shop", "CONTAINS", "SPDXRef-lodash"),
+            relationship("SPDXRef-framework", "DEPENDS_ON", "SPDXRef-shop"),
+            relationship("SPDXRef-engine", "RUNTIME_DEPENDENCY_OF", "SPDXRef-framework"),
+            relationship("SPDXRef-engine", "CONTAINS", "SPDXRef-lodash"),
+            relationship("SPDXRef-engine", "DEPENDS_ON", "SPDXRef-engine"),
+            relationship("SPDXRef-engine", "DEPENDS_ON", "SPDXRef-missing"),
+            relationship("SPDXRef-vendored", "DEPENDS_ON", "SPDXRef-lodash"),
+            relationship("SPDXRef-lodash", "OTHER", "SPDXRef-framework"),
+        ]
+    })
+}
+
+#[test]
+fn spdx_relationships_follow_the_same_rules() {
+    let spdx = parse(&shop_spdx());
+    // The same edges, except the project's to `left-pad`, which nothing links to another
+    // package: a flat list of a lock file's packages looks the same (see below).
+    let mut expected = parse(&shop_document()).dependencies;
+    expected.retain(|kept| *kept != edge(None, LEFT_PAD));
+    assert_eq!(spdx.dependencies, expected);
+    assert_eq!(
+        spdx.components.len(),
+        4,
+        "the described package is the project"
+    );
+    assert!(
+        spdx.dependencies_partial,
+        "the graph goes through the vendored package, which has no package URL"
+    );
+
+    // SPDX 2.2 names the project in `documentDescribes`.
+    let mut document = shop_spdx();
+    document["spdxVersion"] = json!("SPDX-2.2");
+    document["documentDescribes"] = json!(["SPDXRef-shop"]);
+    document["relationships"].as_array_mut().unwrap().remove(0);
+    assert_eq!(parse(&document).dependencies, spdx.dependencies);
+}
+
+#[test]
+fn spdx_generators_give_what_their_relationships_allow() {
+    // Syft: the dependencies between crates, but the scanned directory only contains them.
+    let sbom = inventory::parse(&sbom_document("syft-cargo-spdx-2.2.json")).unwrap();
+    assert_eq!(
+        sbom.dependencies,
+        [
+            edge(
+                Some("pkg:cargo/aho-corasick@0.7.20"),
+                "pkg:cargo/memchr@2.8.3"
+            ),
+            edge(
+                Some("pkg:cargo/fixture-cargo@0.1.0"),
+                "pkg:cargo/regex@1.5.4"
+            ),
+            edge(
+                Some("pkg:cargo/fixture-cargo@0.1.0"),
+                "pkg:cargo/smallvec@1.6.0"
+            ),
+            edge(
+                Some("pkg:cargo/regex@1.5.4"),
+                "pkg:cargo/aho-corasick@0.7.20"
+            ),
+            edge(Some("pkg:cargo/regex@1.5.4"), "pkg:cargo/memchr@2.8.3"),
+            edge(
+                Some("pkg:cargo/regex@1.5.4"),
+                "pkg:cargo/regex-syntax@0.6.29"
+            ),
+        ]
+    );
+    assert!(!sbom.dependencies_partial);
+    let sbom = inventory::parse(&sbom_document("syft-spdx.json")).unwrap();
+    assert!(!sbom.dependencies.is_empty());
+    assert!(sbom.dependencies.iter().all(|edge| edge.parent.is_some()));
+    assert!(!sbom.dependencies_partial);
+
+    // Trivy: the direct dependencies hang from the lock file's entry, which has no package
+    // URL, so only the edge between packages is left.
+    let sbom = inventory::parse(&sbom_document("trivy-npm-spdx.json")).unwrap();
+    assert_eq!(
+        sbom.dependencies,
+        [edge(Some("pkg:npm/debug@2.6.8"), "pkg:npm/ms@2.0.0")]
+    );
+    assert!(sbom.dependencies_partial);
+
+    // GitHub, Cargo: the repository depends on every crate of the lock file, transitive ones
+    // included, with no edge between crates: no direct dependency can be told apart.
+    let sbom = inventory::parse(&sbom_document("github-dependency-graph.json")).unwrap();
+    assert!(sbom.dependencies.is_empty());
+
+    // GitHub, npm: the repository depends on its direct dependencies (development ones
+    // included), with the graph below them. Those that depend on nothing and that nothing
+    // else depends on look like a flat list, and are left out.
+    let sbom = inventory::parse(&sbom_document("github-npm-dependency-graph.json")).unwrap();
+    let direct: Vec<&str> = sbom
+        .dependencies
+        .iter()
+        .filter(|edge| edge.parent.is_none())
+        .map(|edge| edge.child.as_str())
+        .collect();
+    assert_eq!(
+        direct,
+        [
+            "pkg:npm/asynct@1.1.0",
+            "pkg:npm/duplexer@0.1.1",
+            "pkg:npm/it-is@1.0.3",
+            "pkg:npm/pause-stream@0.0.11",
+            "pkg:npm/split@1.0.1",
+            "pkg:npm/stream-combiner@0.2.2",
+            "pkg:npm/stream-spec@0.3.6",
+            "pkg:npm/tape@4.9.1",
+            "pkg:npm/through@2.3.8",
+        ]
+    );
+    assert_eq!(sbom.dependencies.len() - direct.len(), 87);
+    assert!(!sbom.dependencies_partial);
+}
+
+/// A package of `shop_spdx` the project depends on, in another ecosystem or not.
+fn flat_package(document: &mut serde_json::Value, name: &str, purl: &str) {
+    let id = format!("SPDXRef-{name}");
+    document["packages"].as_array_mut().unwrap().push(
+        json!({"SPDXID": id, "name": name, "versionInfo": "1.0.0",
+        "externalRefs": [{"referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl",
+            "referenceLocator": purl}]}),
+    );
+    document["relationships"].as_array_mut().unwrap().push(
+        json!({"spdxElementId": "SPDXRef-shop", "relationshipType": "DEPENDS_ON",
+            "relatedSpdxElement": id}),
+    );
+}
+
+#[test]
+fn spdx_project_edges_need_a_linked_package() {
+    // A repository with a graphed npm lock file, a flat one, and a flat `Cargo.lock`: the
+    // flat lists are not direct dependencies, whatever their ecosystem.
+    let mut document = shop_spdx();
+    flat_package(&mut document, "itoa", "pkg:cargo/itoa@1.0.0");
+    flat_package(&mut document, "flat-a", "pkg:npm/flat-a@1.0.0");
+    flat_package(&mut document, "flat-b", "pkg:npm/flat-b@1.0.0");
+    let sbom = parse(&document);
+    assert_eq!(sbom.components.len(), 7);
+    assert_eq!(sbom.dependencies, parse(&shop_spdx()).dependencies);
+
+    // A flat-listed package that is also linked to another one keeps its edge.
+    document["relationships"].as_array_mut().unwrap().push(
+        json!({"spdxElementId": "SPDXRef-flat-a", "relationshipType": "DEPENDS_ON",
+            "relatedSpdxElement": "SPDXRef-lodash"}),
+    );
+    let dependencies = parse(&document).dependencies;
+    assert!(dependencies.contains(&edge(None, "pkg:npm/flat-a@1.0.0")));
+    assert!(!dependencies.contains(&edge(None, "pkg:npm/flat-b@1.0.0")));
+}
+
+#[test]
+fn spdx_identifiers_given_to_several_packages_are_ambiguous() {
+    let package = |id: &str, purl: Option<&str>| {
+        let mut package = json!({"SPDXID": id, "name": id, "versionInfo": "1.0.0"});
+        if let Some(purl) = purl {
+            package["externalRefs"] = json!([{"referenceCategory": "PACKAGE-MANAGER",
+                "referenceType": "purl", "referenceLocator": purl}]);
+        }
+        package
+    };
+    let depends = |from: &str, to: &str| json!({"spdxElementId": from, "relationshipType": "DEPENDS_ON", "relatedSpdxElement": to});
+    let document = |packages: Vec<serde_json::Value>| {
+        json!({
+            "spdxVersion": "SPDX-2.3",
+            "SPDXID": "SPDXRef-DOCUMENT",
+            "packages": packages,
+            "relationships": [
+                depends("SPDXRef-framework", "SPDXRef-same"),
+                depends("SPDXRef-same", "SPDXRef-lodash"),
+            ]
+        })
+    };
+    let framework = || package("SPDXRef-framework", Some(FRAMEWORK));
+    let lodash = || package("SPDXRef-lodash", Some(LODASH));
+
+    // Two copies of one package: the identifier is not ambiguous.
+    let sbom = parse(&document(vec![
+        framework(),
+        lodash(),
+        package("SPDXRef-same", Some(ENGINE)),
+        package("SPDXRef-same", Some(ENGINE)),
+    ]));
+    assert_eq!(sbom.dependencies.len(), 2);
+    assert!(!sbom.dependencies_partial);
+
+    // Two packages, or a package and one without a package URL, whichever comes first.
+    for duplicates in [
+        [
+            package("SPDXRef-same", Some(ENGINE)),
+            package("SPDXRef-same", Some(LEFT_PAD)),
+        ],
+        [
+            package("SPDXRef-same", Some(ENGINE)),
+            package("SPDXRef-same", None),
+        ],
+        [
+            package("SPDXRef-same", None),
+            package("SPDXRef-same", Some(ENGINE)),
+        ],
+    ] {
+        let mut packages = vec![framework(), lodash()];
+        packages.extend(duplicates);
+        let sbom = parse(&document(packages));
+        assert!(sbom.dependencies.is_empty(), "{:?}", sbom.dependencies);
+        assert!(sbom.dependencies_partial);
+    }
+}
+
 struct Fixture {
     database: DatabaseConnection,
     source: Arc<FakeSource>,
@@ -250,6 +490,16 @@ impl Fixture {
         dependencies::paths(&self.database, &self.owner, project, purl)
             .await
             .unwrap()
+    }
+
+    /// The flag stored on the project by its latest upload.
+    async fn partial(&self, project: i64) -> bool {
+        projects::Entity::find_by_id(project)
+            .one(&self.database)
+            .await
+            .unwrap()
+            .unwrap()
+            .dependencies_partial
     }
 
     async fn edge_count(&self) -> u64 {
@@ -323,6 +573,80 @@ async fn uploads_replace_the_graph_with_the_components() {
     fixture.upload(parse(&document)).await;
     assert_eq!(fixture.edge_count().await, 0);
     assert_eq!(fixture.paths(project, LODASH).await, None);
+}
+
+#[tokio::test]
+async fn spdx_uploads_store_the_graph_and_their_version() {
+    let fixture = Fixture::new().await;
+    let project = fixture.upload(parse(&shop_spdx())).await;
+    assert_eq!(fixture.edge_count().await, 3);
+    assert_eq!(
+        fixture.paths(project, LODASH).await.unwrap().paths,
+        [vec![
+            component(FRAMEWORK, "web-framework", "2.1.0"),
+            component(ENGINE, "template-engine", "0.9.0"),
+            component(LODASH, "lodash", "4.17.20"),
+        ]]
+    );
+    let uploads = inventory::uploads(&fixture.database, &fixture.owner, project)
+        .await
+        .unwrap();
+    assert_eq!(uploads[0].specification_version, "SPDX-2.3");
+    assert_eq!(uploads[0].component_count, 4);
+    assert_eq!(uploads[0].components_without_purl, 1);
+}
+
+#[tokio::test]
+async fn spdx_uploads_store_whether_links_were_lost() {
+    let fixture = Fixture::new().await;
+
+    // The graph goes through `vendored`, which has no package URL.
+    let project = fixture.upload(parse(&shop_spdx())).await;
+    assert!(fixture.partial(project).await);
+    assert!(
+        fixture.paths(project, LODASH).await.unwrap().partial,
+        "the paths carry the stored flag"
+    );
+
+    // Syft: every package has a package URL, nothing is lost. The flag is replaced, not kept.
+    let sbom = inventory::parse(&sbom_document("syft-cargo-spdx-2.2.json")).unwrap();
+    fixture.upload(sbom).await;
+    assert!(!fixture.partial(project).await);
+
+    // Trivy: the lock file's entry has no package URL and the graph goes through it.
+    let sbom = inventory::parse(&sbom_document("trivy-npm-spdx.json")).unwrap();
+    fixture.upload(sbom).await;
+    assert!(fixture.partial(project).await);
+
+    // An identifier given to two packages: no edge goes through it.
+    let package = |id: &str, purl: &str| {
+        json!({"SPDXID": id, "name": id, "versionInfo": "1.0.0",
+            "externalRefs": [{"referenceCategory": "PACKAGE-MANAGER",
+                "referenceType": "purl", "referenceLocator": purl}]})
+    };
+    let depends = |from: &str, to: &str| json!({"spdxElementId": from, "relationshipType": "DEPENDS_ON", "relatedSpdxElement": to});
+    let document = json!({
+        "spdxVersion": "SPDX-2.3",
+        "SPDXID": "SPDXRef-DOCUMENT",
+        "packages": [
+            package("SPDXRef-framework", FRAMEWORK),
+            package("SPDXRef-same", ENGINE),
+            package("SPDXRef-same", LEFT_PAD),
+            package("SPDXRef-lodash", LODASH),
+        ],
+        "relationships": [
+            depends("SPDXRef-framework", "SPDXRef-same"),
+            depends("SPDXRef-same", "SPDXRef-lodash"),
+        ]
+    });
+    fixture.upload(parse(&document)).await;
+    assert!(fixture.partial(project).await);
+
+    // Once the identifiers are distinct, the flag goes.
+    let mut document = document;
+    document["packages"][2]["SPDXID"] = json!("SPDXRef-other");
+    fixture.upload(parse(&document)).await;
+    assert!(!fixture.partial(project).await);
 }
 
 #[tokio::test]

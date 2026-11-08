@@ -28,6 +28,10 @@ depends on directly.
 }
 ```
 
+An SPDX document gives the same information as relationships between packages (`DEPENDS_ON`,
+`DEPENDENCY_OF`), the project being the package the document describes; generators fill them
+less consistently (see [SPDX documents](spdx.md#dependency-graph)).
+
 The components the project's own entry lists are its **direct dependencies**. Each upload stores
 the graph between the components it keeps, and replaces the previous graph along with the
 components: like the components, the graph is always the latest SBOM's.
@@ -69,9 +73,10 @@ in it is in the SBOM: nanobom shows no path rather than a guess.
   rather than bridged, so a path never skips a component: a component reached only through one
   is not linked to the project. When the graph enters and leaves such a component, the finding's
   page adds that some links could not be followed, and other paths may exist.
-- **References shared by several packages.** A `bom-ref` is meant to be unique. When two
-  components with different package URLs carry the same one, nanobom cannot tell which one an
-  edge means, so it drops every edge that names it, and says so like above.
+- **References shared by several packages.** A `bom-ref` (an `SPDXID` in SPDX) is meant to be
+  unique. When two components with different package URLs carry the same one, nanobom cannot
+  tell which one an edge means, so it drops every edge that names it, and says so like above.
+  The note is the same for both formats and is stored with each upload.
 - **Copies of a package.** Paths are between packages, identified by package URL, not between
   installed copies of them. Components with the same package URL are stored once, with the
   edges of all their copies: if two nested copies of `foo 1.0.0` in an npm tree resolve `dep` to
@@ -88,10 +93,15 @@ Generators fill the graph unevenly. With the versions nanobom is tested with:
 | cargo-cyclonedx 0.5.9 | complete, from the crate | yes |
 | cyclonedx-npm 6.0.1 | complete, from the package | yes |
 | cyclonedx-py 8.0.1, `environment` | between installed packages; no `metadata.component` | no |
-| Syft 1.57.0, on an image | between packages; the image is in `metadata.component`, but nothing links it to them | no |
+| Syft 1.57.0, CycloneDX, on an image | between packages; the image is in `metadata.component`, but nothing links it to them | no |
+| Syft 1.33.0, SPDX, on an image or a lock file | between packages; the image or directory only contains them | no |
+| Trivy 0.76.2, SPDX, on a lock file | through the lock file's entry, which has no package URL | no |
+| GitHub dependency graph export (SPDX), `package-lock.json` | complete, from the repository | yes, except for direct dependencies that have no dependency and that no other package depends on ([why](spdx.md#dependency-graph)) |
+| GitHub dependency graph export (SPDX), `Cargo.lock` | the repository depends on every crate, none on another | no |
 
 Whether your generator links the project to its dependencies shows in its output: the entry of
-`dependencies` whose `ref` is the `bom-ref` of `metadata.component`.
+`dependencies` whose `ref` is the `bom-ref` of `metadata.component` in CycloneDX, the
+`DEPENDS_ON` relationships of the described package in SPDX.
 
 A path says how a package gets installed, not that its vulnerable code is called: that is still
 what triage decides ([Triage findings](../how-to/triage.md)). The graph is the one the generator

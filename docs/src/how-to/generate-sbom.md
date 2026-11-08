@@ -1,9 +1,14 @@
 # Generate an SBOM
 
-nanobom reads CycloneDX JSON, specification versions 1.3 to 1.7, and matches each component by
-its package URL (`pkg:npm/lodash@4.17.20`). Whatever the generator, make sure it writes that
-format and gives components a package URL with a version. How nanobom reads the document is
-described in the [upload API reference](../reference/upload-api.md#the-document).
+nanobom reads CycloneDX JSON (specification versions 1.3 to 1.7) and SPDX JSON (SPDX 2.2 and
+2.3), and matches each component by its package URL (`pkg:npm/lodash@4.17.20`). Whatever the
+generator, make sure it writes one of these formats in JSON and gives components a package URL
+with a version. How nanobom reads the document is described in the
+[upload API reference](../reference/upload-api.md#the-document).
+
+Prefer CycloneDX when the generator offers both: its dependency graph names the project's direct
+dependencies more reliably, so findings show what to upgrade more often (see
+[SPDX documents](../explanation/spdx.md)).
 
 ## Choose a generator
 
@@ -21,6 +26,23 @@ Use [Syft](https://github.com/anchore/syft) for container images, binaries, and 
 | Gradle | the `org.cyclonedx.bom` plugin, task `cyclonedxBom` | writes to `build/reports/` |
 | Go | `cyclonedx-gomod app -json -output sbom.json` | [cyclonedx-gomod](https://github.com/CycloneDX/cyclonedx-gomod) |
 | Container images, binaries, anything | `syft <image or directory> -o cyclonedx-json=sbom.json` | [Syft](https://github.com/anchore/syft) |
+
+## Generate SPDX
+
+When a tool or policy requires SPDX, ask for SPDX **JSON**, version 2.2 or 2.3. Tag-value
+(`.spdx`), RDF and SPDX 3.0 are refused.
+
+| Generator | Command | Notes |
+| --- | --- | --- |
+| Syft | `syft <image or directory> -o spdx-json=sbom.spdx.json` | SPDX 2.3; `-o spdx-json@2.2=…` for 2.2. Not `-o spdx`, which is tag-value |
+| Trivy | `trivy image --format spdx-json --output sbom.spdx.json <image>`, or `trivy fs` on a directory | Not `--format spdx`, which is tag-value |
+| GitHub dependency graph | **Insights → Dependency graph → Export SBOM**, or `gh api repos/OWNER/REPO/dependency-graph/sbom --jq .sbom > sbom.spdx.json` | SPDX 2.3, from the manifests and lock files GitHub reads (see below) |
+
+GitHub's export describes the default branch as GitHub last analyzed it, not your build. For a
+package no lock file pins, it gives the manifest's version requirement (`^6.1.2`, `2.*.*`)
+instead of a version: nanobom skips such packages and reports them in `skipped`, since a
+requirement cannot be matched. Commit lock files to get versions. The `--jq .sbom` unwraps the
+document from the API's response.
 
 ## Rust
 
@@ -64,6 +86,8 @@ Distribution packages are matched when OSV covers the distribution.
 
 ## Check an SBOM before uploading
 
+For CycloneDX:
+
 ```sh
 jq '{format: .bomFormat, version: .specVersion,
      components: (.components | length),
@@ -73,3 +97,18 @@ jq '{format: .bomFormat, version: .specVersion,
 `format` must be `CycloneDX` and `version` between `1.3` and `1.7`. Most generators can emit an
 older or newer specification with an option (Syft: `-o cyclonedx-json@1.6=sbom.json`).
 `without_purl` counts the components nanobom will not be able to check.
+
+For SPDX:
+
+```sh
+jq '{version: .spdxVersion,
+     packages: (.packages | length),
+     without_purl: ([.packages[]
+                     | select(.primaryPackagePurpose | IN("FILE", "OPERATING-SYSTEM") | not)
+                     | select(all(.externalRefs[]?; .referenceType != "purl"))]
+                    | length)}' sbom.spdx.json
+```
+
+`version` must be `SPDX-2.2` or `SPDX-2.3`. `without_purl` leaves out files and the operating
+system, which nanobom ignores, but counts the package the document describes (the scanned
+directory or image) when it has no package URL, though it is the project and not a component.

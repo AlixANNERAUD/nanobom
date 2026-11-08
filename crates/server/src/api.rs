@@ -343,8 +343,8 @@ fn evaluation(run: &Waited, findings: &[Finding], public_url: &Url) -> Evaluatio
 }
 
 /// `PUT /api/organizations/{organization}/projects/{project}/sbom`: replaces the project's
-/// components with those of a CycloneDX JSON document. With `wait` or `fail_on`, waits for the
-/// project's evaluation and returns it.
+/// components with those of a CycloneDX or SPDX JSON document. With `wait` or `fail_on`, waits
+/// for the project's evaluation and returns it.
 async fn upload_sbom(
     State(state): State<AppState>,
     Path((organization, project)): Path<(String, String)>,

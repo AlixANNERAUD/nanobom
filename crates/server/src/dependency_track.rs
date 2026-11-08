@@ -365,11 +365,6 @@ async fn submit(
             "the SBOM is larger than the server's maximum SBOM size",
         ));
     }
-    if sbom.trim_ascii_start().starts_with(b"<") {
-        return Err(Error::invalid_sbom(
-            "nanobom accepts CycloneDX JSON only, not XML: generate the SBOM in JSON".to_owned(),
-        ));
-    }
     let sbom = match api::parse_sbom(state, sbom).await {
         Ok(Ok(sbom)) => sbom,
         Ok(Err(nanobom_domain::Error::Invalid(problem))) => {

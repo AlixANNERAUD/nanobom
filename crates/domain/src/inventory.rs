@@ -1,5 +1,5 @@
-//! The component inventory: parsing CycloneDX SBOMs and replacing a project's components with
-//! each new upload, keeping the upload history.
+//! The component inventory: parsing CycloneDX and SPDX SBOMs and replacing a project's
+//! components with each new upload, keeping the upload history.
 //!
 //! An upload is a full snapshot: [`ingest`] deletes the project's components and inserts the
 //! new ones in one transaction, so a project's components are always those of exactly one SBOM.
@@ -7,9 +7,9 @@
 //! new components.
 //!
 //! Components are identified by their package URL (purl), the only identifier OSV can match.
-//! Components without a valid purl are counted and reported back to CI as skipped; files and
-//! the operating system entry are ignored altogether. Two components with the same purl are
-//! stored once.
+//! Components without a valid purl, or whose purl gives a version requirement (`^1.2`) rather
+//! than a version, are counted and reported back to CI as skipped; files and the operating
+//! system entry are ignored altogether. Two components with the same purl are stored once.
 //!
 //! The SBOM's dependency graph is kept with the components, between the components stored: see
 //! [`crate::dependencies`] for what is derived from it and how incomplete graphs are handled.
@@ -40,15 +40,24 @@ use sea_orm::{
     sea_query::{Expr, Func, LikeExpr},
 };
 use serde::{Deserialize, Serialize};
+use serde_json::error::Category;
 
+use self::header::{Context, Header, Text};
 use crate::{
     access::{Actor, Permission},
     error::{Error, Result},
     problem::{Field, Problem},
 };
 
-/// Specification versions accepted at upload.
+mod header;
+pub mod spdx;
+
+/// CycloneDX specification versions accepted at upload.
 pub const SUPPORTED_SPECIFICATION_VERSIONS: [&str; 5] = ["1.3", "1.4", "1.5", "1.6", "1.7"];
+
+/// SPDX versions accepted at upload, as the documents' `spdxVersion` spells them: the JSON
+/// serialization of SPDX 2.2 and 2.3, which share the fields nanobom reads.
+pub const SUPPORTED_SPDX_VERSIONS: [&str; 2] = ["SPDX-2.2", "SPDX-2.3"];
 
 /// At most this many skipped components are listed in an upload's response; all are counted.
 const MAXIMUM_LISTED_SKIPPED_COMPONENTS: usize = 100;
@@ -80,7 +89,10 @@ pub struct SkippedComponent {
 /// The parts of an SBOM nanobom keeps.
 #[derive(Debug, Clone)]
 pub struct ParsedSbom {
+    /// The CycloneDX specification version (`1.6`), or the SPDX version prefixed as SPDX
+    /// documents spell it (`SPDX-2.3`).
     pub specification_version: String,
+    /// The CycloneDX serial number, or the SPDX document namespace.
     pub serial_number: Option<String>,
     pub components: Vec<InventoryComponent>,
     /// Components without a usable package URL, which cannot be matched against OSV.
@@ -90,50 +102,143 @@ pub struct ParsedSbom {
     /// The edges of the SBOM's dependency graph between the components kept, sorted and
     /// without duplicates. Edges to or from a component that is not kept are dropped.
     pub dependencies: Vec<DependencyEdge>,
-    /// Whether edges that could lead through a dropped component were lost: a component
-    /// without a usable package URL that the graph reaches and leaves, or a `bom-ref` shared by
-    /// components with different package URLs. Paths derived from the graph may then be
-    /// missing.
+    /// Whether edges that could lead through a dropped component were lost, whatever the
+    /// format: a component without a usable package URL that the graph reaches and leaves, or
+    /// an identifier (`bom-ref`, SPDXID) given to components with different package URLs. Paths
+    /// derived from the graph may then be missing.
     pub dependencies_partial: bool,
 }
 
 /// An edge of an SBOM's dependency graph, between package URLs in canonical form.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct DependencyEdge {
-    /// The component that depends on `child`; `None` for the project itself (the SBOM's
-    /// `metadata.component`).
+    /// The component that depends on `child`; `None` for the project itself (the CycloneDX
+    /// `metadata.component`, the package an SPDX document describes).
     pub parent: Option<String>,
     pub child: String,
 }
 
-#[derive(Deserialize)]
-struct Header {
-    #[serde(rename = "bomFormat")]
-    format: Option<String>,
-    #[serde(rename = "specVersion")]
-    specification_version: Option<String>,
+/// Parses a CycloneDX or SPDX JSON document, telling them apart by their content
+/// (`bomFormat` or `spdxVersion`), never by a header. A document with both a
+/// `"bomFormat": "CycloneDX"` and an `spdxVersion` is read as CycloneDX.
+///
+/// Errors are [`Error::Invalid`] with a problem that tells CI what is wrong: not JSON (with a
+/// specific message for XML, SPDX tag-value and SPDX RDF), neither CycloneDX nor SPDX (with a
+/// specific message for SPDX 3, recognized by its JSON-LD `@context`), a specification version
+/// outside [`SUPPORTED_SPECIFICATION_VERSIONS`] or [`SUPPORTED_SPDX_VERSIONS`], or a document
+/// that does not follow it. Values of the document echoed in a message are cut to 200
+/// characters.
+///
+/// CycloneDX documents are deserialized once, straight into the model of their specification
+/// version, to keep memory use low on large SBOMs; nested components are flattened. The
+/// dependency graph is read from `dependencies`, whose references are the `bom-ref` of
+/// components; a reference to `metadata.component` is the project. A reference carried by
+/// components with different package URLs is ambiguous: no edge goes through it. See [`spdx`]
+/// for SPDX.
+pub fn parse(document: &[u8]) -> Result<ParsedSbom> {
+    let header: Header = match serde_json::from_slice(document) {
+        Ok(header) => header,
+        // Valid JSON, but not an object.
+        Err(error) if error.classify() == Category::Data => {
+            return Err(Error::invalid(Problem::UnknownSbomFormat));
+        }
+        Err(error) => return Err(Error::invalid(not_json(document, &error))),
+    };
+    if matches!(&header.format, Some(Text::Text(format)) if format == "CycloneDX") {
+        return match header.specification_version {
+            Some(Text::Text(version)) => parse_cyclonedx(document, version),
+            Some(Text::Other) => Err(Error::invalid(Problem::InvalidCycloneDx {
+                detail: "specVersion must be a string".to_owned(),
+            })),
+            None => parse_cyclonedx(document, String::new()),
+        };
+    }
+    match header.spdx_version {
+        Some(Text::Text(version)) => return spdx::parse(document, version),
+        Some(Text::Other) => {
+            return Err(Error::invalid(Problem::InvalidSpdx {
+                detail: "spdxVersion must be a string".to_owned(),
+            }));
+        }
+        None => {}
+    }
+    match header.context {
+        Some(Context {
+            version: Some(version),
+            ..
+        }) => Err(Error::invalid(Problem::UnsupportedSpdxVersion { version })),
+        // JSON-LD naming the SPDX 2 vocabulary: an RDF serialization.
+        Some(Context {
+            names_spdx: true, ..
+        }) => Err(Error::invalid(Problem::SpdxRdf)),
+        _ => Err(Error::invalid(Problem::UnknownSbomFormat)),
+    }
 }
 
-/// Parses a CycloneDX JSON document. The document is deserialized once, straight into the model
-/// of its specification version, to keep memory use low on large SBOMs.
-///
-/// Errors are [`Error::Invalid`] with a problem that tells CI what is wrong: not JSON, not
-/// CycloneDX, a specification version outside [`SUPPORTED_SPECIFICATION_VERSIONS`], or a
-/// document that does not follow it. Nested components are flattened.
-///
-/// The dependency graph is read from `dependencies`, whose references are the `bom-ref` of
-/// components; a reference to `metadata.component` is the project. A reference carried by
-/// components with different package URLs is ambiguous: no edge goes through it.
-pub fn parse(document: &[u8]) -> Result<ParsedSbom> {
-    let header: Header = serde_json::from_slice(document).map_err(|error| {
-        Error::invalid(Problem::SbomNotJson {
-            detail: error.to_string(),
-        })
-    })?;
-    if header.format.as_deref() != Some("CycloneDX") {
-        return Err(Error::invalid(Problem::SbomNotCycloneDx));
+/// Why a document is not JSON, naming the formats CI most likely sent by mistake. Only XML and
+/// Turtle naming the SPDX vocabulary are SPDX RDF: broken JSON may name it too.
+fn not_json(document: &[u8], error: &serde_json::Error) -> Problem {
+    let tag_value = document
+        .split(|byte| *byte == b'\n')
+        .any(|line| line.trim_ascii_start().starts_with(b"SPDXVersion:"));
+    let text = document
+        .strip_prefix(b"\xEF\xBB\xBF")
+        .unwrap_or(document)
+        .trim_ascii_start();
+    let names_spdx = contains(document, b"spdx.org/rdf");
+    if tag_value {
+        Problem::SpdxTagValue
+    } else if text.starts_with(b"<") {
+        if names_spdx {
+            Problem::SpdxRdf
+        } else {
+            Problem::SbomXml
+        }
+    } else if names_spdx && is_turtle(text) {
+        Problem::SpdxRdf
+    } else {
+        Problem::SbomNotJson {
+            detail: capped(&error.to_string()),
+        }
     }
-    let specification_version = header.specification_version.unwrap_or_default();
+}
+
+/// Whether a document starts like Turtle: comments, then a prefix or base declaration
+/// (`@prefix`, or `PREFIX` in the SPARQL style).
+fn is_turtle(document: &[u8]) -> bool {
+    document
+        .split(|byte| *byte == b'\n')
+        .map(<[u8]>::trim_ascii)
+        .find(|line| !line.is_empty() && !line.starts_with(b"#"))
+        .is_some_and(|line| {
+            ["@prefix", "@base", "prefix ", "base "]
+                .iter()
+                .any(|start| {
+                    line.get(..start.len())
+                        .is_some_and(|head| head.eq_ignore_ascii_case(start.as_bytes()))
+                })
+        })
+}
+
+/// Error messages echo values of the document; this many characters of each are kept.
+const MAXIMUM_ECHOED_LENGTH: usize = 200;
+
+/// `text` cut to [`MAXIMUM_ECHOED_LENGTH`] characters, with an ellipsis when it was longer, to
+/// echo in an error message.
+fn capped(text: &str) -> String {
+    match text.char_indices().nth(MAXIMUM_ECHOED_LENGTH) {
+        Some((end, _)) => format!("{}\u{2026}", &text[..end]),
+        None => text.to_owned(),
+    }
+}
+
+fn contains(haystack: &[u8], needle: &[u8]) -> bool {
+    haystack
+        .windows(needle.len())
+        .any(|window| window == needle)
+}
+
+fn parse_cyclonedx(document: &[u8], specification_version: String) -> Result<ParsedSbom> {
     if !SUPPORTED_SPECIFICATION_VERSIONS.contains(&specification_version.as_str()) {
         return Err(Error::invalid(Problem::UnsupportedSpecificationVersion {
             version: specification_version,
@@ -146,37 +251,32 @@ pub fn parse(document: &[u8]) -> Result<ParsedSbom> {
     })?;
     let bom = Bom::parse_from_json_with_version(document, version).map_err(|error| {
         Error::invalid(Problem::InvalidCycloneDx {
-            detail: error.to_string(),
+            detail: capped(&error.to_string()),
         })
     })?;
 
-    let mut parsed = ParsedSbom {
-        specification_version,
-        serial_number: bom.serial_number.as_ref().map(ToString::to_string),
-        components: Vec::new(),
-        skipped_count: 0,
-        skipped: Vec::new(),
-        dependencies: Vec::new(),
-        dependencies_partial: false,
-    };
-    let mut by_purl = BTreeMap::new();
+    let mut collector = Collector::default();
     let mut references = References::default();
     if let Some(components) = &bom.components {
-        collect(&components.0, &mut by_purl, &mut references, &mut parsed);
+        collect(&components.0, &mut collector, &mut references);
     }
     references.forget_ambiguous();
-    parsed.components = by_purl.into_values().collect();
     let project = bom
         .metadata
         .as_ref()
         .and_then(|metadata| metadata.component.as_ref())
         .and_then(|component| component.bom_ref.as_ref())
         .map(String::as_str);
-    if let Some(dependencies) = &bom.dependencies {
-        (parsed.dependencies, parsed.dependencies_partial) =
-            dependency_edges(&dependencies.0, project, &references);
-    }
-    Ok(parsed)
+    let (dependencies, dependencies_partial) = match &bom.dependencies {
+        Some(dependencies) => dependency_edges(&dependencies.0, project, &references),
+        None => (Vec::new(), false),
+    };
+    Ok(collector.finish(
+        specification_version,
+        bom.serial_number.as_ref().map(ToString::to_string),
+        dependencies,
+        dependencies_partial,
+    ))
 }
 
 /// How the `bom-ref`s of an SBOM resolve to the components kept.
@@ -275,12 +375,7 @@ fn dependency_edges(
     (edges.into_iter().collect(), partial)
 }
 
-fn collect(
-    components: &[Component],
-    by_purl: &mut BTreeMap<String, InventoryComponent>,
-    references: &mut References,
-    parsed: &mut ParsedSbom,
-) {
+fn collect(components: &[Component], collector: &mut Collector, references: &mut References) {
     for component in components {
         // Files and the operating system describe what was scanned; they are not packages.
         let is_package = !matches!(
@@ -288,42 +383,92 @@ fn collect(
             Classification::File | Classification::OperatingSystem
         );
         if is_package {
-            match inventory_component(component) {
-                Ok(inventory) => {
-                    if let Some(reference) = &component.bom_ref {
-                        references.keep(reference, &inventory.purl);
-                    }
-                    by_purl.entry(inventory.purl.clone()).or_insert(inventory);
-                }
-                Err(reason) => {
-                    if let Some(reference) = &component.bom_ref {
-                        references.skip(reference);
-                    }
-                    parsed.skipped_count += 1;
-                    if parsed.skipped.len() < MAXIMUM_LISTED_SKIPPED_COMPONENTS {
-                        parsed.skipped.push(SkippedComponent {
-                            name: component.name.to_string(),
-                            version: component.version.as_ref().map(ToString::to_string),
-                            reason,
-                        });
-                    }
+            let purl = component.purl.as_ref().map(ToString::to_string);
+            let version = component.version.as_ref().map(ToString::to_string);
+            let kept = collector.add(&component.name, version, purl.as_deref());
+            if let Some(reference) = &component.bom_ref {
+                match kept {
+                    Some(purl) => references.keep(reference, &purl),
+                    None => references.skip(reference),
                 }
             }
         }
         if let Some(children) = &component.components {
-            collect(&children.0, by_purl, references, parsed);
+            collect(&children.0, collector, references);
         }
     }
 }
 
-fn inventory_component(component: &Component) -> std::result::Result<InventoryComponent, String> {
-    let purl = component
-        .purl
-        .as_ref()
-        .ok_or_else(|| "no package URL".to_owned())?;
-    let purl = purl.to_string();
-    let parsed = PackageUrl::from_str(&purl)
+/// The components of an SBOM being parsed, whatever its format.
+#[derive(Default)]
+struct Collector {
+    by_purl: BTreeMap<String, InventoryComponent>,
+    skipped_count: usize,
+    skipped: Vec<SkippedComponent>,
+}
+
+impl Collector {
+    /// Adds a package, returning its package URL in canonical form when it can be tracked and
+    /// recording why otherwise.
+    fn add(&mut self, name: &str, version: Option<String>, purl: Option<&str>) -> Option<String> {
+        match inventory_component(purl) {
+            Ok(inventory) => {
+                let purl = inventory.purl.clone();
+                self.by_purl.entry(purl.clone()).or_insert(inventory);
+                Some(purl)
+            }
+            Err(reason) => {
+                self.skipped_count += 1;
+                if self.skipped.len() < MAXIMUM_LISTED_SKIPPED_COMPONENTS {
+                    self.skipped.push(SkippedComponent {
+                        name: name.to_owned(),
+                        version,
+                        reason,
+                    });
+                }
+                None
+            }
+        }
+    }
+
+    fn finish(
+        self,
+        specification_version: String,
+        serial_number: Option<String>,
+        dependencies: Vec<DependencyEdge>,
+        dependencies_partial: bool,
+    ) -> ParsedSbom {
+        ParsedSbom {
+            specification_version,
+            serial_number,
+            components: self.by_purl.into_values().collect(),
+            skipped_count: self.skipped_count,
+            skipped: self.skipped,
+            dependencies,
+            dependencies_partial,
+        }
+    }
+}
+
+fn inventory_component(purl: Option<&str>) -> std::result::Result<InventoryComponent, String> {
+    let purl = purl.ok_or_else(|| "no package URL".to_owned())?;
+    let mut parsed = PackageUrl::from_str(purl)
         .map_err(|error| format!("invalid package URL {purl:?}: {error}"))?;
+    if let Some(version) = parsed.version() {
+        // `=1.6.0` (or `==1.6.0`) allows one version, which OSV can match.
+        let exact = version.trim_start_matches('=');
+        if exact.is_empty() || is_version_requirement(exact) {
+            return Err(format!(
+                "version requirement {version:?} instead of a resolved version"
+            ));
+        }
+        if exact.len() != version.len() {
+            let exact = exact.to_owned();
+            parsed
+                .with_version(exact)
+                .map_err(|error| format!("invalid package URL {purl:?}: {error}"))?;
+        }
+    }
     let mut query = parsed.clone();
     query.clear_qualifiers().without_subpath();
     let name = match parsed.namespace() {
@@ -337,6 +482,20 @@ fn inventory_component(component: &Component) -> std::result::Result<InventoryCo
         name,
         version: parsed.version().map(str::to_owned),
     })
+}
+
+/// Whether a purl version is a requirement on versions rather than one version. GitHub's
+/// dependency graph export gives the manifest's requirement (`^6.1.2`, `2.*.*`, `1.x`) for
+/// packages no lock file pins, and OSV matches such a string against the wrong releases. A
+/// `~` is only a requirement at the start: Debian versions contain one (`1.0~rc1-2`). Real
+/// versions use `!` (`1!2.0`, a Python epoch), `:` (`1:2.3`, a Debian epoch) and `+`
+/// (`v1.2.3+incompatible`, Go), so those are not requirements.
+fn is_version_requirement(version: &str) -> bool {
+    version.starts_with(['^', '~', '>', '<', '!', '['])
+        || version.contains(['*', ' ', ',', '|', '>', '<'])
+        || version
+            .split('.')
+            .any(|segment| segment.eq_ignore_ascii_case("x"))
 }
 
 /// Where an upload comes from, as given by CI. Both labels are free text kept for display: at

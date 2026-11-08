@@ -9,7 +9,7 @@ use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
-use nanobom_domain::{notifications, organizations, projects, tokens};
+use nanobom_domain::{inventory, notifications, organizations, projects, tokens};
 use nanobom_osv::Severity;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, PaginatorTrait};
 use serde_json::json;
@@ -134,21 +134,75 @@ async fn invalid_and_oversized_documents_are_rejected() {
         .secret;
     let path = "/api/organizations/acme/projects/web/sbom";
 
-    let response = server
-        .send(upload(
-            path,
-            Some(&token),
-            b"{\"spdxVersion\": \"SPDX-2.3\"}".to_vec(),
-        ))
-        .await;
-    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
-    let body = body_json(response).await;
-    assert!(body["error"].as_str().unwrap().contains("CycloneDX"));
+    let refused = [
+        (&b"{\"name\": \"sbom\"}"[..], "or an SPDX JSON document"),
+        (
+            b"SPDXVersion: SPDX-2.3\nDataLicense: CC0-1.0\n",
+            "SPDX tag-value documents are not supported",
+        ),
+        (
+            b"<rdf:RDF xmlns:spdx=\"http://spdx.org/rdf/terms#\"/>",
+            "SPDX RDF documents are not supported",
+        ),
+        (
+            b"{\"@context\": \"https://spdx.org/rdf/3.0.1/spdx-context.jsonld\"}",
+            "unsupported SPDX version \"SPDX-3.0.1\"",
+        ),
+    ];
+    for (document, message) in refused {
+        let response = server
+            .send(upload(path, Some(&token), document.to_vec()))
+            .await;
+        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        let body = body_json(response).await;
+        let error = body["error"].as_str().unwrap();
+        assert!(error.contains(message), "{error}");
+    }
 
     let response = server
         .send(upload(path, Some(&token), vec![b' '; 1024 * 1024 + 1]))
         .await;
     assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+    // The limit is the same for SPDX.
+    let mut document = sbom_document("syft-spdx.json");
+    document.extend(std::iter::repeat_n(b' ', 1024 * 1024));
+    let response = server.send(upload(path, Some(&token), document)).await;
+    assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+#[tokio::test]
+async fn spdx_documents_are_uploaded_like_cyclonedx() {
+    let server = server(&[]).await;
+    let owner = user(&server.database, "owner").await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let token = tokens::create(&server.database, &owner, organization.id, None, "CI")
+        .await
+        .unwrap()
+        .secret;
+
+    let response = server
+        .send(upload(
+            "/api/organizations/acme/projects/web/sbom",
+            Some(&token),
+            sbom_document("trivy-npm-spdx.json"),
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let outcome = body_json(response).await;
+    assert_eq!(outcome["component_count"], 5);
+    assert_eq!(outcome["components_without_purl"], 1);
+    assert_eq!(outcome["skipped"][0]["name"], "package-lock.json");
+    assert_eq!(outcome["skipped"][0]["reason"], "no package URL");
+
+    let project = projects::find(&server.database, &owner, organization.id, "web")
+        .await
+        .unwrap();
+    let uploads = inventory::uploads(&server.database, &owner, project.id)
+        .await
+        .unwrap();
+    assert_eq!(uploads[0].specification_version, "SPDX-2.3");
 }
 
 /// A high severity advisory affecting the lodash of `cyclonedx-npm.json`.
