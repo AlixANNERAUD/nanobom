@@ -39,12 +39,6 @@ Restart nanobom. All `NANOBOM_OIDC_*` options are in the
   starting. The discovery request does not follow redirects: give the issuer exactly as the
   provider announces it.
 
-> **Known limitation:** nanobom currently removes a trailing slash from `NANOBOM_OIDC_ISSUER`,
-> while the issuer in the discovery document must match it character for character. Providers
-> whose issuer ends with `/`, such as Authentik, fail at the first sign-in with
-> `unexpected issuer URI` in the logs. Keycloak, Zitadel and most other providers announce their
-> issuer without a trailing slash and are not affected.
-
 ## 3. Grant instance administration from the provider (optional)
 
 ```sh
@@ -152,8 +146,8 @@ NANOBOM_OIDC_ADMINISTRATOR_CLAIM=groups
 NANOBOM_OIDC_ADMINISTRATOR_VALUE=nanobom-admins
 ```
 
-Authentik's issuer ends with a slash, so it is affected by the
-[known limitation](#2-configure-nanobom) above.
+Authentik's issuer ends with a slash (`…/application/o/nanobom/`); keep it in
+`NANOBOM_OIDC_ISSUER`.
 
 ## Other providers
 

@@ -39,18 +39,42 @@ fn signing_key() -> CoreRsaPrivateSigningKey {
 /// A mocked provider. Its token endpoint is mounted per sign-in, once the nonce is known.
 struct Provider {
     server: MockServer,
+    /// The issuer announced in the discovery document and in ID tokens, exactly as a client
+    /// must configure it.
+    issuer: String,
+    /// The path the provider is served under: empty, or `/application/o/nanobom`.
+    root: &'static str,
 }
 
 impl Provider {
+    /// An issuer that is the bare origin, without a trailing slash.
     async fn start() -> Self {
+        Self::serve("", |origin| origin).await
+    }
+
+    /// An issuer with a path and a trailing slash, like Authentik's
+    /// `https://auth.example.org/application/o/nanobom/`.
+    async fn start_with_trailing_slash() -> Self {
+        Self::serve("/application/o/nanobom", |origin| {
+            format!("{origin}/application/o/nanobom/")
+        })
+        .await
+    }
+
+    async fn serve(root: &'static str, issuer: impl FnOnce(String) -> String) -> Self {
         let server = MockServer::start().await;
-        mount_discovery(&server).await;
-        Self { server }
+        let issuer = issuer(server.uri());
+        mount_discovery(&server, &issuer, root).await;
+        Self {
+            server,
+            issuer,
+            root,
+        }
     }
 
     fn settings(&self) -> OpenIdSettings {
         OpenIdSettings {
-            issuer: self.server.uri(),
+            issuer: self.issuer.clone(),
             client_id: CLIENT_ID.to_owned(),
             client_secret: Some("secret".to_owned()),
             scopes: vec![
@@ -79,7 +103,7 @@ impl Provider {
         information: Value,
     ) {
         self.server.reset().await;
-        mount_discovery(&self.server).await;
+        mount_discovery(&self.server, &self.issuer, self.root).await;
         let access_token = AccessToken::new("access-token".to_owned());
         let claims: HashMap<String, Value> = serde_json::from_value(extra).unwrap();
         let id_token = IdToken::<
@@ -89,7 +113,7 @@ impl Provider {
             CoreJwsSigningAlgorithm,
         >::new(
             IdTokenClaims::new(
-                IssuerUrl::new(self.server.uri()).unwrap(),
+                IssuerUrl::new(self.issuer.clone()).unwrap(),
                 vec![Audience::new(CLIENT_ID.to_owned())],
                 Utc::now() + Duration::minutes(5),
                 Utc::now(),
@@ -106,7 +130,7 @@ impl Provider {
         )
         .unwrap();
         Mock::given(method("POST"))
-            .and(path("/token"))
+            .and(path(format!("{}/token", self.root)))
             .and(body_string_contains("code_verifier="))
             .and(body_string_contains("code=the-code"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
@@ -120,24 +144,25 @@ impl Provider {
         let mut information = information;
         information["sub"] = json!(subject);
         Mock::given(method("GET"))
-            .and(path("/userinfo"))
+            .and(path(format!("{}/userinfo", self.root)))
             .respond_with(ResponseTemplate::new(200).set_body_json(information))
             .mount(&self.server)
             .await;
     }
 }
 
-/// Serves the provider's discovery document and keys.
-async fn mount_discovery(server: &MockServer) {
-    let issuer = server.uri();
+/// Serves the provider's discovery document and keys under `root`. The `issuer` is announced
+/// verbatim, so a trailing slash is part of it.
+async fn mount_discovery(server: &MockServer, issuer: &str, root: &str) {
+    let base = format!("{}{root}", server.uri());
     Mock::given(method("GET"))
-        .and(path("/.well-known/openid-configuration"))
+        .and(path(format!("{root}/.well-known/openid-configuration")))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "issuer": issuer,
-            "authorization_endpoint": format!("{issuer}/authorize"),
-            "token_endpoint": format!("{issuer}/token"),
-            "userinfo_endpoint": format!("{issuer}/userinfo"),
-            "jwks_uri": format!("{issuer}/jwks"),
+            "authorization_endpoint": format!("{base}/authorize"),
+            "token_endpoint": format!("{base}/token"),
+            "userinfo_endpoint": format!("{base}/userinfo"),
+            "jwks_uri": format!("{base}/jwks"),
             "response_types_supported": ["code"],
             "subject_types_supported": ["public"],
             "id_token_signing_alg_values_supported": ["RS256"]
@@ -145,7 +170,7 @@ async fn mount_discovery(server: &MockServer) {
         .mount(server)
         .await;
     Mock::given(method("GET"))
-        .and(path("/jwks"))
+        .and(path(format!("{root}/jwks")))
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_json(json!({"keys": [signing_key().as_verification_key()]})),
@@ -175,7 +200,11 @@ async fn sign_in(
         .start(Some("/organizations".to_owned()))
         .await
         .unwrap();
-    assert!(url.starts_with(&format!("{}/authorize", provider.server.uri())));
+    assert!(url.starts_with(&format!(
+        "{}{}/authorize",
+        provider.server.uri(),
+        provider.root
+    )));
     assert_eq!(query_parameter(&url, "code_challenge_method"), "S256");
     assert!(query_parameter(&url, "scope").contains("email"));
     let state = query_parameter(&url, "state");
@@ -247,6 +276,55 @@ async fn first_sign_in_creates_the_user_and_later_ones_find_it() {
         other.email.is_none(),
         "the email address belongs to another account"
     );
+}
+
+/// Providers such as Authentik announce an issuer ending with a slash; the library compares it
+/// character for character with the configured one, so it must reach discovery untouched.
+#[tokio::test]
+async fn an_issuer_with_a_trailing_slash_is_used_as_configured() {
+    let provider = Provider::start_with_trailing_slash().await;
+    let database = testing::database().await;
+    let settings = provider.settings();
+    assert!(settings.issuer.ends_with('/'));
+    let openid = OpenId::new(settings).unwrap();
+
+    let user = sign_in(
+        &provider,
+        &openid,
+        &database,
+        "subject-1",
+        "alice.martin",
+        json!({}),
+        json!({}),
+    )
+    .await
+    .unwrap();
+    assert_eq!(user.username, "alice.martin");
+    let identity =
+        nanobom_domain::users::find_by_identity(&database, &provider.issuer, "subject-1")
+            .await
+            .unwrap();
+    assert_eq!(
+        identity.map(|user| user.id),
+        Some(user.id),
+        "the identity is stored under the issuer of the ID token, slash included"
+    );
+}
+
+/// The slash is significant: an issuer configured without it does not match a provider that
+/// announces it, and the failure is reported as a discovery error.
+#[tokio::test]
+async fn a_missing_trailing_slash_fails_discovery() {
+    let provider = Provider::start_with_trailing_slash().await;
+    let settings = OpenIdSettings {
+        issuer: provider.issuer.trim_end_matches('/').to_owned(),
+        ..provider.settings()
+    };
+    let openid = OpenId::new(settings).unwrap();
+    assert!(matches!(
+        openid.start(None).await,
+        Err(OpenIdError::Discovery(_))
+    ));
 }
 
 #[tokio::test]

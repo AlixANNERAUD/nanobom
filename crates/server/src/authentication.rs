@@ -60,7 +60,9 @@ pub fn openid(options: &ServeOptions) -> Result<Option<OpenId>, crate::Failure> 
     let group_mapping = GroupMapping::parse(oidc_group_mapping)
         .map_err(|error| format!("invalid NANOBOM_OIDC_GROUP_MAPPING: {error}"))?;
     let openid = OpenId::new(OpenIdSettings {
-        issuer: issuer.trim_end_matches('/').to_owned(),
+        // Kept as configured: the library compares it character for character with the issuer
+        // the provider announces, and some (Authentik) announce one ending with a slash.
+        issuer: issuer.clone(),
         client_id: client_id.clone(),
         client_secret: oidc_client_secret
             .clone()
