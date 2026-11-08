@@ -90,8 +90,9 @@ them to the people who fix dependencies, or rely on the organizations'
 
 ## Alert on logs
 
-nanobom writes one JSON object per line on standard output. If you collect logs, alert on the
-messages listed in the [logs reference](../reference/metrics.md#log-messages), first of all
+nanobom writes one JSON object per line on standard error (Docker and systemd collect both
+streams, so a collector reading only standard output must read both now). If you collect logs,
+alert on the messages listed in the [logs reference](../reference/metrics.md#log-messages), first of all
 `run failed; findings left unchanged`, `a stage of a run panicked; the worker continues` and
 `database error`. Webhook receivers that stay down show as a growing
 `nanobom_webhook_deliveries_total{outcome="abandoned"}`.

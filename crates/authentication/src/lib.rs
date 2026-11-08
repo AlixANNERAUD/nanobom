@@ -14,7 +14,8 @@
 //!   their sessions;
 //! - [`OpenId`] runs the authorization code flow and creates or updates users from the
 //!   provider's claims ([`claims`] reads groups and administrator rights);
-//! - [`csrf::protect`] refuses cross-site state-changing requests.
+//! - [`csrf::protect`] refuses cross-site state-changing requests;
+//! - [`redirect::local_path`] keeps a redirect target on this site.
 //!
 //! Start with [`backend`], then [`openid`] if single sign-on is in play.
 
@@ -22,6 +23,7 @@ pub mod backend;
 pub mod claims;
 pub mod csrf;
 pub mod openid;
+pub mod redirect;
 pub mod session_store;
 
 pub use backend::{AuthenticationSession, Backend, Credentials, SessionUser};

@@ -1,8 +1,8 @@
 //! Command line administration: the first administrator and upload tokens.
 //!
 //! These commands use the database directly, without an actor: whoever can run them can read
-//! the database anyway. A new token's secret is printed on standard output. Logs go to standard
-//! output too, so a script capturing the secret should pass `--log-level off`.
+//! the database anyway. A new token's secret is printed on standard output alone: logs go to
+//! standard error, so a script can capture the secret.
 
 use std::io::BufRead;
 

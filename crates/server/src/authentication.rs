@@ -178,20 +178,12 @@ fn forget_old_clients(retain_recent: impl Fn() + Send + 'static) {
     });
 }
 
-/// Keeps redirects on this site: a relative path, not `//host` nor `/\host` (which browsers
-/// also read as another host), and without control characters. Anything else becomes `/`.
+/// Keeps redirects on this site (see [`nanobom_authentication::redirect::local_path`]):
+/// anything that is not a local path becomes `/`.
 pub fn safe_next(next: Option<&str>) -> String {
-    match next {
-        Some(path)
-            if path.starts_with('/')
-                && !path.starts_with("//")
-                && !path.starts_with("/\\")
-                && !path.chars().any(char::is_control) =>
-        {
-            path.to_owned()
-        }
-        _ => "/".to_owned(),
-    }
+    next.and_then(nanobom_authentication::redirect::local_path)
+        .unwrap_or("/")
+        .to_owned()
 }
 
 fn sign_in_page(error: &str, next: &str) -> Redirect {
