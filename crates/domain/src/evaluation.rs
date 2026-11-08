@@ -696,8 +696,12 @@ async fn update_project(
         .ok_or_else(|| sea_orm::DbErr::RecordNotFound("organization".to_owned()))?;
     let transaction = database.begin().await?;
     let now = Utc::now().fixed_offset();
+    // Ordered, because the first stored finding matching an alias group is the one kept and the
+    // others are marked fixed: the oldest must win, as it does on SQLite, or a triaged finding
+    // could lose to a newer duplicate on PostgreSQL, which returns rows in no set order.
     let existing = findings::Entity::find()
         .filter(findings::Column::ProjectId.eq(project.id))
+        .order_by_asc(findings::Column::Id)
         .all(&transaction)
         .await?;
     let mut by_purl: HashMap<&str, Vec<&findings::Model>> = HashMap::new();

@@ -373,6 +373,46 @@ async fn ignored_findings_that_disappear_are_fixed() {
 }
 
 #[tokio::test]
+async fn the_oldest_finding_of_a_merged_alias_group_is_kept() {
+    let fixture = Fixture::new().await;
+    // Two records that do not know each other yet, reported one run apart, so they open two
+    // findings. The first is under the identifier that sorts last, so that an index on
+    // (project, package, identifier) would not put it first by accident.
+    let mut advisory = lodash_advisory("2024-01-01T00:00:00Z");
+    advisory["aliases"] = json!([]);
+    fixture.source.publish(advisory, &[LODASH]);
+    let project = fixture.upload(&[LODASH]).await;
+    fixture.run().await;
+    let oldest = fixture.findings(project).await[0].id;
+
+    let mut alias = lodash_alias();
+    alias["aliases"] = json!([]);
+    fixture.source.publish(alias, &[LODASH]);
+    fixture.run().await;
+    assert_eq!(fixture.findings(project).await.len(), 2);
+    // Updating the oldest row moves it behind the other one in a PostgreSQL table, so an
+    // unordered read would return the newer finding first.
+    findings::ignore(&fixture.database, &fixture.owner, oldest, "accepted", None)
+        .await
+        .unwrap();
+
+    // The advisory now lists the other identifier as an alias: both are one group.
+    fixture
+        .source
+        .publish(lodash_advisory("2024-06-01T00:00:00Z"), &[LODASH]);
+    let outcome = fixture.run().await;
+    assert_eq!(outcome.fixed_findings, 1, "the duplicate is closed");
+    for finding in fixture.findings(project).await {
+        let expected = if finding.id == oldest {
+            Status::Ignored
+        } else {
+            Status::Fixed
+        };
+        assert_eq!(finding.status, expected, "finding {}", finding.id);
+    }
+}
+
+#[tokio::test]
 async fn failed_runs_change_nothing_and_are_recorded() {
     let fixture = Fixture::new().await;
     fixture
