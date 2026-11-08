@@ -80,3 +80,22 @@ async fn migrations_create_the_exploitation_table() {
     assert_eq!(row.epss_score, Some(0.5));
     assert_eq!(row.kev_due_date, None);
 }
+
+#[tokio::test]
+async fn backup_refuses_databases_other_than_sqlite() {
+    let connection = testing::database().await;
+    // Only meaningful when the suite runs on another database (NANOBOM_TEST_DATABASE_URL).
+    if connection.get_database_backend() == DatabaseBackend::Sqlite {
+        return;
+    }
+    let destination = std::env::temp_dir().join(format!("nanobom-refused-{}", std::process::id()));
+    let error = database::backup(&connection, &destination)
+        .await
+        .expect_err("only SQLite is copied");
+    assert!(matches!(
+        error,
+        database::BackupError::UnsupportedBackend(_)
+    ));
+    assert!(error.to_string().contains("pg_dump"));
+    assert!(!destination.exists());
+}

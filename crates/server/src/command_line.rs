@@ -12,7 +12,7 @@ use clap::{ArgAction, Args, Parser, Subcommand, ValueEnum};
 #[derive(Debug, Parser)]
 #[command(name = "nanobom", version, about)]
 pub struct CommandLine {
-    /// Database URL. SQLite is the supported database.
+    /// Database URL: `sqlite://<path>` or `postgres://<user>:<password>@<host>/<database>`.
     #[arg(
         long,
         env = "NANOBOM_DATABASE_URL",
@@ -56,7 +56,8 @@ pub enum Command {
     Serve(Box<ServeOptions>),
     /// Apply pending database migrations and exit.
     Migrate,
-    /// Write a consistent copy of the live SQLite database to a new file.
+    /// Write a consistent copy of the live SQLite database to a new file (use pg_dump for
+    /// PostgreSQL).
     Backup {
         /// Destination file; it must not exist yet.
         #[arg(env = "NANOBOM_BACKUP_DESTINATION")]
