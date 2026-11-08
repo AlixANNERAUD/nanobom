@@ -1,6 +1,6 @@
 [book]
 title = "nanobom"
-description = "User and operator guide of nanobom, a self-hosted SBOM vulnerability tracker."
+description = "Guide to nanobom, the lightweight self-hosted SBOM vulnerability tracker: install it with Docker, upload CycloneDX SBOMs from CI, prioritize OSV findings with CISA KEV and EPSS, and gate pipelines."
 authors = ["Alix ANNERAUD"]
 language = "en"
 src = "src"
