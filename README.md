@@ -16,7 +16,7 @@ about new ones through a webhook.
   comes back, ignored with a reason and an optional expiry. OSV aliases (GHSA, CVE, …) of one
   vulnerability are merged into one finding.
 - **Exploitation signals**: findings are matched against CISA's Known Exploited Vulnerabilities
-  catalog and FIRST's EPSS scores, and listed with the most exploited first.
+  catalog and FIRST's EPSS scores, and listed with known exploited ones first.
 - **A CI gate**: an upload can wait for its evaluation and fail the pipeline when open findings
   reach a severity, or are known exploited.
 - **Webhooks** per organization for new findings above a severity (and for known exploited ones
@@ -128,8 +128,9 @@ curl --fail-with-body -X PUT \
 
 `evaluation.status` is `succeeded`, `failed` (OSV was unreachable) or `timed_out`, in which case
 `run_id` is `null` and the run still finishes in the background. `open` counts the project's open
-findings, ignored ones excluded; `findings` lists the most severe first (known exploited ones first among equals), at
-most 100; `known_exploited` counts all of them. `error` is present only when the upload fails:
+findings, ignored ones excluded; `findings` lists the most severe first (known exploited ones
+first among equals), at most 100; `known_exploited` counts all of them. `error` is present only
+when the upload fails:
 
 | Status | Meaning |
 | --- | --- |
@@ -137,9 +138,20 @@ most 100; `known_exploited` counts all of them. `error` is present only when the
 | `503` | With `fail_on`, the evaluation failed or timed out, so the findings are not up to date; the gate does not pass |
 
 Without `fail_on`, `wait=true` only adds the evaluation, and the status stays `200` or `201`.
-A project is evaluated when waiting even if `NANOBOM_RUN_AFTER_UPLOAD` is `false`. An invalid
-`wait` (neither `true` nor `false`) or `fail_on` is a `422`. To stop gating a pipeline, remove
-`fail_on` from the URL.
+A project is evaluated when waiting even if `NANOBOM_RUN_AFTER_UPLOAD` is `false`. `fail_on` is
+trimmed and case-insensitive. Invalid parameters are refused with a `422` before anything is
+stored, with one of these errors:
+
+- `wait must be true or false`;
+- `fail_on must be critical, high, medium, low or exploited`;
+- `fail_on=exploited needs exploitation data (NANOBOM_EXPLOITATION_DATA)`, when
+  `NANOBOM_EXPLOITATION_DATA` is `false`: no finding could ever be known exploited.
+
+To stop gating a pipeline, remove `fail_on` from the URL.
+
+A reverse proxy in front of nanobom must let the request wait: with nginx, set
+`proxy_read_timeout` above `NANOBOM_UPLOAD_WAIT_SECONDS` (300 seconds by default), or lower the
+setting.
 
 Complete pipelines, both failing on high findings: [GitHub Actions](examples/github-actions.yml),
 [GitLab CI](examples/gitlab-ci.yml). Upload tokens can also be managed from the command line:
@@ -175,11 +187,15 @@ CVEs among a finding's identifier and aliases):
   probability of exploitation in the next 30 days, refreshed when older than 24 hours.
 
 A finding with several CVEs takes the most alarming of each signal. Findings are ordered known
-exploited first, then by EPSS score, severity and CVSS score; the findings list can be limited to
-known exploited ones. If a download fails, the previous data is kept, the run is not affected and
-`nanobom_exploitation_refresh_failures_total` increases. `NANOBOM_EXPLOITATION_DATA=false` turns
-this off, for instances that cannot reach those services (open findings are then never known
-exploited).
+exploited first, then by severity, then by EPSS score within a severity (findings without one
+last) and by CVSS score; the findings list can be limited to known exploited ones. The refresh
+runs before uploads waiting for the run are answered, so `fail_on=exploited` sees the CVEs the
+run found, and is abandoned after 60 seconds. If a download fails or the refresh is abandoned,
+the previous exploitation data is kept, the run is not affected and
+`nanobom_exploitation_refresh_failures_total` increases; after a failed download of the KEV
+catalog, refreshes fail at once for 5 minutes instead of retrying it.
+`NANOBOM_EXPLOITATION_DATA=false` turns this off, for instances that cannot reach those services
+(open findings are then never known exploited, and `fail_on=exploited` is refused).
 
 ### Stale projects
 
