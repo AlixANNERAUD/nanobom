@@ -209,8 +209,8 @@ failed`):
   network, or a redirect (an `http` issuer redirected to `https`, for example), which nanobom does
   not follow;
 - `unexpected issuer URI` — the issuer in the discovery document differs from
-  `NANOBOM_OIDC_ISSUER`. Copy it exactly from the discovery document. If it ends with `/`, see
-  the [known limitation](single-sign-on.md#2-configure-nanobom);
+  `NANOBOM_OIDC_ISSUER`. Copy it exactly from the discovery document, including a trailing `/`
+  if there is one;
 - `the identity provider refused the sign-in` — usually a wrong client secret, or a client not
   allowed to use the authorization code flow.
 
