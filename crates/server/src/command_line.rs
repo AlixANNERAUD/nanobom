@@ -183,6 +183,11 @@ pub struct ServeOptions {
     #[arg(long, env = "NANOBOM_EXPLOITATION_DATA", default_value_t = true, action = ArgAction::Set)]
     pub exploitation_data: bool,
 
+    /// Days without an SBOM after which a project is flagged stale and its organization's
+    /// webhook notified (0 disables the feature).
+    #[arg(long, env = "NANOBOM_STALE_AFTER_DAYS", default_value_t = 30)]
+    pub stale_after_days: u32,
+
     /// Address of CISA's Known Exploited Vulnerabilities catalog (JSON).
     #[arg(
         long,

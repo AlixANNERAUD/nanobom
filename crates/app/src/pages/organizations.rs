@@ -10,7 +10,7 @@ use crate::{
         CreateOrganization, TriggerRun, load_organization, load_organizations, load_sign_in_options,
     },
     model::{Organization, OrganizationData, Run, Severity, SeverityCounts, SignInOptions},
-    t, tp,
+    t, tf, tp,
 };
 
 fn sign_in_error(code: &str) -> &'static str {
@@ -309,12 +309,21 @@ pub fn OrganizationPage() -> impl IntoView {
                             let last_upload = project
                                 .last_upload_at
                                 .map_or_else(|| t!("organization.never").to_owned(), format_time);
+                            let stale_badge = project.stale.then(|| {
+                                let title = tf!("organization.stale_title", date = last_upload.clone());
+                                view! {
+                                    <Badge variant=BadgeVariant::Outline title=title>
+                                        {t!("organization.stale")}
+                                    </Badge>
+                                }
+                            });
                             view! {
                                 <tr class=TABLE_ROW>
                                     <th scope="row" class=format!("{TABLE_CELL} text-left font-medium")>
                                         <a class="underline-offset-4 hover:underline" href=href>
                                             {name}
                                         </a>
+                                        {stale_badge}
                                     </th>
                                     {cells}
                                     <td class=format!("{TABLE_CELL} text-right tabular-nums")>

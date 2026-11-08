@@ -29,6 +29,7 @@ use crate::{
     evaluation::{RunOutcome, Scope},
     exploitation::{self, Exploitation},
     problem::Problem,
+    staleness,
 };
 
 /// Identifiers per database query, below SQLite's limit on bound variables.
@@ -200,6 +201,21 @@ pub struct RunFailedPayload {
     pub run: PayloadRun,
     pub scope: String,
     pub error: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PayloadStaleProject {
+    pub project: String,
+    pub last_upload_at: Option<DateTime<FixedOffset>>,
+    pub url: String,
+}
+
+/// `projects.stale`: projects of one organization whose SBOM stopped coming.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StaleProjectsPayload {
+    pub event: String,
+    pub organization: PayloadOrganization,
+    pub projects: Vec<PayloadStaleProject>,
 }
 
 fn run(outcome: &RunOutcome) -> PayloadRun {
@@ -516,6 +532,62 @@ pub async fn new_findings_deliveries(
     Ok(deliveries)
 }
 
+/// The `projects.stale` deliveries to make: one per organization with an enabled webhook and
+/// projects that became stale since their last notification, whatever the webhook's minimum
+/// severity and `exploited_only`. The projects are marked as notified.
+pub async fn stale_deliveries(
+    database: &impl ConnectionTrait,
+    stale_after_days: u32,
+    public_url: &Url,
+) -> Result<Vec<Delivery<StaleProjectsPayload>>> {
+    let mut deliveries = Vec::new();
+    let mut notified = Vec::new();
+    for (organization_id, projects) in staleness::newly_stale(database, stale_after_days).await? {
+        let Some(organization) = organizations::Entity::find_by_id(organization_id)
+            .one(database)
+            .await?
+        else {
+            continue;
+        };
+        let Some(webhook) = organization_webhooks::Entity::find_by_id(organization_id)
+            .one(database)
+            .await?
+            .filter(|webhook| webhook.enabled)
+        else {
+            continue;
+        };
+        notified.extend(projects.iter().map(|project| project.id));
+        deliveries.push(Delivery {
+            organization_id,
+            url: webhook.url,
+            payload: StaleProjectsPayload {
+                event: "projects.stale".to_owned(),
+                projects: projects
+                    .into_iter()
+                    .map(|project| PayloadStaleProject {
+                        url: link(
+                            public_url,
+                            &format!(
+                                "organizations/{}/projects/{}",
+                                organization.slug, project.slug
+                            ),
+                        ),
+                        project: project.slug,
+                        last_upload_at: project.last_upload_at,
+                    })
+                    .collect(),
+                organization: PayloadOrganization {
+                    url: link(public_url, &format!("organizations/{}", organization.slug)),
+                    slug: organization.slug,
+                    name: organization.name,
+                },
+            },
+        });
+    }
+    staleness::mark_notified(database, &notified).await?;
+    Ok(deliveries)
+}
+
 /// The `run.failed` payload for a failed run.
 pub fn run_failed_payload(outcome: &RunOutcome, public_url: &Url) -> Option<RunFailedPayload> {
     let error = outcome.error.clone()?;
@@ -557,11 +629,12 @@ impl Notifier {
         }
     }
 
-    /// Delivers `findings.new` payloads and records the outcome on each webhook.
-    pub async fn deliver(
+    /// Delivers payloads (`findings.new`, `projects.stale`) and records the outcome on each
+    /// webhook.
+    pub async fn deliver<T: Serialize>(
         &self,
         database: &impl ConnectionTrait,
-        deliveries: Vec<Delivery<NewFindingsPayload>>,
+        deliveries: Vec<Delivery<T>>,
     ) -> Result<()> {
         for delivery in deliveries {
             let result = self.post(&delivery.url, &delivery.payload).await;
@@ -570,11 +643,9 @@ impl Notifier {
                 Err(error) => format!("failed: {error}"),
             };
             match &result {
-                Ok(_) => tracing::info!(
-                    organization = delivery.organization_id,
-                    findings = delivery.payload.count,
-                    "webhook delivered"
-                ),
+                Ok(_) => {
+                    tracing::info!(organization = delivery.organization_id, "webhook delivered")
+                }
                 Err(error) => tracing::warn!(
                     organization = delivery.organization_id,
                     %error,

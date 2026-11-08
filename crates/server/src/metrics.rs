@@ -5,7 +5,7 @@ use std::{sync::OnceLock, time::Duration};
 
 use metrics::{counter, describe_counter, describe_gauge, describe_histogram, gauge, histogram};
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
-use nanobom_domain::{evaluation::RunOutcome, exploitation, findings};
+use nanobom_domain::{evaluation::RunOutcome, exploitation, findings, staleness};
 use nanobom_entity::runs;
 use nanobom_osv::Severity;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
@@ -46,6 +46,10 @@ fn describe() {
     describe_gauge!(
         "nanobom_open_findings_known_exploited",
         "Open findings with a CVE in CISA's Known Exploited Vulnerabilities catalog"
+    );
+    describe_gauge!(
+        "nanobom_stale_projects",
+        "Projects whose SBOM stopped coming (older than the stale threshold)"
     );
     describe_counter!(
         "nanobom_exploitation_refresh_failures_total",
@@ -104,6 +108,16 @@ pub async fn refresh_known_exploited(database: &DatabaseConnection) {
     }
 }
 
+/// Updates the gauge of stale projects.
+pub async fn refresh_stale_projects(database: &DatabaseConnection, stale_after_days: u32) {
+    handle();
+    match staleness::stale_count(database, stale_after_days).await {
+        #[allow(clippy::cast_precision_loss)]
+        Ok(count) => gauge!("nanobom_stale_projects").set(count as f64),
+        Err(error) => tracing::warn!(%error, "counting stale projects failed"),
+    }
+}
+
 /// Updates the open findings gauges from the database.
 pub async fn refresh_open_findings(database: &DatabaseConnection) {
     handle();
@@ -120,8 +134,9 @@ pub async fn refresh_open_findings(database: &DatabaseConnection) {
 }
 
 /// Sets the gauges from the database at startup.
-pub async fn initialize(database: &DatabaseConnection) {
+pub async fn initialize(database: &DatabaseConnection, stale_after_days: u32) {
     refresh_open_findings(database).await;
+    refresh_stale_projects(database, stale_after_days).await;
     refresh_known_exploited(database).await;
     match runs::Entity::find()
         .filter(runs::Column::Status.eq("succeeded"))

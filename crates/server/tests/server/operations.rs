@@ -7,14 +7,16 @@ use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
+use chrono::Utc;
 use nanobom::{healthcheck, runner::RunRequest};
 use nanobom_domain::{
     evaluation::{Scope, Trigger},
     findings::{self, Filter},
-    organizations, projects, tokens,
+    notifications, organizations, projects, tokens,
 };
 use nanobom_entity::exploitation;
-use sea_orm::{EntityTrait, PaginatorTrait};
+use nanobom_osv::Severity;
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, PaginatorTrait};
 use serde_json::json;
 use std::{
     task::{Context, Waker},
@@ -183,6 +185,67 @@ async fn failed_runs_call_the_failure_webhook() {
     assert_eq!(payload["event"], "run.failed");
     assert_eq!(payload["scope"], "all");
     assert!(payload["error"].as_str().unwrap().contains("unreachable"));
+}
+
+#[tokio::test]
+async fn scheduled_runs_notify_stale_projects_once() {
+    let receiver = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/stale"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&receiver)
+        .await;
+    let server = server(&["--stale-after-days", "30"]).await;
+    let owner = user(&server.database, "owner").await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    notifications::set(
+        &server.database,
+        &owner,
+        organization.id,
+        &format!("{}/stale", receiver.uri()),
+        Severity::Critical,
+        true,
+        true,
+    )
+    .await
+    .unwrap();
+    let project = projects::create(&server.database, &owner, organization.id, "web", "Web")
+        .await
+        .unwrap();
+    let mut active: nanobom_entity::projects::ActiveModel = project.into();
+    active.last_upload_at = Set(Some(
+        (Utc::now() - chrono::Duration::days(40)).fixed_offset(),
+    ));
+    active.update(&server.database).await.unwrap();
+
+    let scheduled = RunRequest {
+        trigger: Trigger::Scheduled,
+        scope: Scope::All,
+        triggered_by: None,
+    };
+    // A manual run does not notify.
+    server.runner.request(RunRequest {
+        trigger: Trigger::Manual,
+        ..scheduled
+    });
+    server.runner.wait_until_idle().await;
+    assert!(receiver.received_requests().await.unwrap().is_empty());
+
+    server.runner.request(scheduled);
+    server.runner.wait_until_idle().await;
+    let requests = receiver.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1);
+    let payload: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(payload["event"], "projects.stale");
+    assert_eq!(payload["organization"]["slug"], "acme");
+    assert_eq!(payload["projects"][0]["project"], "web");
+    assert!(payload["projects"][0]["last_upload_at"].is_string());
+
+    server.runner.request(scheduled);
+    server.runner.wait_until_idle().await;
+    assert_eq!(receiver.received_requests().await.unwrap().len(), 1);
 }
 
 #[tokio::test]

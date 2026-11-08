@@ -73,9 +73,14 @@ pub async fn load_organization(organization: String) -> Result<OrganizationData,
     let found = organizations::find(database, &actor, &organization)
         .await
         .map_err(failure)?;
-    let projects = findings::overview(database, &actor, found.id)
-        .await
-        .map_err(failure)?;
+    let projects = findings::overview(
+        database,
+        &actor,
+        found.id,
+        context()?.settings.stale_after_days,
+    )
+    .await
+    .map_err(failure)?;
     let runs = evaluation::recent_runs(database, &actor, found.id, 5)
         .await
         .map_err(failure)?;
@@ -90,6 +95,7 @@ pub async fn load_organization(organization: String) -> Result<OrganizationData,
                 open: crate::server::counts(project.open),
                 ignored: project.ignored,
                 known_exploited: project.known_exploited,
+                stale: project.stale,
             })
             .collect(),
         runs: runs.into_iter().map(run).collect(),
@@ -154,7 +160,15 @@ pub async fn load_project(
     let component_count = uploads.first().map_or(0, |upload| {
         usize::try_from(upload.component_count).unwrap_or_default()
     });
+    let stale = nanobom_domain::staleness::is_stale(
+        model.created_at,
+        model.last_upload_at,
+        chrono::Utc::now().fixed_offset(),
+        context()?.settings.stale_after_days,
+    );
     Ok(ProjectData {
+        last_upload_at: model.last_upload_at,
+        stale,
         organization: crate::server::organization(found),
         slug: model.slug,
         name: model.name,

@@ -190,6 +190,7 @@ pub struct ProjectRow {
     pub open: SeverityCounts,
     pub ignored: u64,
     pub known_exploited: i64,
+    pub stale: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -273,6 +274,8 @@ pub struct ProjectData {
     pub ecosystems: Vec<String>,
     pub uploads: Vec<Upload>,
     pub component_count: usize,
+    pub last_upload_at: Option<DateTime<FixedOffset>>,
+    pub stale: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

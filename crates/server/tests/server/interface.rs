@@ -469,3 +469,32 @@ async fn the_webhook_form_saves_the_exploited_only_option() {
         .expect("a webhook");
     assert!(!webhook.exploited_only);
 }
+
+#[tokio::test]
+async fn stale_projects_are_flagged() {
+    let server = server(&["--stale-after-days", "30"]).await;
+    let owner = local_user(&server.database, "alice", PASSWORD).await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let project = projects::create(&server.database, &owner, organization.id, "web", "Web")
+        .await
+        .unwrap();
+    let alice = Browser::sign_in(&server, "alice").await;
+    let page = "/organizations/acme/projects/web";
+    let html = alice.page("/organizations/acme").await;
+    assert!(!html.contains("Stale"));
+    assert!(!alice.page(page).await.contains("No SBOM received since"));
+
+    let mut active: nanobom_entity::projects::ActiveModel = project.into();
+    active.last_upload_at = Set(Some(
+        (chrono::Utc::now() - chrono::Duration::days(40)).fixed_offset(),
+    ));
+    active.update(&server.database).await.unwrap();
+    let html = alice.page("/organizations/acme").await;
+    assert!(html.contains("Stale"));
+    assert!(html.contains("Last upload: "));
+    let html = alice.page(page).await;
+    assert!(html.contains("No SBOM received since"));
+    assert!(html.contains("check the CI job uploading it"));
+}

@@ -164,7 +164,11 @@ pub enum BadgeVariant {
 }
 
 #[component]
-pub fn Badge(#[prop(optional)] variant: BadgeVariant, children: Children) -> impl IntoView {
+pub fn Badge(
+    #[prop(optional)] variant: BadgeVariant,
+    #[prop(optional, into)] title: Option<String>,
+    children: Children,
+) -> impl IntoView {
     let variant = match variant {
         BadgeVariant::Secondary => "border-transparent bg-secondary text-secondary-foreground",
         BadgeVariant::Outline => "text-foreground",
@@ -172,9 +176,12 @@ pub fn Badge(#[prop(optional)] variant: BadgeVariant, children: Children) -> imp
         BadgeVariant::Muted => "border-transparent bg-muted text-muted-foreground",
     };
     view! {
-        <span class=format!(
-            "inline-flex w-fit items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-semibold whitespace-nowrap {variant}",
-        )>{children()}</span>
+        <span
+            title=title
+            class=format!(
+                "inline-flex w-fit items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-semibold whitespace-nowrap {variant}",
+            )
+        >{children()}</span>
     }
 }
 
@@ -184,6 +191,7 @@ pub enum AlertVariant {
     Default,
     Destructive,
     Success,
+    Warning,
 }
 
 #[component]
@@ -196,6 +204,7 @@ pub fn Alert(
         AlertVariant::Default => ("bg-card text-card-foreground", "status"),
         AlertVariant::Destructive => ("border-destructive/50 bg-card text-destructive", "alert"),
         AlertVariant::Success => ("border-success/50 bg-card text-success", "status"),
+        AlertVariant::Warning => ("border-warning/50 bg-card text-warning", "status"),
     };
     view! {
         <div role=role class=format!("relative w-full rounded-lg border px-4 py-3 text-sm {variant}")>

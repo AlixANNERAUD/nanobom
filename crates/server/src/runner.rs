@@ -37,6 +37,8 @@ pub struct RunRequest {
 pub struct NotificationSettings {
     pub public_url: Url,
     pub failure_webhook: Option<Url>,
+    /// Days without an SBOM after which a project is stale (0: never).
+    pub stale_after_days: u32,
 }
 
 /// A request waiting in the queue, with whoever waits for its outcome.
@@ -181,6 +183,7 @@ async fn finish(
 ) {
     metrics::record_run(outcome);
     metrics::refresh_open_findings(database).await;
+    metrics::refresh_stale_projects(database, settings.stale_after_days).await;
     if outcome.succeeded() {
         if let Some(feeds) = feeds {
             match exploitation::refresh(database, feeds, outcome.scope).await {
@@ -204,6 +207,22 @@ async fn finish(
                 }
             }
             Err(error) => tracing::error!(%error, "preparing webhook deliveries failed"),
+        }
+        if outcome.trigger == Trigger::Scheduled {
+            match notifications::stale_deliveries(
+                database,
+                settings.stale_after_days,
+                &settings.public_url,
+            )
+            .await
+            {
+                Ok(deliveries) => {
+                    if let Err(error) = notifier.deliver(database, deliveries).await {
+                        tracing::error!(%error, "recording webhook deliveries failed");
+                    }
+                }
+                Err(error) => tracing::error!(%error, "preparing stale project deliveries failed"),
+            }
         }
     } else if let (Some(url), Some(payload)) = (
         &settings.failure_webhook,

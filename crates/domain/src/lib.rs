@@ -17,6 +17,7 @@ pub mod organizations;
 pub mod passwords;
 pub mod problem;
 pub mod projects;
+pub mod staleness;
 pub mod tokens;
 pub mod users;
 

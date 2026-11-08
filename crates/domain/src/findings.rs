@@ -629,14 +629,19 @@ pub struct ProjectOverview {
     pub ignored: u64,
     /// Open findings with a known exploited CVE.
     pub known_exploited: i64,
+    /// No SBOM received for longer than the stale threshold.
+    pub stale: bool,
 }
 
-/// The projects of an organization with their open findings by severity.
+/// The projects of an organization with their open findings by severity; `stale_after_days`
+/// is the stale threshold (0: never stale).
 pub async fn overview(
     database: &impl ConnectionTrait,
     actor: &Actor,
     organization_id: i64,
+    stale_after_days: u32,
 ) -> Result<Vec<ProjectOverview>> {
+    let now = chrono::Utc::now().fixed_offset();
     let projects = crate::projects::list(database, actor, organization_id).await?;
     let mut overviews: Vec<ProjectOverview> = projects
         .iter()
@@ -648,6 +653,12 @@ pub async fn overview(
             open: SeverityCounts::default(),
             ignored: 0,
             known_exploited: 0,
+            stale: crate::staleness::is_stale(
+                project.created_at,
+                project.last_upload_at,
+                now,
+                stale_after_days,
+            ),
         })
         .collect();
     let index: HashMap<i64, usize> = overviews

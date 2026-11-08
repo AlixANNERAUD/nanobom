@@ -231,6 +231,17 @@ pub fn ProjectPage() -> impl IntoView {
                                 </Alert>
                             }
                         });
+                    let stale = page.stale.then(|| {
+                        let date = page
+                            .last_upload_at
+                            .or_else(|| latest.as_ref().map(|upload| upload.uploaded_at))
+                            .map_or_else(|| t!("organization.never").to_owned(), format_time);
+                        view! {
+                            <Alert variant=AlertVariant::Warning>
+                                {tf!("project.stale_alert", date = date)}
+                            </Alert>
+                        }
+                    });
                     let count = page.findings.len();
                     let rows = finding_rows(page.findings.clone());
                     let table = if page.findings.is_empty() {
@@ -325,6 +336,7 @@ pub fn ProjectPage() -> impl IntoView {
                         <Heading title=page.name.clone() subtitle>
                             {check_now}
                         </Heading>
+                        {stale}
                         {without_purl}
                         <Filters page=page.clone() filter />
                         {table}

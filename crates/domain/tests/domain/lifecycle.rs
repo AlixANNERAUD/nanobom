@@ -595,7 +595,7 @@ async fn filters_and_overview_count_by_severity() {
     )
     .await
     .unwrap();
-    let overview = findings::overview(&fixture.database, &fixture.viewer, fixture.organization)
+    let overview = findings::overview(&fixture.database, &fixture.viewer, fixture.organization, 0)
         .await
         .unwrap();
     assert_eq!(overview.len(), 1);

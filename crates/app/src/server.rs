@@ -30,6 +30,8 @@ pub struct InterfaceSettings {
     pub openid_button: Option<String>,
     pub password_minimum_length: usize,
     pub personal_organizations: bool,
+    /// Days without an SBOM after which a project is stale (0: never).
+    pub stale_after_days: u32,
 }
 
 pub fn context() -> Result<InterfaceContext, ServerFnError> {
