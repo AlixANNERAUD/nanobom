@@ -13,11 +13,12 @@ cargo-deny, wasm-bindgen, mdBook…) and runs the tasks. Every cargo command goe
 mise install
 mise run dev       # server with live reload on http://127.0.0.1:3000
 mise run dev-admin # first administrator of the development database
-mise run check     # formatting, clippy, tests and cargo-deny, as CI
+mise run check     # formatting, clippy, rustdoc, tests and cargo-deny, as CI
 mise run test      # tests only (cargo-nextest)
 mise run coverage  # tests with coverage, written to lcov.info
 mise run build     # release binary and site in target/
 mise run docs      # this book, in docs/book
+mise run doc       # the API documentation (rustdoc); broken links fail it
 ```
 
 `mise run dev` needs neither `/data` nor root. It runs `cargo leptos watch -- serve` (cargo-leptos

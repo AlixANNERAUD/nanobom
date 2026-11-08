@@ -11,7 +11,8 @@
 //!
 //! Without `wait` or `fail_on`, the upload answers at once and queues a run of the project
 //! (unless runs after uploads are disabled). With them, it waits for a run of the project that
-//! starts after the upload ([`Runner::request_and_wait`](crate::runner::Runner::request_and_wait)), at most
+//! starts after the upload
+//! ([`Runner::request_and_wait`](crate::runner::Runner::request_and_wait)), at most
 //! `--upload-wait-seconds`, and returns the project's open findings. `fail_on` then turns the
 //! result into a status CI can act on:
 //!

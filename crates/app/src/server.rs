@@ -6,8 +6,9 @@
 //! that actor (the domain checks permissions), and ends with [`finish`], which sends the browser
 //! back to the form's page with a translated notice or error.
 //!
-//! Redirects go to paths, never to absolute URLs: [`back`] uses the `Referer` only when its
-//! host is the request's own, and keeps its path alone.
+//! Redirects go to paths: [`back`] uses the `Referer` only when its host is the request's own,
+//! and keeps its path alone. That path is not yet checked against protocol-relative forms such
+//! as `//other.example` (issue #43).
 
 use std::sync::Arc;
 

@@ -157,7 +157,9 @@ pub struct RunOutcome {
     pub trigger: Trigger,
     pub started_at: DateTime<FixedOffset>,
     pub duration_seconds: f64,
-    /// Why the run failed; findings were left untouched. The message may name packages of any
+    /// Why the run failed. A failure to reach OSV opens or fixes nothing; ignores that expired
+    /// were already reopened, and a database error halfway through keeps the projects already
+    /// updated. The message may name packages of any
     /// organization in scope, so it is not for organization members of an instance-wide run.
     pub error: Option<String>,
     /// Versioned components in scope, counted once per project.
@@ -170,7 +172,8 @@ pub struct RunOutcome {
 }
 
 impl RunOutcome {
-    /// Whether the run completed; a failed run left findings untouched.
+    /// Whether the run completed (see [`RunOutcome::error`] for what a failed run may have
+    /// changed).
     pub fn succeeded(&self) -> bool {
         self.error.is_none()
     }
@@ -339,7 +342,8 @@ impl<S: VulnerabilitySource + 'static> Evaluator<S> {
         Ok(outcome)
     }
 
-    /// The body of a run. Any error leaves findings as they were.
+    /// The body of a run. Expired ignores are reopened first; a failure to reach OSV then opens
+    /// or fixes nothing, while a database error keeps the projects already updated.
     async fn evaluate(
         &self,
         run_id: i64,
