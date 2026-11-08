@@ -29,7 +29,7 @@ tower-http = { version = "0.7.1", features = ["compression-gzip", "compression-b
 axum-login = "0.18.0"
 async-trait = "0.1"
 tower-sessions = { version = "0.14.0", default-features = false, features = ["axum-core"] }
-password-auth = "1.0.0"
+password-auth = "2.0.0"
 openidconnect = { version = "4.1.0", default-features = false, features = ["reqwest", "rustls-tls"] }
 tower_governor = { version = "0.8.0", default-features = false, features = ["axum"] }
 sea-orm = { version = "2.0.4", default-features = false, features = ["sqlx-sqlite", "sqlx-postgres", "runtime-tokio", "macros", "with-chrono", "with-json"] }
