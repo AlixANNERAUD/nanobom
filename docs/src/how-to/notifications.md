@@ -14,12 +14,20 @@ An organization's admins configure one webhook in **Settings → Webhook**:
   severity;
 - **Enabled**: unchecked, nothing is sent.
 
-Then **Save webhook**. After the next run that opens findings, the settings page shows the time
-and outcome of the last delivery (the HTTP status, or the error). **Remove webhook** deletes the
-configuration.
+Then **Save webhook**. After the next run that opens findings, **Recent deliveries** on the
+settings page lists the documents sent, newest first: the event, whether it was **Delivered**,
+is **Retrying** (with the time of the next attempt) or **Failed**, the number of attempts, and
+the time and answer of the last attempt (the HTTP status, or the error). **Remove webhook**
+deletes the configuration and abandons the deliveries still waiting for a retry.
+
+A receiver that is down for a while misses nothing: failed deliveries are retried after 1 minute,
+10 minutes and 1 hour. A `4xx` answer other than `408` and `429` is not retried, so fix the
+receiver or the URL and wait for the next document. The rules are in the
+[webhook reference](../reference/webhooks.md#delivery).
 
 Requests are not signed: use an unguessable URL (most receivers put a random identifier in the
-path) over `https`, and answer within 15 seconds.
+path) over `https`, and answer within 15 seconds. A document can arrive twice when an answer is
+lost; receivers that must not act twice can remember the run's `id` per event.
 
 ## Receive them in Home Assistant
 

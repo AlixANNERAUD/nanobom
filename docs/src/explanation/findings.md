@@ -37,8 +37,11 @@ and the instance-wide scheduled runs. The error message of an instance-wide run 
 organizations' packages, so only instance administrators see it; others read "the run could not
 complete".
 
-A run interrupted by a shutdown is not resumed and stays listed as running; the next run of the
-same scope does its work.
+A run that stops before it can record its end is recorded as failed with the error "the run
+stopped unexpectedly", counted and sent to the failure webhook like any failed run. That happens
+right away when a bug makes the run panic (the queue goes on with the next run), and at the next
+start when nanobom was stopped or crashed during the run. Such a run is not resumed; the next run
+of the same scope does its work.
 
 ## Matching against OSV
 
