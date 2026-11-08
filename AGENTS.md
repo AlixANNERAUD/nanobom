@@ -33,7 +33,8 @@ fail: the build directory is set up by mise.
 | `mise run format` | Formats the code |
 | `mise run lint` | rustfmt check, clippy with `-D warnings` for the server and for the WebAssembly frontend |
 | `mise run test` | The test suite (nextest) |
-| `mise run check` | What CI runs: lint, tests, cargo-deny |
+| `mise run check` | What CI runs: lint, rustdoc, tests, cargo-deny |
+| `mise run doc` | Rustdoc with warnings as errors (broken intra-doc links fail) |
 | `mise run dev` / `mise run dev-admin` | Development server on http://127.0.0.1:3000 with a local database / its first administrator |
 | `mise run entities` | Regenerates `crates/entity` from the migrations |
 | `mise run docs` | Builds the guide into `docs/book` |
