@@ -20,6 +20,8 @@ pub struct Model {
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
+    #[sea_orm(has_many = "super::component_dependencies::Entity")]
+    ComponentDependencies,
     #[sea_orm(has_many = "super::components::Entity")]
     Components,
     #[sea_orm(has_many = "super::findings::Entity")]
@@ -38,6 +40,12 @@ pub enum Relation {
     SbomUploads,
     #[sea_orm(has_many = "super::upload_tokens::Entity")]
     UploadTokens,
+}
+
+impl Related<super::component_dependencies::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::ComponentDependencies.def()
+    }
 }
 
 impl Related<super::components::Entity> for Entity {

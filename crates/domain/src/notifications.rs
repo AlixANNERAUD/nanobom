@@ -49,6 +49,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     access::{Actor, Permission},
     deliveries::{self, Attempt, Outcome},
+    dependencies::Graph,
     error::{Error, Result},
     evaluation::{self, RunOutcome, Scope},
     exploitation::{self, Exploitation, QUERY_CHUNK},
@@ -204,6 +205,9 @@ pub struct PayloadFinding {
     pub kev_due_date: Option<NaiveDate>,
     pub epss: Option<f64>,
     pub epss_percentile: Option<f64>,
+    /// The names of the project's direct dependencies that lead to the component, per the
+    /// dependency graph of its latest SBOM; empty when the graph does not say.
+    pub introduced_via: Vec<String>,
     pub url: String,
 }
 
@@ -296,6 +300,7 @@ pub struct Delivery<T> {
 struct Entry {
     finding_id: i64,
     organization_id: i64,
+    project_id: i64,
     project_slug: String,
     purl: String,
     vulnerability_id: String,
@@ -446,6 +451,7 @@ pub async fn new_findings_deliveries(
         .map(|finding| Entry {
             finding_id: finding.finding_id,
             organization_id: finding.organization_id,
+            project_id: finding.project_id,
             project_slug: finding.project_slug.clone(),
             purl: finding.purl.clone(),
             vulnerability_id: finding.vulnerability_id.clone(),
@@ -474,6 +480,7 @@ pub async fn new_findings_deliveries(
         entries.push(Entry {
             finding_id: candidate.finding.id,
             organization_id: candidate.organization_id,
+            project_id: candidate.finding.project_id,
             project_slug: candidate.project_slug,
             purl: candidate.finding.purl,
             vulnerability_id: candidate.finding.vulnerability_id,
@@ -498,6 +505,7 @@ pub async fn new_findings_deliveries(
             .push(entry);
     }
     let mut deliveries = Vec::new();
+    let mut graphs: HashMap<i64, Graph> = HashMap::new();
     for (organization_id, entries) in by_organization {
         let Some(webhook) = organization_webhooks::Entity::find_by_id(organization_id)
             .one(database)
@@ -529,6 +537,22 @@ pub async fn new_findings_deliveries(
         else {
             continue;
         };
+        let mut introduced_via = Vec::with_capacity(entries.len());
+        for entry in &entries {
+            let graph = match graphs.entry(entry.project_id) {
+                std::collections::hash_map::Entry::Occupied(graph) => graph.into_mut(),
+                std::collections::hash_map::Entry::Vacant(vacant) => {
+                    vacant.insert(Graph::load(database, entry.project_id).await?)
+                }
+            };
+            let mut names: Vec<String> = graph
+                .introduced_via(&entry.purl)
+                .into_iter()
+                .map(|component| component.name)
+                .collect();
+            names.dedup();
+            introduced_via.push(names);
+        }
         let payload = NewFindingsPayload {
             event: "findings.new".to_owned(),
             organization: PayloadOrganization {
@@ -549,7 +573,8 @@ pub async fn new_findings_deliveries(
                 .count(),
             findings: entries
                 .into_iter()
-                .map(|entry| PayloadFinding {
+                .zip(introduced_via)
+                .map(|(entry, introduced_via)| PayloadFinding {
                     url: link(public_url, &format!("findings/{}", entry.finding_id)),
                     project: entry.project_slug,
                     component: entry.purl,
@@ -564,6 +589,7 @@ pub async fn new_findings_deliveries(
                     kev_due_date: entry.exploitation.kev_due_date,
                     epss: entry.exploitation.epss_score,
                     epss_percentile: entry.exploitation.epss_percentile,
+                    introduced_via,
                 })
                 .collect(),
         };

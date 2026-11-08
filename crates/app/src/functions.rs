@@ -256,6 +256,20 @@ pub async fn load_finding(finding: i64) -> Result<FindingData, ServerFnError> {
                 reason: event.reason,
             })
             .collect(),
+        dependency_paths: detail
+            .dependency_paths
+            .map(|paths| crate::model::DependencyPaths {
+                paths: paths
+                    .paths
+                    .into_iter()
+                    .map(|path| {
+                        path.into_iter()
+                            .map(crate::server::dependency_component)
+                            .collect()
+                    })
+                    .collect(),
+                more: paths.more,
+            }),
         finding: crate::server::finding(detail.finding),
     })
 }

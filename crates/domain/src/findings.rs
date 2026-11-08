@@ -33,6 +33,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     access::{Actor, Permission},
+    dependencies::{ComponentRef, DependencyPaths, Graph},
     error::{Error, Result},
     evaluation::record_event,
     exploitation::{self, Exploitation, QUERY_CHUNK, VulnerabilityFacts, vulnerability_facts},
@@ -152,6 +153,10 @@ pub struct Finding {
     /// Like `ignore_reason`, meaningful only while the finding is ignored.
     pub ignore_expires_at: Option<DateTime<FixedOffset>>,
     pub exploitation: Exploitation,
+    /// The project's direct dependencies that lead to the component (itself when it is one),
+    /// per the dependency graph of the latest SBOM, sorted by name. Empty when the graph does
+    /// not say, or when the component is no longer in the project.
+    pub introduced_via: Vec<ComponentRef>,
 }
 
 /// Which findings to list. Empty lists mean "any".
@@ -205,6 +210,7 @@ fn view(
         ignore_reason: finding.ignore_reason,
         ignore_expires_at: finding.ignore_expires_at,
         exploitation: Exploitation::default(),
+        introduced_via: Vec::new(),
     }
 }
 
@@ -298,8 +304,10 @@ async fn project_findings(
         })
         .collect();
     let mut exploitations = exploitation::for_findings(database, &keys).await?;
+    let graph = Graph::load(database, project_id).await?;
     for finding in &mut findings {
         finding.exploitation = exploitations.remove(&finding.id).unwrap_or_default();
+        finding.introduced_via = graph.introduced_via(&finding.purl);
     }
     if filter.exploited_only {
         findings.retain(|finding| finding.exploitation.known_exploited);
@@ -387,6 +395,9 @@ pub struct FindingDetail {
     pub ignored_by: Option<String>,
     pub affected_components: Vec<AffectedComponent>,
     pub events: Vec<Event>,
+    /// How the project pulls in the component; `None` when its latest SBOM did not say which
+    /// components the project depends on directly.
+    pub dependency_paths: Option<DependencyPaths>,
 }
 
 async fn usernames(
@@ -432,6 +443,8 @@ pub async fn detail(
         .await?
         .ok_or(Error::NotFound)?;
     let record: Option<Vulnerability> = serde_json::from_str(&vulnerability.record).ok();
+    let graph = Graph::load(database, project.id).await?;
+    let dependency_paths = graph.paths(&finding.purl);
     let (component_name, _) = component_name_and_version(&finding.purl);
     let package_name = component_name
         .rsplit('/')
@@ -524,6 +537,7 @@ pub async fn detail(
             })
             .collect(),
         affected_components,
+        dependency_paths,
         finding: {
             let facts = VulnerabilityFacts {
                 aliases: serde_json::from_str(&vulnerability.aliases).unwrap_or_default(),
@@ -531,6 +545,7 @@ pub async fn detail(
                 cvss_score: vulnerability.cvss_score,
             };
             let mut view = view(finding, project.slug, Some(&facts));
+            view.introduced_via = graph.introduced_via(&view.purl);
             view.exploitation = exploitation::for_cves(
                 database,
                 &exploitation::cve_ids(&view.vulnerability_id, &view.aliases),

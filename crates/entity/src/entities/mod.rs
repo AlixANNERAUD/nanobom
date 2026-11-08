@@ -2,6 +2,7 @@
 
 pub mod prelude;
 
+pub mod component_dependencies;
 pub mod components;
 pub mod exploitation;
 pub mod finding_events;

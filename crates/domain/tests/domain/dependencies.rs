@@ -1,0 +1,355 @@
+//! The dependency graph of an SBOM: what each generator gives, how it is stored with the
+//! components, and the paths shown on findings, in webhooks and to CI.
+
+use std::sync::Arc;
+
+use nanobom_domain::{
+    Error,
+    access::Actor,
+    dependencies::{self, ComponentRef, DependencyPaths},
+    evaluation::{Evaluator, Scope, Trigger},
+    findings::{self, Filter},
+    inventory::{self, DependencyEdge, ParsedSbom, UploadSource},
+    notifications, organizations, testing,
+    testing::FakeSource,
+    tokens,
+    users::{self, NewUser},
+};
+use nanobom_entity::component_dependencies;
+use nanobom_osv::Severity;
+use sea_orm::{DatabaseConnection, EntityTrait, PaginatorTrait};
+use serde_json::json;
+
+const LODASH: &str = "pkg:npm/lodash@4.17.20";
+const FRAMEWORK: &str = "pkg:npm/web-framework@2.1.0";
+const ENGINE: &str = "pkg:npm/template-engine@0.9.0";
+const LEFT_PAD: &str = "pkg:npm/left-pad@1.0.0";
+
+fn sbom_document(name: &str) -> Vec<u8> {
+    let path = format!("{}/tests/fixtures/sboms/{name}", env!("CARGO_MANIFEST_DIR"));
+    std::fs::read(&path).unwrap_or_else(|error| panic!("read {path}: {error}"))
+}
+
+fn edge(parent: Option<&str>, child: &str) -> DependencyEdge {
+    DependencyEdge {
+        parent: parent.map(str::to_owned),
+        child: child.to_owned(),
+    }
+}
+
+/// `shop` depends on `web-framework` -> `template-engine` -> `lodash`, on `left-pad`, and on a
+/// vendored package without a package URL that also depends on `lodash`.
+fn shop_document() -> serde_json::Value {
+    json!({
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.5",
+        "version": 1,
+        "metadata": {"component": {"type": "application", "name": "shop", "bom-ref": "shop"}},
+        "components": [
+            {"type": "library", "name": "web-framework", "version": "2.1.0", "bom-ref": "framework", "purl": FRAMEWORK},
+            {"type": "library", "name": "template-engine", "version": "0.9.0", "bom-ref": "engine", "purl": ENGINE},
+            {"type": "library", "name": "lodash", "version": "4.17.20", "bom-ref": "lodash", "purl": LODASH},
+            {"type": "library", "name": "vendored", "bom-ref": "vendored"},
+            {"type": "library", "name": "left-pad", "version": "1.0.0", "bom-ref": "left-pad", "purl": LEFT_PAD}
+        ],
+        "dependencies": [
+            {"ref": "shop", "dependsOn": ["framework", "vendored", "left-pad"]},
+            {"ref": "framework", "dependsOn": ["engine", "shop"]},
+            {"ref": "engine", "dependsOn": ["lodash", "engine", "missing"]},
+            {"ref": "vendored", "dependsOn": ["lodash"]},
+            {"ref": "left-pad"}
+        ]
+    })
+}
+
+fn parse(document: &serde_json::Value) -> ParsedSbom {
+    inventory::parse(document.to_string().as_bytes()).unwrap()
+}
+
+#[test]
+fn cargo_cyclonedx_and_cyclonedx_npm_describe_the_project() {
+    let sbom = inventory::parse(&sbom_document("cargo-cyclonedx.json")).unwrap();
+    assert_eq!(
+        sbom.dependencies,
+        [
+            edge(None, "pkg:cargo/itoa@1.0.18"),
+            edge(None, "pkg:cargo/smallvec@1.6.0"),
+        ]
+    );
+    let sbom = inventory::parse(&sbom_document("cyclonedx-npm.json")).unwrap();
+    assert_eq!(
+        sbom.dependencies,
+        [
+            edge(None, "pkg:npm/%40babel/helper-string-parser@7.25.9"),
+            edge(None, "pkg:npm/lodash@4.17.20"),
+            edge(None, "pkg:npm/minimist@1.2.5"),
+        ]
+    );
+}
+
+#[test]
+fn cyclonedx_py_and_syft_leave_the_project_out() {
+    // An environment has no project: the graph links packages only.
+    let sbom = inventory::parse(&sbom_document("cyclonedx-py.json")).unwrap();
+    assert_eq!(
+        sbom.dependencies,
+        [edge(Some("pkg:pypi/urllib3@1.26.4"), "pkg:pypi/idna@3.6")]
+    );
+    // An image names itself in the metadata, but no package depends on it.
+    let sbom = inventory::parse(&sbom_document("syft.json")).unwrap();
+    assert!(!sbom.dependencies.is_empty());
+    assert!(sbom.dependencies.iter().all(|edge| edge.parent.is_some()));
+}
+
+#[test]
+fn edges_through_components_that_are_not_kept_are_dropped() {
+    let sbom = parse(&shop_document());
+    assert_eq!(
+        sbom.dependencies,
+        [
+            edge(None, LEFT_PAD),
+            edge(None, FRAMEWORK),
+            edge(Some(ENGINE), LODASH),
+            edge(Some(FRAMEWORK), ENGINE),
+        ],
+        "no edge to the project, to itself, to an unknown reference or through `vendored`"
+    );
+
+    let mut document = shop_document();
+    document.as_object_mut().unwrap().remove("dependencies");
+    assert!(parse(&document).dependencies.is_empty());
+}
+
+struct Fixture {
+    database: DatabaseConnection,
+    source: Arc<FakeSource>,
+    evaluator: Evaluator<FakeSource>,
+    owner: Actor,
+    organization: i64,
+    secret: String,
+}
+
+impl Fixture {
+    async fn new() -> Self {
+        let database = testing::database().await;
+        let owner = users::create(
+            &database,
+            NewUser {
+                username: "owner".to_owned(),
+                ..NewUser::default()
+            },
+            false,
+        )
+        .await
+        .unwrap();
+        let owner = Actor::from_user(&owner);
+        let organization = organizations::create(&database, &owner, "acme", "Acme")
+            .await
+            .unwrap()
+            .id;
+        let secret = tokens::create(&database, &owner, organization, None, "CI")
+            .await
+            .unwrap()
+            .secret;
+        let source = Arc::new(FakeSource::default());
+        let evaluator = Evaluator::new(database.clone(), Arc::clone(&source));
+        Self {
+            database,
+            source,
+            evaluator,
+            owner,
+            organization,
+            secret,
+        }
+    }
+
+    async fn upload(&self, sbom: ParsedSbom) -> i64 {
+        let token = tokens::authenticate(&self.database, &self.secret)
+            .await
+            .unwrap()
+            .unwrap();
+        inventory::ingest(
+            &self.database,
+            &token,
+            "acme",
+            "shop",
+            sbom,
+            UploadSource::default(),
+        )
+        .await
+        .unwrap()
+        .project_id
+    }
+
+    async fn paths(&self, project: i64, purl: &str) -> Option<DependencyPaths> {
+        dependencies::paths(&self.database, &self.owner, project, purl)
+            .await
+            .unwrap()
+    }
+
+    async fn edge_count(&self) -> u64 {
+        component_dependencies::Entity::find()
+            .count(&self.database)
+            .await
+            .unwrap()
+    }
+}
+
+fn component(purl: &str, name: &str, version: &str) -> ComponentRef {
+    ComponentRef {
+        purl: purl.to_owned(),
+        name: name.to_owned(),
+        version: Some(version.to_owned()),
+    }
+}
+
+fn lodash_advisory() -> serde_json::Value {
+    json!({
+        "id": "GHSA-35jh-r3h4-6jhm",
+        "modified": "2024-01-01T00:00:00Z",
+        "aliases": ["CVE-2021-23337"],
+        "summary": "Command Injection in lodash",
+        "database_specific": {"severity": "HIGH"}
+    })
+}
+
+#[tokio::test]
+async fn uploads_replace_the_graph_with_the_components() {
+    let fixture = Fixture::new().await;
+    let project = fixture.upload(parse(&shop_document())).await;
+    assert_eq!(fixture.edge_count().await, 4);
+    assert_eq!(
+        fixture.paths(project, LODASH).await,
+        Some(DependencyPaths {
+            paths: vec![vec![
+                component(FRAMEWORK, "web-framework", "2.1.0"),
+                component(ENGINE, "template-engine", "0.9.0"),
+                component(LODASH, "lodash", "4.17.20"),
+            ]],
+            more: 0,
+        })
+    );
+    assert_eq!(
+        fixture.paths(project, LEFT_PAD).await.unwrap().paths,
+        [vec![component(LEFT_PAD, "left-pad", "1.0.0")]]
+    );
+
+    // lodash becomes a direct dependency: the old path goes with the old upload.
+    let mut document = shop_document();
+    document["dependencies"] = json!([
+        {"ref": "shop", "dependsOn": ["lodash", "left-pad"]},
+        {"ref": "framework", "dependsOn": ["engine"]}
+    ]);
+    fixture.upload(parse(&document)).await;
+    assert_eq!(fixture.edge_count().await, 3);
+    assert_eq!(
+        fixture.paths(project, LODASH).await.unwrap().paths,
+        [vec![component(LODASH, "lodash", "4.17.20")]]
+    );
+    assert_eq!(
+        fixture.paths(project, ENGINE).await,
+        Some(DependencyPaths::default()),
+        "linked to nothing the project depends on"
+    );
+
+    // Without a graph, nothing is known any more.
+    document.as_object_mut().unwrap().remove("dependencies");
+    fixture.upload(parse(&document)).await;
+    assert_eq!(fixture.edge_count().await, 0);
+    assert_eq!(fixture.paths(project, LODASH).await, None);
+}
+
+#[tokio::test]
+async fn paths_are_limited_to_the_organization() {
+    let fixture = Fixture::new().await;
+    let project = fixture.upload(parse(&shop_document())).await;
+    let stranger = users::create(
+        &fixture.database,
+        NewUser {
+            username: "stranger".to_owned(),
+            ..NewUser::default()
+        },
+        false,
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        dependencies::paths(
+            &fixture.database,
+            &Actor::from_user(&stranger),
+            project,
+            LODASH
+        )
+        .await,
+        Err(Error::NotFound)
+    ));
+}
+
+#[tokio::test]
+async fn findings_webhooks_and_ci_name_the_direct_dependency() {
+    let fixture = Fixture::new().await;
+    fixture.source.publish(lodash_advisory(), &[LODASH]);
+    let project = fixture.upload(parse(&shop_document())).await;
+    notifications::set(
+        &fixture.database,
+        &fixture.owner,
+        fixture.organization,
+        "https://hooks.example.org/nanobom",
+        Severity::Unknown,
+        true,
+        false,
+    )
+    .await
+    .unwrap();
+    let outcome = fixture
+        .evaluator
+        .run(Trigger::Scheduled, Scope::All, None)
+        .await
+        .unwrap();
+    assert!(outcome.succeeded());
+
+    let listed = findings::list(
+        &fixture.database,
+        &fixture.owner,
+        project,
+        &Filter::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(
+        listed[0].introduced_via,
+        [component(FRAMEWORK, "web-framework", "2.1.0")]
+    );
+
+    let detail = findings::detail(&fixture.database, &fixture.owner, listed[0].id)
+        .await
+        .unwrap();
+    assert_eq!(detail.finding.introduced_via, listed[0].introduced_via);
+    let paths = detail.dependency_paths.unwrap();
+    assert_eq!(paths.paths.len(), 1);
+    assert_eq!(paths.paths[0].len(), 3);
+
+    let deliveries = notifications::new_findings_deliveries(
+        &fixture.database,
+        &outcome,
+        &"https://nanobom.example.org/".parse().unwrap(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(deliveries.len(), 1);
+    assert_eq!(
+        deliveries[0].payload.findings[0].introduced_via,
+        ["web-framework"]
+    );
+
+    // An SBOM without a graph: the finding stays, its path is unknown.
+    let mut document = shop_document();
+    document.as_object_mut().unwrap().remove("dependencies");
+    fixture.upload(parse(&document)).await;
+    let detail = findings::detail(&fixture.database, &fixture.owner, listed[0].id)
+        .await
+        .unwrap();
+    assert_eq!(detail.dependency_paths, None);
+    assert!(detail.finding.introduced_via.is_empty());
+}

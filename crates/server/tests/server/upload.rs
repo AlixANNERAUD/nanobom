@@ -238,6 +238,11 @@ async fn waiting_uploads_return_the_evaluation() {
     assert_eq!(findings[0]["component"], "pkg:npm/lodash@4.17.20");
     assert_eq!(findings[0]["severity"], "high");
     assert_eq!(findings[0]["known_exploited"], false);
+    assert_eq!(
+        findings[0]["introduced_via"],
+        json!(["lodash"]),
+        "a direct dependency introduces itself"
+    );
     let id = nanobom_entity::findings::Entity::find()
         .one(&server.database)
         .await

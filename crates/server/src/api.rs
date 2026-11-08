@@ -286,6 +286,9 @@ struct EvaluationFinding {
     component: String,
     severity: Severity,
     known_exploited: bool,
+    /// The names of the project's direct dependencies that lead to the component; empty when
+    /// the SBOM's dependency graph does not say.
+    introduced_via: Vec<String>,
     url: String,
 }
 
@@ -324,6 +327,15 @@ fn evaluation(run: &Waited, findings: &[Finding], public_url: &Url) -> Evaluatio
                 component: finding.purl.clone(),
                 severity: finding.severity,
                 known_exploited: finding.exploitation.known_exploited,
+                introduced_via: {
+                    let mut names: Vec<String> = finding
+                        .introduced_via
+                        .iter()
+                        .map(|component| component.name.clone())
+                        .collect();
+                    names.dedup();
+                    names
+                },
                 url: notifications::link(public_url, &format!("findings/{}", finding.id)),
             })
             .collect(),
