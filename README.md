@@ -2,7 +2,7 @@
 
 <p align="center">
   <strong>The lightweight, self-hosted SBOM vulnerability tracker.</strong><br>
-  Know what you ship, see what is actually exploited, and stop it in CI —
+  Know what you ship, see what is actually exploited, and stop it in CI,
   with one container and a SQLite file.
 </p>
 
@@ -94,21 +94,21 @@ and fails the job when they cross your threshold. GitLab CI and any other CI wor
 
 The full guide lives at **<https://alixanneraud.github.io/nanobom/>**:
 
-- **Tutorials** — [your first scan](https://alixanneraud.github.io/nanobom/tutorials/first-scan.html),
+- **Tutorials** - [your first scan](https://alixanneraud.github.io/nanobom/tutorials/first-scan.html),
   [gate a repository's CI](https://alixanneraud.github.io/nanobom/tutorials/gate-ci.html).
-- **How-to guides** — [install](https://alixanneraud.github.io/nanobom/how-to/install.html),
+- **How-to guides** - [install](https://alixanneraud.github.io/nanobom/how-to/install.html),
   [generate an SBOM](https://alixanneraud.github.io/nanobom/how-to/generate-sbom.html),
   [single sign-on](https://alixanneraud.github.io/nanobom/how-to/single-sign-on.html),
   [reverse proxy and TLS](https://alixanneraud.github.io/nanobom/how-to/reverse-proxy.html),
   [monitoring](https://alixanneraud.github.io/nanobom/how-to/monitoring.html),
   [backups and upgrades](https://alixanneraud.github.io/nanobom/how-to/maintenance.html),
   [troubleshooting](https://alixanneraud.github.io/nanobom/how-to/troubleshoot.html), …
-- **Reference** — [configuration](https://alixanneraud.github.io/nanobom/reference/configuration.html),
+- **Reference** - [configuration](https://alixanneraud.github.io/nanobom/reference/configuration.html),
   [upload API](https://alixanneraud.github.io/nanobom/reference/upload-api.html),
   [webhook payloads](https://alixanneraud.github.io/nanobom/reference/webhooks.html),
   [roles and permissions](https://alixanneraud.github.io/nanobom/reference/accounts.html),
   [metrics](https://alixanneraud.github.io/nanobom/reference/metrics.html).
-- **Explanation** — [concepts](https://alixanneraud.github.io/nanobom/explanation/concepts.html),
+- **Explanation** - [concepts](https://alixanneraud.github.io/nanobom/explanation/concepts.html),
   [how findings stay up to date](https://alixanneraud.github.io/nanobom/explanation/findings.html),
   [prioritization](https://alixanneraud.github.io/nanobom/explanation/prioritization.html),
   [security model](https://alixanneraud.github.io/nanobom/explanation/security.html),

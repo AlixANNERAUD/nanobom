@@ -49,15 +49,15 @@ The `error` field says what is wrong; the
 [upload API reference](../reference/upload-api.md#status-codes) lists the messages. The usual
 ones:
 
-- `the SBOM must be a CycloneDX JSON document` — an SPDX document, an XML CycloneDX document, or
+- `the SBOM must be a CycloneDX JSON document` - an SPDX document, an XML CycloneDX document, or
   the generator's default format: ask for CycloneDX JSON explicitly (Syft:
   `-o cyclonedx-json=sbom.json`);
-- `unsupported CycloneDX version` — the generator writes a version older than 1.3, or newer
+- `unsupported CycloneDX version` - the generator writes a version older than 1.3, or newer
   than 1.7;
-- `the project slug must be …` — the project name in the URL contains spaces, slashes or other
+- `the project slug must be …` - the project name in the URL contains spaces, slashes or other
   characters. `${GITHUB_REPOSITORY#*/}` and `$CI_PROJECT_NAME` are usually fine; a repository
   name with a dot at the start or with upper-case letters is folded or refused;
-- `fail_on=exploited needs exploitation data (NANOBOM_EXPLOITATION_DATA)` — exploitation data is
+- `fail_on=exploited needs exploitation data (NANOBOM_EXPLOITATION_DATA)` - exploitation data is
   off on this instance: gate on a severity instead.
 
 ### Upload answers 409
@@ -209,14 +209,14 @@ its default, nanobom sends `http://localhost:8080/auth/oidc/callback`.
 The logs say why (`OpenID Connect sign-in refused` or `starting the OpenID Connect sign-in
 failed`):
 
-- `the identity provider could not be reached` — nanobom cannot fetch
+- `the identity provider could not be reached` - nanobom cannot fetch
   `<issuer>/.well-known/openid-configuration`: wrong issuer, provider unreachable from nanobom's
   network, or a redirect (an `http` issuer redirected to `https`, for example), which nanobom does
   not follow;
-- `unexpected issuer URI` — the issuer in the discovery document differs from
+- `unexpected issuer URI` - the issuer in the discovery document differs from
   `NANOBOM_OIDC_ISSUER`. Copy it exactly from the discovery document, including a trailing `/`
   if there is one;
-- `the identity provider refused the sign-in` — usually a wrong client secret, or a client not
+- `the identity provider refused the sign-in` - usually a wrong client secret, or a client not
   allowed to use the authorization code flow.
 
 ### Groups or administrator rights are not applied
