@@ -105,6 +105,13 @@ writes every timestamp in UTC; PostgreSQL stores them as `timestamp with time zo
 whose result order matters state it (`ORDER BY`), since PostgreSQL, unlike SQLite, returns rows
 in no particular order otherwise.
 
+SQLite lets one connection write at a time. Every transaction that writes takes the write lock
+when it starts (`BEGIN IMMEDIATE`), and a connection waits up to 10 seconds for it while another
+holds it, so concurrent writes (an upload during a run, a form, the webhook retries) queue up
+instead of failing. A transaction that took the lock only at its first write could fail at once
+if another connection had written since it started reading. PostgreSQL locks rows, not the
+database, and needs none of this.
+
 ## Resources
 
 nanobom does its work in short bursts, after uploads and at night, and is idle the rest of the

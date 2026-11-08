@@ -50,7 +50,6 @@ use sea_orm::{
     ActiveModelTrait,
     ActiveValue::Set,
     ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
-    TransactionTrait,
     sea_query::{Expr, OnConflict},
 };
 use serde::{Deserialize, Serialize};
@@ -592,7 +591,7 @@ async fn expire_ignores(
             .all(database)
             .await?;
         for finding in expired {
-            let transaction = database.begin().await?;
+            let transaction = crate::database::begin_write(database).await?;
             let id = finding.id;
             let mut finding: findings::ActiveModel = finding.into();
             finding.status = Set(Status::Open.as_str().to_owned());
@@ -694,7 +693,7 @@ async fn update_project(
         .one(database)
         .await?
         .ok_or_else(|| sea_orm::DbErr::RecordNotFound("organization".to_owned()))?;
-    let transaction = database.begin().await?;
+    let transaction = crate::database::begin_write(database).await?;
     let now = Utc::now().fixed_offset();
     let existing = findings::Entity::find()
         .filter(findings::Column::ProjectId.eq(project.id))

@@ -221,7 +221,7 @@ pub async fn set_role(
     user_id: i64,
     role: Role,
 ) -> Result<Member> {
-    let transaction = database.begin().await?;
+    let transaction = crate::database::begin_write(database).await?;
     let membership = manual_membership(&transaction, organization_id, user_id).await?;
     let current = membership
         .as_ref()
@@ -246,7 +246,7 @@ pub async fn remove(
     organization_id: i64,
     user_id: i64,
 ) -> Result<()> {
-    let transaction = database.begin().await?;
+    let transaction = crate::database::begin_write(database).await?;
     let membership = manual_membership(&transaction, organization_id, user_id).await?;
     let current = membership
         .as_ref()
@@ -277,7 +277,7 @@ pub async fn synchronize(
     user_id: i64,
     roles: &BTreeMap<String, Role>,
 ) -> Result<()> {
-    let transaction = database.begin().await?;
+    let transaction = crate::database::begin_write(database).await?;
     memberships::Entity::delete_many()
         .filter(memberships::Column::UserId.eq(user_id))
         .filter(memberships::Column::Source.eq(Source::Synchronized.as_str()))

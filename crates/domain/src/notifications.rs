@@ -42,7 +42,7 @@ use nanobom_osv::Severity;
 use reqwest::Url;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseConnection,
-    EntityTrait, ModelTrait, QueryFilter, QueryOrder, TransactionTrait,
+    EntityTrait, ModelTrait, QueryFilter, QueryOrder,
 };
 use serde::{Deserialize, Serialize};
 
@@ -676,7 +676,7 @@ pub async fn queue_new_findings(
     outcome: &RunOutcome,
     public_url: &Url,
 ) -> Result<Vec<i64>> {
-    let transaction = database.begin().await?;
+    let transaction = crate::database::begin_write(database).await?;
     let deliveries = new_findings_deliveries(&transaction, outcome, public_url).await?;
     let ids = enqueue(&transaction, &deliveries).await?;
     transaction.commit().await?;
@@ -690,7 +690,7 @@ pub async fn queue_stale(
     stale_after_days: u32,
     public_url: &Url,
 ) -> Result<Vec<i64>> {
-    let transaction = database.begin().await?;
+    let transaction = crate::database::begin_write(database).await?;
     let deliveries = stale_deliveries(&transaction, stale_after_days, public_url).await?;
     let ids = enqueue(&transaction, &deliveries).await?;
     transaction.commit().await?;

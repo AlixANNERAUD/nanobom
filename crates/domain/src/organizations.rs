@@ -58,7 +58,7 @@ pub async fn create(
 ) -> Result<Organization> {
     let slug = names::slug(Field::OrganizationSlug, slug)?;
     let name = names::display_name(Field::OrganizationName, name)?;
-    let transaction = database.begin().await?;
+    let transaction = crate::database::begin_write(database).await?;
     if find_model_by_slug(&transaction, &slug).await?.is_some() {
         return Err(Error::conflict(Problem::OrganizationExists { slug }));
     }
