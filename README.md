@@ -1,5 +1,9 @@
 # nanobom
 
+[![CI](https://github.com/AlixANNERAUD/nanobom/actions/workflows/ci.yml/badge.svg)](https://github.com/AlixANNERAUD/nanobom/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/github/AlixANNERAUD/nanobom/graph/badge.svg)](https://codecov.io/github/AlixANNERAUD/nanobom)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 A lightweight, self-hosted SBOM vulnerability tracker. Your CI uploads a CycloneDX SBOM of each
 project; nanobom checks every component against [OSV](https://osv.dev) after each upload and
 every night, keeps a history of the vulnerabilities found (open, ignored, fixed), and tells you
@@ -203,8 +207,13 @@ cargo-deny, wasm-bindgen) and runs the tasks:
 mise install
 mise run dev      # server with live reload on http://127.0.0.1:3000
 mise run check    # formatting, clippy, tests and cargo-deny, as CI
+mise run coverage # tests with coverage, written to lcov.info
 mise run build    # release binary and site in target/
 ```
+
+Pull request titles follow [Conventional Commits](https://www.conventionalcommits.org)
+(`feat: …`, `fix: …`): they become the commits on `main` from which releases and the
+[changelog](CHANGELOG.md) are made. [RELEASING.md](RELEASING.md) describes the release process.
 
 The workspace has one crate per concern: `domain` (inventory, OSV matching, findings,
 organizations and the access rules), `osv`, `authentication`, `entity` and `migration`

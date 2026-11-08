@@ -1,0 +1,93 @@
+# Releases with release-plz: merging to main opens or updates a release PR (version and
+# changelog); merging that PR tags vX.Y.Z and drafts the GitHub release, then release.yml
+# attaches the archives, publishes the images and publishes the release. See RELEASING.md.
+
+[workspace]
+release_always = false
+# An application, not a library: no public API to check, nothing on crates.io. Versions come
+# from the vX.Y.Z git tags.
+semver_check = false
+git_only = true
+dependencies_update = false
+# Every crate inherits the workspace version and reads it from the same tags; only `nanobom`
+# creates them and has a changelog.
+git_tag_name = "v{{ version }}"
+changelog_update = false
+git_tag_enable = false
+git_release_enable = false
+pr_name = "{% if version %}chore: release v{{ version }}{% else %}chore: release{% endif %}"
+git_release_body = "{{ changelog }}"
+# Published by release.yml once the archives are attached.
+git_release_draft = true
+
+[changelog]
+header = """
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+"""
+protect_breaking_commits = true
+sort_commits = "oldest"
+commit_parsers = [
+  { message = "^Merge pull request", skip = true },
+  { message = "^chore: release", skip = true },
+  { message = "^feat", group = "Added" },
+  { message = "^fix", group = "Fixed" },
+  { message = "^perf", group = "Performance" },
+  { message = "^refactor", group = "Changed" },
+  { message = "^docs?", group = "Documentation" },
+  { message = "^deprecated", group = "Deprecated" },
+  { message = "^security", group = "Security" },
+  { message = "^revert", group = "Reverted" },
+  { message = "^(chore|ci|build|test|style)", group = "Miscellaneous" },
+  { message = "^.*", group = "Other" },
+]
+
+[[package]]
+name = "nanobom"
+version_group = "nanobom"
+changelog_update = true
+changelog_path = "CHANGELOG.md"
+changelog_include = [
+  "nanobom-app",
+  "nanobom-authentication",
+  "nanobom-domain",
+  "nanobom-entity",
+  "nanobom-frontend",
+  "nanobom-migration",
+  "nanobom-osv",
+]
+git_tag_enable = true
+git_release_enable = true
+git_release_name = "nanobom v{{ version }}"
+
+[[package]]
+name = "nanobom-app"
+version_group = "nanobom"
+
+[[package]]
+name = "nanobom-authentication"
+version_group = "nanobom"
+
+[[package]]
+name = "nanobom-domain"
+version_group = "nanobom"
+
+[[package]]
+name = "nanobom-entity"
+version_group = "nanobom"
+
+[[package]]
+name = "nanobom-frontend"
+version_group = "nanobom"
+
+[[package]]
+name = "nanobom-migration"
+version_group = "nanobom"
+
+[[package]]
+name = "nanobom-osv"
+version_group = "nanobom"
