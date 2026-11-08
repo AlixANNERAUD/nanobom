@@ -32,13 +32,19 @@ pub struct RunRequest {
     pub triggered_by: Option<i64>,
 }
 
-/// Where notifications go.
+/// Longest time the exploitation data is refreshed for after a run, while uploads wait.
+pub const EXPLOITATION_REFRESH_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Where notifications go, and how long the work after a run may hold waiting uploads.
 #[derive(Debug, Clone)]
 pub struct NotificationSettings {
     pub public_url: Url,
     pub failure_webhook: Option<Url>,
     /// Days without an SBOM after which a project is stale (0: never).
     pub stale_after_days: u32,
+    /// Longest refresh of the exploitation data after a run (`EXPLOITATION_REFRESH_TIMEOUT`);
+    /// a refresh taking longer is abandoned and counts as failed.
+    pub exploitation_refresh_timeout: Duration,
 }
 
 /// A request waiting in the queue, with whoever waits for its outcome.
@@ -85,11 +91,15 @@ impl Runner {
                     .await
                 {
                     Ok(outcome) => {
-                        finish(&database, &notifier, &settings, feeds.as_deref(), &outcome).await;
+                        // The exploitation data comes before the waiters: an upload waiting
+                        // with `fail_on=exploited` needs the CVEs first seen in this run.
+                        record(&database, &settings, feeds.as_deref(), &outcome).await;
                         for waiter in waiters {
                             // A waiter that gave up has dropped its receiver.
                             let _ = waiter.send(outcome.clone());
                         }
+                        // Gauges and webhooks can be slow; nobody waits for them.
+                        notify(&database, &notifier, &settings, &outcome).await;
                     }
                     // Dropping the waiters releases them without an outcome.
                     Err(error) => {
@@ -173,32 +183,50 @@ impl Runner {
     }
 }
 
-/// Notifications and metrics after a run.
-async fn finish(
+/// What a waiting upload needs after a run: the run's metric and, when the run succeeded, the
+/// exploitation data of its scope, refreshed within `settings.exploitation_refresh_timeout`.
+async fn record(
     database: &DatabaseConnection,
-    notifier: &Notifier,
     settings: &NotificationSettings,
     feeds: Option<&Feeds>,
     outcome: &RunOutcome,
 ) {
     metrics::record_run(outcome);
+    let Some(feeds) = feeds.filter(|_| outcome.succeeded()) else {
+        return;
+    };
+    let refresh = exploitation::refresh(database, feeds, outcome.scope);
+    match tokio::time::timeout(settings.exploitation_refresh_timeout, refresh).await {
+        Ok(Ok(summary)) => tracing::info!(
+            cves = summary.cves,
+            known_exploited = summary.known_exploited,
+            "exploitation data refreshed"
+        ),
+        Ok(Err(error)) => {
+            tracing::warn!(%error, "refreshing exploitation data failed");
+            metrics::record_exploitation_refresh_failure();
+        }
+        Err(_) => {
+            tracing::warn!(
+                seconds = settings.exploitation_refresh_timeout.as_secs(),
+                "refreshing exploitation data took too long; the previous data is kept"
+            );
+            metrics::record_exploitation_refresh_failure();
+        }
+    }
+}
+
+/// Instance-wide gauges and notifications after a run, once its waiters are answered.
+async fn notify(
+    database: &DatabaseConnection,
+    notifier: &Notifier,
+    settings: &NotificationSettings,
+    outcome: &RunOutcome,
+) {
     metrics::refresh_open_findings(database).await;
+    metrics::refresh_known_exploited(database).await;
     metrics::refresh_stale_projects(database, settings.stale_after_days).await;
     if outcome.succeeded() {
-        if let Some(feeds) = feeds {
-            match exploitation::refresh(database, feeds, outcome.scope).await {
-                Ok(summary) => tracing::info!(
-                    cves = summary.cves,
-                    known_exploited = summary.known_exploited,
-                    "exploitation data refreshed"
-                ),
-                Err(error) => {
-                    tracing::warn!(%error, "refreshing exploitation data failed");
-                    metrics::record_exploitation_refresh_failure();
-                }
-            }
-        }
-        metrics::refresh_known_exploited(database).await;
         match notifications::new_findings_deliveries(database, outcome, &settings.public_url).await
         {
             Ok(deliveries) => {

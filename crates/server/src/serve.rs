@@ -131,6 +131,7 @@ pub async fn run(
             public_url: options.public_url.clone(),
             failure_webhook: options.failure_webhook_url.clone(),
             stale_after_days: options.stale_after_days,
+            exploitation_refresh_timeout: runner::EXPLOITATION_REFRESH_TIMEOUT,
         },
         feeds,
     );

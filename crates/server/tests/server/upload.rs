@@ -1,13 +1,22 @@
 //! The SBOM upload endpoint.
 
-use crate::common::{TestServer, body_json, sbom_document, server, user};
+use std::time::{Duration, Instant};
+
+use crate::common::{
+    TestServer, body_json, sbom_document, server, server_with_exploitation_timeout, user,
+};
 use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
-use nanobom_domain::{organizations, projects, tokens};
+use nanobom_domain::{notifications, organizations, projects, tokens};
+use nanobom_osv::Severity;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, PaginatorTrait};
 use serde_json::json;
+use wiremock::{
+    Mock, MockServer, ResponseTemplate,
+    matchers::{method, path},
+};
 
 fn upload(path: &str, token: Option<&str>, body: Vec<u8>) -> Request<Body> {
     let mut request = Request::put(path).header(header::CONTENT_TYPE, "application/json");
@@ -369,4 +378,96 @@ async fn evaluations_that_take_too_long_time_out() {
 
     server.source.resume();
     server.runner.wait_until_idle().await;
+}
+
+#[tokio::test]
+async fn waiting_uploads_are_answered_before_webhook_deliveries() {
+    let receiver = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/hook"))
+        .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(8)))
+        .mount(&receiver)
+        .await;
+    let server = server(&["--upload-wait-seconds", "4"]).await;
+    server
+        .source
+        .publish(lodash_advisory(), &["pkg:npm/lodash@4.17.20"]);
+    let owner = user(&server.database, "owner").await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    notifications::set(
+        &server.database,
+        &owner,
+        organization.id,
+        &format!("{}/hook", receiver.uri()),
+        Severity::Low,
+        true,
+        false,
+    )
+    .await
+    .unwrap();
+    let token = tokens::create(&server.database, &owner, organization.id, None, "CI")
+        .await
+        .unwrap()
+        .secret;
+
+    // The run opens a finding, so its `findings.new` delivery takes 8 seconds.
+    let started = Instant::now();
+    let (status, body) = upload_web(&server, &token, "?wait=true").await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert_eq!(body["evaluation"]["status"], "succeeded", "{body}");
+    assert_eq!(body["evaluation"]["open"]["high"], 1);
+    assert!(started.elapsed() < Duration::from_secs(4));
+}
+
+#[tokio::test]
+async fn a_hanging_exploitation_feed_holds_waiting_uploads_only_up_to_the_bound() {
+    let feeds = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/kev.json"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"vulnerabilities": []}))
+                .set_delay(Duration::from_secs(20)),
+        )
+        .mount(&feeds)
+        .await;
+    let kev_url = format!("{}/kev.json", feeds.uri());
+    let epss_url = format!("{}/epss", feeds.uri());
+    let server = server_with_exploitation_timeout(
+        &[
+            "--kev-url",
+            &kev_url,
+            "--epss-url",
+            &epss_url,
+            "--upload-wait-seconds",
+            "10",
+        ],
+        Duration::from_secs(1),
+    )
+    .await;
+    server
+        .source
+        .publish(lodash_advisory(), &["pkg:npm/lodash@4.17.20"]);
+    let token = acme_token(&server).await;
+
+    let started = Instant::now();
+    let (status, body) = upload_web(&server, &token, "?fail_on=exploited").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["evaluation"]["status"], "succeeded", "{body}");
+    assert_eq!(body["evaluation"]["known_exploited"], 0);
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed >= Duration::from_secs(1) && elapsed < Duration::from_secs(10),
+        "{elapsed:?}"
+    );
+    assert!(
+        nanobom_entity::exploitation::Entity::find()
+            .all(&server.database)
+            .await
+            .unwrap()
+            .is_empty(),
+        "an abandoned refresh stores nothing"
+    );
 }
