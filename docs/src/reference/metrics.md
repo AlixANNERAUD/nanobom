@@ -32,8 +32,8 @@ Counters start at zero at each start, and appear only once something has been co
 
 ## Logs
 
-nanobom writes one JSON object per line on standard output (`NANOBOM_LOG_FORMAT=text` for
-humans), with the event's fields at the top level:
+nanobom writes one JSON object per line on standard error (`NANOBOM_LOG_FORMAT=text` for
+humans; standard output is kept for command results), with the event's fields at the top level:
 
 ```json
 {"timestamp":"2026-11-08T03:00:41.120Z","level":"INFO","message":"run succeeded","run":42,"scope":"all","components":1834,"vulnerabilities":97,"new":2,"fixed":5,"seconds":38.2,"target":"nanobom_domain::evaluation"}
