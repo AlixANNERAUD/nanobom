@@ -157,8 +157,9 @@ default). Every proxy between CI and nanobom must allow that, or CI gets a `504`
 while the run goes on:
 
 - nginx: `proxy_read_timeout 330s;` on the API location (the default is 60 seconds);
-- Traefik 3: `transport.respondingTimeouts.readTimeout` of the entry point, 60 seconds by
-  default;
+- Traefik 3: the entry point's `transport.respondingTimeouts.readTimeout` defaults to 60 seconds;
+  raise it above the wait as a precaution, and keep `forwardingTimeouts.responseHeaderTimeout`
+  unset (no limit) or above it;
 - Caddy does not limit how long a proxied response takes by default (unless
   `response_header_timeout` is set);
 - cloud load balancers often have an idle timeout of 60 seconds that needs raising.

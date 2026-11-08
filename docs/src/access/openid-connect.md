@@ -65,7 +65,7 @@ Consequences worth knowing:
 - A single sign-on user only exists after their first sign-in, so they can only be added to an
   organization by hand after that (group mapping, below, avoids the wait).
 - With `NANOBOM_OIDC_CREATE_USERS=false`, only users who signed in before can sign in; others see
-  "This account is not known here". Turn it off once everyone who should have access has an
+  "This account is not known here and new accounts are not created automatically". Turn it off once everyone who should have access has an
   account, if the provider serves more people than nanobom should.
 - Personal organizations are created for new single sign-on users too, according to
   `NANOBOM_PERSONAL_ORGANIZATIONS`.
@@ -212,8 +212,8 @@ The sign-in page shows a short message and the logs say why:
 | Message | Cause |
 | --- | --- |
 | The identity provider could not sign you in | Discovery failed, the provider refused the sign-in (wrong redirect URI or client secret), or its answer could not be verified; see the `OpenID Connect sign-in refused` or `starting the OpenID Connect sign-in failed` log line |
-| The sign-in took too long | The session cookie set when leaving for the provider was not sent back: the sign-in took longer than the session, or the public URL's host or scheme differs from the address in the browser |
-| This account is not known here | `NANOBOM_OIDC_CREATE_USERS=false` and the user never signed in |
+| The sign-in took too long; please try again | The session cookie set when leaving for the provider was not sent back: the sign-in took longer than the session, or the public URL's host or scheme differs from the address in the browser |
+| This account is not known here and new accounts are not created automatically | `NANOBOM_OIDC_CREATE_USERS=false` and the user never signed in |
 | This account is disabled | An instance administrator disabled the user |
 
 See also [Troubleshooting](../troubleshooting.md#single-sign-on).

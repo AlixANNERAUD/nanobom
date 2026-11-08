@@ -46,7 +46,10 @@ with `403` when:
 
 Together with `SameSite=Lax` cookies, which browsers do not send with cross-site `POST` requests,
 this covers current and older browsers without a token in every form. Requests carrying an
-`Authorization` header are not checked, since they do not rely on cookies.
+`Authorization` header are not checked, since they do not rely on cookies, and neither are
+requests carrying neither `Sec-Fetch-Site` nor `Origin`: browsers send at least one of them on a
+cross-site `POST`, so such requests come from other clients, which a cookie-based attack cannot
+use.
 
 ## Passwords and sign-in
 

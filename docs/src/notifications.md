@@ -96,7 +96,8 @@ notified as such.
 
 ### `projects.stale`
 
-After a **scheduled** run, each organization with an enabled webhook receives the projects that
+After a **successful scheduled** run (and unless `NANOBOM_STALE_AFTER_DAYS` is `0`), each
+organization with an enabled webhook receives the projects that
 became [stale](findings/triage.md#stale-projects) since they were last notified, whatever the
 minimum severity and the known exploited option:
 

@@ -123,8 +123,8 @@ The upload API's messages stay in English on purpose: they are read in CI logs.
 ## Documentation
 
 This book lives in `docs/` and is built with [mdBook](https://rust-lang.github.io/mdBook/):
-`mise run docs` builds it into `docs/book/`, and `mise exec -- mdbook serve docs` serves it with
-live reload on <http://localhost:3000>. It is published to GitHub Pages from `main`. Document
+`mise run docs` builds it into `docs/book/`, and `mise exec -- mdbook serve docs --port 3001` serves it with
+live reload on <http://localhost:3001> (port 3000 is the development server's). It is published to GitHub Pages from `main`. Document
 behavior where users and operators look for it, and check options, defaults and messages against
 the code.
 

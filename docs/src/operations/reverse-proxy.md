@@ -110,8 +110,8 @@ volumes:
 
 No port is published: Traefik reaches the container on the Docker network. Traefik discards the
 `X-Forwarded-*` headers of untrusted clients and sets its own. Traefik 3 limits reading a request
-to 60 seconds by default; raise it on the entry point for waiting uploads, in Traefik's static
-configuration:
+to 60 seconds by default (`respondingTimeouts.readTimeout`); waiting uploads hold their request
+longer, so raise it on the entry point as a precaution, in Traefik's static configuration:
 
 ```yaml
 entryPoints:

@@ -56,6 +56,7 @@ alone on standard output, so a script can capture it:
 
 All are optional. Empty `source_commit` and `image_tag` count as absent; control characters are
 refused. `fail_on` is trimmed and case-insensitive; `wait` accepts exactly `true` or `false`.
+Findings of unknown severity (`open.unknown`) never reach a severity threshold, not even `low`.
 
 ## Waiting for the evaluation
 
@@ -128,7 +129,7 @@ A successful upload returns `201 Created` when it created the project, `200 OK` 
 | `run_id` | The run's identifier, `null` when timed out |
 | `open` | The project's **open** findings by severity; ignored findings are not counted |
 | `known_exploited` | How many open findings are known exploited |
-| `findings` | The open findings, known exploited first, then by severity and EPSS score; at most 100 |
+| `findings` | The open findings, most severe first, known exploited first within a severity, then by EPSS score; at most 100, so a long list drops the least severe |
 
 `open` and `findings` describe the project's findings as they are when the response is written.
 After a `failed` or `timed_out` evaluation, they are the findings of the previous successful run,
