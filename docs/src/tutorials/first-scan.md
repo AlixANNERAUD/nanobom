@@ -46,8 +46,8 @@ Your CI will send SBOMs to an organization, with an upload token of that organiz
 
 1. Under **New organization**, enter `Acme` as the name and `acme` as the slug, then **Create**.
 2. Open **Acme**, then **Settings**.
-3. Under **Upload tokens**, enter `tutorial` as the token name, leave the scope on **Whole
-   organization**, and **Create token**.
+3. Under **API tokens**, enter `tutorial` as the token name, leave the project on **Whole
+   organization** and the scope on **Upload and read**, and **Create token**.
 4. Copy the token: it starts with `nanobom_`, and it will not be shown again.
 
 In the terminal, keep it in a variable for the next steps:

@@ -1,9 +1,10 @@
 # Accounts, roles and permissions
 
 Who can see and do what depends on two things: **instance administration**, a flag on the user
-account, and the user's **organization role**, per organization. Upload tokens are not user
-accounts: they authenticate CI on the [upload API](upload-api.md#tokens) and the
-[VEX API](vex-api.md) only.
+account, and the user's **organization role**, per organization. API tokens are not user
+accounts: they authenticate CI and scripts on the [upload API](upload-api.md#tokens), the
+[VEX API](vex-api.md) and the [read API](read-api.md) only, where they read as viewers of their
+organization.
 
 ## Organization roles
 
@@ -16,7 +17,7 @@ Each member of an organization has one of four roles, each including the ones be
 | Start a run (**Check now**) | | ✓ | ✓ | ✓ |
 | Add, change and remove members other than owners | | | ✓ | ✓ |
 | Delete projects | | | ✓ | ✓ |
-| Create and revoke upload tokens | | | ✓ | ✓ |
+| Create and revoke API tokens, upload or read | | | ✓ | ✓ |
 | Configure the webhook | | | ✓ | ✓ |
 | Rename the organization | | | ✓ | ✓ |
 | Grant and remove the owner role | | | | ✓ |

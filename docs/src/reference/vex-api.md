@@ -13,11 +13,10 @@ PUT /api/organizations/{organization}/projects/{project}/vex
 
 | Method | Authentication | Does |
 | --- | --- | --- |
-| `GET` | `Authorization: Bearer nanobom_…` (an [upload token](upload-api.md#tokens)), or the session of a signed-in member (any role) | Returns the project's findings as a CycloneDX 1.6 JSON document |
-| `PUT` | `Authorization: Bearer nanobom_…` only | Applies the statements of a CycloneDX VEX document to the project's open findings |
+| `GET` | A [token](upload-api.md#tokens) of either scope, in `Authorization: Bearer nanobom_…` or `X-Api-Key`, or the session of a signed-in member (any role), as on the [read API](read-api.md#authentication) | Returns the project's findings as a CycloneDX 1.6 JSON document |
+| `PUT` | `Authorization: Bearer nanobom_…` only, with a token of the `upload` scope | Applies the statements of a CycloneDX VEX document to the project's open findings |
 
-A token reaches the projects it may upload to: an organization token any project of its
-organization, a project token its own project. Any other project, like a missing one, is a `404`:
+A token reaches its organization's projects, or its own project for a project token. Any other project, like a missing one, is a `404`:
 unlike uploads, these endpoints never create a project.
 
 Slugs are case-insensitive. The body of a `PUT` may be at most `NANOBOM_MAXIMUM_SBOM_SIZE` MiB
@@ -183,6 +182,7 @@ Errors are English JSON, `{"error": "…"}`.
 | --- | --- |
 | `200` | Exported, or imported |
 | `401` | `GET`: neither a valid token nor a session; `PUT`: no valid token. The response has a `WWW-Authenticate: Bearer` header |
+| `403` | `PUT` with a read token |
 | `404` | The organization or project does not exist, or the token or member does not reach it |
 | `413` | The body is larger than `NANOBOM_MAXIMUM_SBOM_SIZE` |
 | `422` | Invalid document |
@@ -191,7 +191,8 @@ Errors are English JSON, `{"error": "…"}`.
 | Status | `error` |
 | --- | --- |
 | `401` | `a valid upload token is required in the Authorization header (Bearer)` |
-| `401` | `sign in, or send an upload token in the Authorization header (Bearer)` (`GET` without either) |
+| `401` | `sign in, or send a token in the Authorization header (Bearer) or in X-Api-Key` (`GET` without either) |
+| `403` | `this token is read-only: uploads need a token with the upload scope` |
 | `404` | `not found` |
 | `422` | `the VEX document is not valid JSON: …` |
 | `422` | `the VEX document must be a CycloneDX JSON document (bomFormat "CycloneDX")` |

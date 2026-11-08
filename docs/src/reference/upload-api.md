@@ -20,20 +20,27 @@ The body may be at most `NANOBOM_MAXIMUM_SBOM_SIZE` MiB (16 by default).
 
 ## Tokens
 
-Upload tokens are random 256-bit values prefixed with `nanobom_`. nanobom stores only their
-SHA-256 digest: a token is shown once, at creation, and cannot be recovered, only revoked and
-replaced. Tokens authenticate on the upload API and the [VEX API](vex-api.md) only, never on the
-interface.
+Tokens are random 256-bit values prefixed with `nanobom_`. nanobom stores only their SHA-256
+digest: a token is shown once, at creation, and cannot be recovered, only revoked and replaced.
+Tokens authenticate on the upload API, the [VEX API](vex-api.md) and the
+[read API](read-api.md), never on the interface.
 
-| Kind | Created with | May |
+A token has a reach, its organization or one project, and a scope:
+
+| Reach | Created with | May |
 | --- | --- | --- |
-| **Organization token** | scope **Whole organization** in **Settings → Upload tokens**, or `nanobom token create` without `--project` | upload to any project of its organization, and create projects by uploading to a new slug |
-| **Project token** | a project chosen as scope, or `--project web` | upload to that project only; it never creates one, so it can only be created once the project exists |
+| **Organization token** | project **Whole organization** in **Settings → API tokens**, or `nanobom token create` without `--project` | reach any project of its organization; with the upload scope, create projects by uploading to a new slug |
+| **Project token** | a project chosen, or `--project web` | reach that project only; it never creates one, so it can only be created once the project exists |
+
+| Scope | Created with | May |
+| --- | --- | --- |
+| **`upload`** (default) | scope **Upload and read**, or `--scope upload` | upload SBOMs, import VEX documents, and read |
+| **`read`** | scope **Read only**, or `--scope read` | read only, through the [read API](read-api.md) and the VEX export; uploads and VEX imports answer `403` |
 
 Tokens are created and revoked by the organization's admins
-([roles](accounts.md#organization-roles)) in **Settings → Upload tokens**, which shows each
-token's scope and when it was last used, or with
-[`nanobom token`](command-line.md#nanobom-token).
+([roles](accounts.md#organization-roles)) in **Settings → API tokens**, which shows each
+token's project, scope and last use, or with [`nanobom token`](command-line.md#nanobom-token).
+Which token to give to what is discussed in [Tokens and scopes](../explanation/tokens.md).
 
 ## The document
 
@@ -224,7 +231,7 @@ not of this SBOM.
 | `200` | The SBOM replaced the project's components | |
 | `201` | The SBOM created the project | |
 | `401` | No `Authorization: Bearer` header, or a token that is unknown or revoked | Check the secret in CI; the response has a `WWW-Authenticate: Bearer` header |
-| `403` | A project token used for another existing project | Use that project's slug, or an organization token |
+| `403` | A project token used for another existing project, or a read token | Use that project's slug, or an organization token; upload with a token of the upload scope |
 | `404` | The organization does not exist or is not the token's; or a project token used for a project that does not exist | Check the organization slug in the URL; create the project first (with an organization token) |
 | `409` | With `fail_on`: the evaluation succeeded and open findings reach the threshold | Fix or triage the findings listed in `evaluation.findings` |
 | `413` | The body is larger than `NANOBOM_MAXIMUM_SBOM_SIZE` (16 MiB by default) | Raise the limit, or split the SBOM; this error's body is plain text, not JSON |
@@ -245,6 +252,7 @@ cut to 200 characters, followed by `…`.
 | --- | --- |
 | `401` | `a valid upload token is required in the Authorization header (Bearer)` |
 | `403` | `this token does not allow uploads to this project` |
+| `403` | `this token is read-only: uploads need a token with the upload scope` |
 | `404` | `not found` |
 | `422` | `wait must be true or false` |
 | `422` | `fail_on must be critical, high, medium, low or exploited` |
@@ -336,6 +344,7 @@ problems (`Content-Type: application/problem+json`):
 | `400` | An invalid document: any [document error](#error-messages) of the native API, XML and SPDX tag-value included | Problem |
 | `401` | No `X-Api-Key`, or a token that is unknown or revoked | `a valid nanobom upload token is required in the X-Api-Key header` |
 | `403` | A project token used for another existing project | `Access to the specified project is forbidden` |
+| `403` | A read token | `This nanobom token is read-only: uploads need a token with the upload scope.` |
 | `404` | A missing project without `autoCreate`, or with a project token | `The project could not be found.` |
 | `409` | `autoCreate` and another upload created the same project first: send the upload again | `the project "…" already exists` |
 | `413` | An SBOM larger than `NANOBOM_MAXIMUM_SBOM_SIZE` | Plain text |

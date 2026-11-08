@@ -15,8 +15,9 @@ request without replacing anything, use a separate project (`web-pr`), or none a
 
 ## Create an upload token
 
-An organization's admins create tokens in **Settings → Upload tokens**: a name, and a scope,
-either **Whole organization** or one project. Copy the token when it is shown: it is shown once.
+An organization's admins create tokens in **Settings → API tokens**: a name, a project, either
+**Whole organization** or one project, and the scope **Upload and read** (a **Read only** token
+cannot upload). Copy the token when it is shown: it is shown once.
 
 - Use an **organization token** for the first upload of a project: it creates the project.
 - Then prefer a **project token** when a repository builds one project: a leaked token reaches

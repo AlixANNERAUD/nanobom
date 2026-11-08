@@ -94,6 +94,7 @@ upload to nanobom with a new address and key: see [Dependency-Track clients](htt
   or PostgreSQL; no queue, no cache server, no vulnerability mirror to keep in sync.
 - Organizations and roles, local accounts and OpenID Connect single sign-on (Keycloak, Zitadel,
   Authentik, …) with roles mapped from groups.
+- A read-only JSON API, described in OpenAPI, for dashboards and scripts, with read-only tokens.
 - Prometheus metrics, health check, JSON logs, online backups.
 - Server-rendered interface that works without JavaScript, in English and French, light and
   dark.
@@ -113,6 +114,7 @@ The full guide lives at **<https://alixanneraud.github.io/nanobom/>**:
   [troubleshooting](https://alixanneraud.github.io/nanobom/how-to/troubleshoot.html), …
 - **Reference** - [configuration](https://alixanneraud.github.io/nanobom/reference/configuration.html),
   [upload API](https://alixanneraud.github.io/nanobom/reference/upload-api.html),
+  [read API](https://alixanneraud.github.io/nanobom/reference/read-api.html),
   [webhook payloads](https://alixanneraud.github.io/nanobom/reference/webhooks.html),
   [roles and permissions](https://alixanneraud.github.io/nanobom/reference/accounts.html),
   [metrics](https://alixanneraud.github.io/nanobom/reference/metrics.html).

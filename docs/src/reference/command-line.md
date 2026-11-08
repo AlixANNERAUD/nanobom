@@ -18,7 +18,7 @@ In the container image, run commands with `docker exec <container> /app/nanobom 
 | `nanobom migrate` | Apply pending database migrations and exit. |
 | `nanobom backup <destination>` | Write a consistent copy of the live database to a new file. |
 | `nanobom create-administrator` | Create a local instance administrator. |
-| `nanobom token create`, `list`, `revoke` | Manage upload tokens. |
+| `nanobom token create`, `list`, `revoke` | Manage API tokens. |
 | `nanobom healthcheck` | Check that the running server is healthy. |
 
 `create-administrator` and `token` apply pending migrations first, so they work on a new
@@ -64,18 +64,20 @@ Creates a local account that is an instance administrator, typically the first o
 
 ## `nanobom token`
 
-Manages upload tokens with direct access to the database, like **Settings → Upload tokens**.
+Manages API tokens with direct access to the database, like **Settings → API tokens**.
 
 | Command | Flags | |
 | --- | --- | --- |
-| `nanobom token create` | `--organization` (`NANOBOM_TOKEN_ORGANIZATION`), `--name` (`NANOBOM_TOKEN_NAME`), `--project` (`NANOBOM_TOKEN_PROJECT`, optional) | Create a token and print it. Without `--project`, the token covers the organization and may create projects. |
+| `nanobom token create` | `--organization` (`NANOBOM_TOKEN_ORGANIZATION`), `--name` (`NANOBOM_TOKEN_NAME`), `--project` (`NANOBOM_TOKEN_PROJECT`, optional), `--scope` (`NANOBOM_TOKEN_SCOPE`, `upload` or `read`, default `upload`) | Create a token and print it. Without `--project`, the token covers the organization and, with the `upload` scope, may create projects. A `read` token only reads ([scopes](upload-api.md#tokens)). |
 | `nanobom token list` | `--organization` (`NANOBOM_TOKEN_ORGANIZATION`) | List an organization's tokens. |
 | `nanobom token revoke` | `--id` | Revoke a token, by the identifier `token list` prints. |
 
 ```sh
 nanobom token create --organization acme --name "web CI" --project web
+nanobom token create --organization acme --name Grafana --scope read
 nanobom token list --organization acme
-# 7	nanobom_3f9a1c	web CI	web	2026-11-08T03:12:44+00:00	active
+# 8	nanobom_91d0e2	Grafana	(organization)	never used	active	read
+# 7	nanobom_3f9a1c	web CI	web	2026-11-08T03:12:44+00:00	active	upload
 nanobom token revoke --id 7
 ```
 
@@ -83,7 +85,8 @@ nanobom token revoke --id 7
 `TOKEN=$(nanobom token create --organization acme --name CI)`. It cannot be shown again.
 
 `token list` prints one tab-separated line per token, revoked ones included: identifier, first
-characters, name, project (or `(organization)`), last use, state.
+characters, name, project (or `(organization)`), last use, state, scope. The scope comes last, so
+scripts written for earlier versions keep their columns.
 
 ## `nanobom healthcheck`
 
