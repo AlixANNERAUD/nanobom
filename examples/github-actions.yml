@@ -1,9 +1,11 @@
-# Uploads the SBOM of a Rust project to nanobom on every push to main.
+# Uploads the SBOM of a Rust project to nanobom on every push to main, with the nanobom action
+# (https://github.com/AlixANNERAUD/nanobom-action). The job summary lists the project's open
+# findings.
 # Secrets: NANOBOM_TOKEN (an upload token of the organization). Variables: NANOBOM_URL.
 #
-# fail_on=high makes the job fail (HTTP 409) when the project has open findings of high
-# severity or above once evaluated; use critical, medium, low or exploited (known exploited
-# only) instead. Remove fail_on from the URL to only record the SBOM.
+# fail-on: high fails the job when the project has open findings of high severity or above once
+# evaluated; use critical, medium, low or exploited (known exploited only) instead, or remove it
+# to only record the SBOM. Without `sbom`, the action generates one with Syft.
 name: SBOM
 
 on:
@@ -17,19 +19,15 @@ jobs:
   sbom:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
       - name: Generate the SBOM
         run: |
           cargo install cargo-cyclonedx --locked
           cargo cyclonedx --format json --override-filename sbom
-      - name: Upload it to nanobom
-        run: |
-          curl --fail-with-body --silent --show-error \
-            --request PUT \
-            --header "Authorization: Bearer $NANOBOM_TOKEN" \
-            --header "Content-Type: application/json" \
-            --data-binary @sbom.json \
-            "$NANOBOM_URL/api/organizations/acme/projects/${GITHUB_REPOSITORY#*/}/sbom?source_commit=$GITHUB_SHA&fail_on=high"
-        env:
-          NANOBOM_URL: ${{ vars.NANOBOM_URL }}
-          NANOBOM_TOKEN: ${{ secrets.NANOBOM_TOKEN }}
+      - uses: AlixANNERAUD/nanobom-action@v1
+        with:
+          url: ${{ vars.NANOBOM_URL }}
+          token: ${{ secrets.NANOBOM_TOKEN }}
+          organization: acme
+          sbom: sbom.json
+          fail-on: high
