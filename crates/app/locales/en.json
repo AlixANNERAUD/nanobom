@@ -114,7 +114,8 @@
     "trigger_upload": "upload",
     "scope_all": "all organizations",
     "scope_organization": "organization",
-    "scope_project": "project"
+    "scope_project": "project",
+    "known_exploited": "Known exploited"
   },
   "project": {
     "title": "Project",
@@ -151,7 +152,11 @@
     "filter_open_and_ignored": "Open and ignored",
     "filter_all": "All",
     "filter_ecosystem": "Ecosystem",
-    "filter": "Filter"
+    "filter": "Filter",
+    "known_exploited": "Known exploited",
+    "known_exploited_due": "CISA due date: {date}",
+    "epss": "EPSS",
+    "filter_exploited": "Only known exploited vulnerabilities"
   },
   "finding": {
     "title": "Finding",
@@ -189,7 +194,20 @@
     "also_affected": "Also affected",
     "also_affected_description": "In the organizations you can see.",
     "no_other_component": "No other component.",
-    "references": "References"
+    "references": "References",
+    "exploitation": "Exploitation",
+    "exploitation_none": "No exploitation is known for this vulnerability.",
+    "kev_added": "Added to the CISA catalog",
+    "kev_due": "CISA due date",
+    "ransomware": "Ransomware campaigns",
+    "yes": "Known",
+    "no": "Unknown",
+    "epss_score": "EPSS score",
+    "epss_percentile": "EPSS percentile",
+    "epss_value": "{score} (percentile {percentile}, {date})",
+    "percent": "{value}%",
+    "kev_link": "CISA Known Exploited Vulnerabilities catalog",
+    "epss_link": "About EPSS"
   },
   "search": {
     "title": "Search",
@@ -251,7 +269,8 @@
     "rename": "Rename",
     "delete_title": "Delete this organization",
     "delete_description": "Its projects, findings, tokens and memberships are deleted for good.",
-    "delete": "Delete organization"
+    "delete": "Delete organization",
+    "exploited_only": "Only known exploited vulnerabilities"
   },
   "administration": {
     "title": "Administration",

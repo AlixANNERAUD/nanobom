@@ -304,6 +304,7 @@ pub fn OrganizationPage() -> impl IntoView {
                             let href = format!("/organizations/{}/projects/{}", slug, project.slug);
                             let cells = severity_cells(project.open);
                             let ignored = project.ignored;
+                            let known_exploited = project.known_exploited;
                             let name = project.name.clone();
                             let last_upload = project
                                 .last_upload_at
@@ -316,6 +317,9 @@ pub fn OrganizationPage() -> impl IntoView {
                                         </a>
                                     </th>
                                     {cells}
+                                    <td class=format!("{TABLE_CELL} text-right tabular-nums")>
+                                        {known_exploited}
+                                    </td>
                                     <td class=format!("{TABLE_CELL} text-right tabular-nums text-muted-foreground")>
                                         {ignored}
                                     </td>
@@ -350,6 +354,7 @@ pub fn OrganizationPage() -> impl IntoView {
                                     <tr class=TABLE_HEAD_ROW>
                                         <th scope="col" class=TABLE_HEAD>{t!("organization.project")}</th>
                                         {headers}
+                                        <th scope="col" class=format!("{TABLE_HEAD} text-right")>{t!("organization.known_exploited")}</th>
                                         <th scope="col" class=format!("{TABLE_HEAD} text-right")>{t!("organization.ignored")}</th>
                                         <th scope="col" class=TABLE_HEAD>{t!("organization.last_upload")}</th>
                                     </tr>

@@ -19,11 +19,35 @@ use crate::{
     t, tf, tp,
 };
 
+/// A fraction (0 to 1) as a whole percentage, in the request's language.
+fn percent(fraction: f64) -> String {
+    #[allow(clippy::cast_possible_truncation)]
+    let value = (fraction * 100.0).round() as i64;
+    tf!("finding.percent", value = value)
+}
+
 fn finding_rows(findings: Vec<FindingRow>) -> impl IntoView {
     findings
         .into_iter()
         .map(|finding| {
             let href = format!("/findings/{}", finding.id);
+            let exploited = finding.exploitation.known_exploited.then(|| {
+                let title = finding
+                    .exploitation
+                    .kev_due_date
+                    .map(|date| tf!("project.known_exploited_due", date = date.to_string()))
+                    .unwrap_or_default();
+                view! {
+                    <span title=title class="mt-1 block">
+                        <Badge variant=BadgeVariant::Destructive>{t!("project.known_exploited")}</Badge>
+                    </span>
+                }
+            });
+            let epss = finding
+                .exploitation
+                .epss_percentile
+                .map(percent)
+                .unwrap_or_default();
             view! {
                 <tr class=TABLE_ROW>
                     <td class=TABLE_CELL>
@@ -45,6 +69,7 @@ fn finding_rows(findings: Vec<FindingRow>) -> impl IntoView {
                         <span class="text-muted-foreground block max-w-md truncate text-xs">
                             {finding.summary.clone().unwrap_or_default()}
                         </span>
+                        {exploited}
                     </th>
                     <td class=TABLE_CELL>
                         <span class="font-medium">{finding.component_name.clone()}</span>
@@ -53,6 +78,7 @@ fn finding_rows(findings: Vec<FindingRow>) -> impl IntoView {
                             {finding.ecosystem.clone()}
                         </span>
                     </td>
+                    <td class=format!("{TABLE_CELL} text-right tabular-nums")>{epss}</td>
                     <td class=TABLE_CELL>
                         <StatusBadge status=finding.status />
                     </td>
@@ -127,6 +153,10 @@ fn Filters(page: ProjectData, filter: FindingFilter) -> impl IntoView {
                         .collect_view()}
                 </select>
             </div>
+            <label class=format!("{LABEL} h-9")>
+                <input type="checkbox" name="exploited" value="1" class=CHECKBOX checked=filter.exploited />
+                {t!("project.filter_exploited")}
+            </label>
             <Button variant=ButtonVariant::Secondary>{t!("project.filter")}</Button>
         </form>
     }
@@ -147,6 +177,7 @@ pub fn ProjectPage() -> impl IntoView {
                 severity: nonempty("severity"),
                 status: nonempty("status"),
                 ecosystem: nonempty("ecosystem"),
+                exploited: nonempty("exploited").is_some_and(|value| value == "1"),
             },
         )
     };
@@ -217,6 +248,7 @@ pub fn ProjectPage() -> impl IntoView {
                                         <th scope="col" class=TABLE_HEAD>{t!("project.severity")}</th>
                                         <th scope="col" class=TABLE_HEAD>{t!("project.vulnerability")}</th>
                                         <th scope="col" class=TABLE_HEAD>{t!("project.component")}</th>
+                                        <th scope="col" class=format!("{TABLE_HEAD} text-right")>{t!("project.epss")}</th>
                                         <th scope="col" class=TABLE_HEAD>{t!("project.status")}</th>
                                         <th scope="col" class=TABLE_HEAD>{t!("project.since")}</th>
                                     </tr>
@@ -420,6 +452,39 @@ pub fn FindingPage() -> impl IntoView {
                             </dd>
                         }
                     });
+                    let exploitation = finding.exploitation.clone();
+                    let known_exploited = exploitation.known_exploited;
+                    let exploitation_body = if known_exploited || exploitation.epss_score.is_some() {
+                        let yes_no = |value: bool| if value { t!("finding.yes") } else { t!("finding.no") };
+                        let kev = known_exploited.then(|| {
+                            view! {
+                                <dt class="text-muted-foreground">{t!("finding.kev_added")}</dt>
+                                <dd>{exploitation.kev_date_added.map(|date| date.to_string())}</dd>
+                                <dt class="text-muted-foreground">{t!("finding.kev_due")}</dt>
+                                <dd>{exploitation.kev_due_date.map(|date| date.to_string())}</dd>
+                                <dt class="text-muted-foreground">{t!("finding.ransomware")}</dt>
+                                <dd>{yes_no(exploitation.kev_ransomware)}</dd>
+                            }
+                        });
+                        let epss = exploitation.epss_score.map(|score| {
+                            let percentile = exploitation.epss_percentile.map(percent).unwrap_or_default();
+                            let date = exploitation.epss_date.map(|date| date.to_string()).unwrap_or_default();
+                            view! {
+                                <dt class="text-muted-foreground">{t!("finding.epss_score")}</dt>
+                                <dd>
+                                    {tf!(
+                                        "finding.epss_value", score = format!("{score:.3}"), percentile = percentile, date = date
+                                    )}
+                                </dd>
+                            }
+                        });
+                        view! { <dl class="grid gap-2 text-sm">{kev}{epss}</dl> }.into_any()
+                    } else {
+                        view! { <p class="text-muted-foreground text-sm">{t!("finding.exploitation_none")}</p> }
+                            .into_any()
+                    };
+                    let known_exploited_badge = known_exploited
+                        .then(|| view! { <Badge variant=BadgeVariant::Destructive>{t!("project.known_exploited")}</Badge> });
                     view! {
                         <Title text=format!("{} · nanobom", finding.vulnerability_id) />
                         <nav aria-label=t!("common.breadcrumb") class="text-muted-foreground text-sm">
@@ -441,6 +506,7 @@ pub fn FindingPage() -> impl IntoView {
                             subtitle=finding.summary.clone().unwrap_or_default()
                         >
                             <SeverityBadge severity=finding.severity />
+                            {known_exploited_badge}
                             <StatusBadge status=finding.status />
                         </Heading>
                         <div class="grid gap-6 lg:grid-cols-[2fr_1fr]">
@@ -459,6 +525,32 @@ pub fn FindingPage() -> impl IntoView {
                                         <p class="text-sm whitespace-pre-wrap break-words">
                                             {page.details.clone().unwrap_or_else(|| t!("finding.no_description").to_owned())}
                                         </p>
+                                    </CardContent>
+                                </Card>
+                                <Card>
+                                    <CardHeader>
+                                        <CardTitle>{t!("finding.exploitation")}</CardTitle>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <div class="grid gap-3">
+                                        {exploitation_body}
+                                        <p class="flex flex-wrap gap-x-4 text-sm">
+                                            <a
+                                                class="underline-offset-4 hover:underline"
+                                                href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog"
+                                                rel="noreferrer"
+                                            >
+                                                {t!("finding.kev_link")}
+                                            </a>
+                                            <a
+                                                class="underline-offset-4 hover:underline"
+                                                href="https://www.first.org/epss/"
+                                                rel="noreferrer"
+                                            >
+                                                {t!("finding.epss_link")}
+                                            </a>
+                                        </p>
+                                        </div>
                                     </CardContent>
                                 </Card>
                                 <Card>

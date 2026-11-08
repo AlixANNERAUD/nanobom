@@ -283,6 +283,15 @@ pub fn finding(value: nanobom_domain::findings::Finding) -> model::FindingRow {
         fixed_at: value.fixed_at,
         ignore_reason: value.ignore_reason,
         ignore_expires_at: value.ignore_expires_at,
+        exploitation: model::Exploitation {
+            known_exploited: value.exploitation.known_exploited,
+            kev_date_added: value.exploitation.kev_date_added,
+            kev_due_date: value.exploitation.kev_due_date,
+            kev_ransomware: value.exploitation.kev_ransomware,
+            epss_score: value.exploitation.epss_score,
+            epss_percentile: value.exploitation.epss_percentile,
+            epss_date: value.exploitation.epss_date,
+        },
     }
 }
 

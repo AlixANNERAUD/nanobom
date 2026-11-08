@@ -7,8 +7,9 @@ use axum::{
 };
 use nanobom_domain::{
     findings::{self, Filter, Status},
-    organizations, projects, tokens,
+    notifications, organizations, projects, tokens,
 };
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use serde_json::json;
 
 const PASSWORD: &str = "correct horse battery staple";
@@ -337,4 +338,134 @@ async fn pages_follow_the_chosen_language() {
     let html = french.page("/organizations").await;
     assert!(html.contains("<html lang=\"fr\""));
     assert!(html.contains("Nouvelle organisation"));
+}
+
+#[tokio::test]
+async fn exploitation_signals_are_shown_and_filtered() {
+    let server = server(&[]).await;
+    server.source.publish(
+        json!({
+            "id": "GHSA-35jh-r3h4-6jhm",
+            "modified": "2024-01-01T00:00:00Z",
+            "aliases": ["CVE-2021-23337"],
+            "summary": "Command Injection in lodash",
+            "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H"}],
+            "affected": [{"package": {"ecosystem": "npm", "name": "lodash"},
+                "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "4.17.21"}]}]}]
+        }),
+        &["pkg:npm/lodash@4.17.20"],
+    );
+    let owner = local_user(&server.database, "alice", PASSWORD).await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let secret = tokens::create(&server.database, &owner, organization.id, None, "CI")
+        .await
+        .unwrap()
+        .secret;
+    server
+        .send(
+            Request::put("/api/organizations/acme/projects/web/sbom")
+                .header(header::AUTHORIZATION, format!("Bearer {secret}"))
+                .body(Body::from(sbom_document("cyclonedx-npm.json")))
+                .unwrap(),
+        )
+        .await;
+    server.runner.wait_until_idle().await;
+    let alice = Browser::sign_in(&server, "alice").await;
+    let project = projects::find(&server.database, &owner, organization.id, "web")
+        .await
+        .unwrap();
+    let finding = findings::list(&server.database, &owner, project.id, &Filter::default())
+        .await
+        .unwrap()[0]
+        .id;
+    let project_page = "/organizations/acme/projects/web";
+    let finding_page = format!("/findings/{finding}");
+
+    let html = alice.page(project_page).await;
+    assert!(!html.contains("Known exploited"));
+    let html = alice.page(&finding_page).await;
+    assert!(html.contains("No exploitation is known"));
+
+    nanobom_entity::exploitation::ActiveModel {
+        cve_id: Set("CVE-2021-23337".to_owned()),
+        known_exploited: Set(true),
+        kev_date_added: Set(Some("2022-03-01".to_owned())),
+        kev_due_date: Set(Some("2022-03-22".to_owned())),
+        kev_ransomware: Set(true),
+        epss_score: Set(Some(0.5)),
+        epss_percentile: Set(Some(0.97)),
+        epss_date: Set(Some("2026-11-02".to_owned())),
+        ..Default::default()
+    }
+    .insert(&server.database)
+    .await
+    .unwrap();
+
+    let html = alice.page(project_page).await;
+    assert!(html.contains("Known exploited"));
+    assert!(html.contains("CISA due date: 2022-03-22"));
+    assert!(html.contains("97%"));
+    assert!(html.contains("GHSA-35jh-r3h4-6jhm"));
+    let html = alice.page(&format!("{project_page}?exploited=1")).await;
+    assert!(html.contains("GHSA-35jh-r3h4-6jhm"));
+    let html = alice.page("/organizations/acme").await;
+    assert!(html.contains("Known exploited"), "the organization column");
+
+    let html = alice.page(&finding_page).await;
+    assert!(html.contains("Exploitation"));
+    assert!(html.contains("2022-03-01"));
+    assert!(html.contains("2022-03-22"));
+    assert!(html.contains("0.500"));
+    assert!(html.contains("https://www.cisa.gov/known-exploited-vulnerabilities-catalog"));
+    assert!(html.contains("https://www.first.org/epss/"));
+
+    // Without the exploitation row, the filter hides the finding.
+    nanobom_entity::exploitation::Entity::delete_by_id("CVE-2021-23337")
+        .exec(&server.database)
+        .await
+        .unwrap();
+    let html = alice.page(&format!("{project_page}?exploited=1")).await;
+    assert!(html.contains("No finding matches"));
+}
+
+#[tokio::test]
+async fn the_webhook_form_saves_the_exploited_only_option() {
+    let server = server(&[]).await;
+    let owner = local_user(&server.database, "alice", PASSWORD).await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let alice = Browser::sign_in(&server, "alice").await;
+    let page = "/organizations/acme/settings";
+    let html = alice.page(page).await;
+    assert!(html.contains("Only known exploited vulnerabilities"));
+
+    let response = alice
+        .submit(
+            page,
+            "save_webhook",
+            "organization=acme&url=https%3A%2F%2Fexample.org%2Fhook&minimum_severity=high&enabled=on&exploited_only=on",
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::FOUND);
+    let webhook = notifications::get(&server.database, &owner, organization.id)
+        .await
+        .unwrap()
+        .expect("a webhook");
+    assert!(webhook.exploited_only);
+
+    alice
+        .submit(
+            page,
+            "save_webhook",
+            "organization=acme&url=https%3A%2F%2Fexample.org%2Fhook&minimum_severity=high&enabled=on",
+        )
+        .await;
+    let webhook = notifications::get(&server.database, &owner, organization.id)
+        .await
+        .unwrap()
+        .expect("a webhook");
+    assert!(!webhook.exploited_only);
 }

@@ -261,6 +261,9 @@ fn WebhookSettings(page: SettingsData) -> impl IntoView {
         .as_ref()
         .map_or(Severity::High, |webhook| webhook.minimum_severity);
     let enabled = webhook.as_ref().is_none_or(|webhook| webhook.enabled);
+    let exploited_only = webhook
+        .as_ref()
+        .is_some_and(|webhook| webhook.exploited_only);
     let url = webhook
         .as_ref()
         .map(|webhook| webhook.url.clone())
@@ -326,6 +329,10 @@ fn WebhookSettings(page: SettingsData) -> impl IntoView {
                             <label class=format!("{LABEL} h-9")>
                                 <input type="checkbox" name="enabled" class=CHECKBOX checked=enabled />
                                 {t!("settings.enabled")}
+                            </label>
+                            <label class=format!("{LABEL} h-9")>
+                                <input type="checkbox" name="exploited_only" class=CHECKBOX checked=exploited_only />
+                                {t!("settings.exploited_only")}
                             </label>
                             <Button>{t!("settings.save_webhook")}</Button>
                         </div>

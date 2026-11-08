@@ -89,6 +89,7 @@ pub async fn load_organization(organization: String) -> Result<OrganizationData,
                 last_upload_at: project.last_upload_at,
                 open: crate::server::counts(project.open),
                 ignored: project.ignored,
+                known_exploited: project.known_exploited,
             })
             .collect(),
         runs: runs.into_iter().map(run).collect(),
@@ -138,6 +139,7 @@ pub async fn load_project(
             None => vec![findings::Status::Open, findings::Status::Ignored],
         },
         ecosystem: filter.ecosystem.filter(|ecosystem| !ecosystem.is_empty()),
+        exploited_only: filter.exploited,
     };
     let list = findings::list(database, &actor, model.id, &domain_filter)
         .await
@@ -309,6 +311,7 @@ pub async fn load_settings(organization: String) -> Result<SettingsData, ServerF
             url: webhook.url,
             minimum_severity: crate::server::severity(webhook.minimum_severity),
             enabled: webhook.enabled,
+            exploited_only: webhook.exploited_only,
             last_delivery_at: webhook.last_delivery_at,
             last_delivery_status: webhook.last_delivery_status,
         }),
@@ -590,6 +593,7 @@ pub async fn save_webhook(
     url: String,
     minimum_severity: String,
     enabled: Option<String>,
+    exploited_only: Option<String>,
 ) -> Result<(), ServerFnError> {
     let actor = actor().await?;
     let database = &context()?.database;
@@ -605,7 +609,7 @@ pub async fn save_webhook(
             &url,
             crate::server::domain_severity(severity),
             enabled.is_some(),
-            false,
+            exploited_only.is_some(),
         )
         .await?;
         Ok(crate::t!("notices.webhook_saved").to_owned())

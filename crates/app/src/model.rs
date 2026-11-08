@@ -4,7 +4,7 @@
 /// The error a server function returns while it redirects to the sign-in page; never shown.
 pub const SIGN_IN_REQUIRED: &str = "sign in required";
 
-use chrono::{DateTime, FixedOffset};
+use chrono::{DateTime, FixedOffset, NaiveDate};
 use serde::{Deserialize, Serialize};
 
 use crate::t;
@@ -189,6 +189,7 @@ pub struct ProjectRow {
     pub last_upload_at: Option<DateTime<FixedOffset>>,
     pub open: SeverityCounts,
     pub ignored: u64,
+    pub known_exploited: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -211,6 +212,18 @@ pub struct OrganizationData {
     pub runs: Vec<Run>,
 }
 
+/// Exploitation data (CISA KEV and FIRST EPSS) of a finding.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Exploitation {
+    pub known_exploited: bool,
+    pub kev_date_added: Option<NaiveDate>,
+    pub kev_due_date: Option<NaiveDate>,
+    pub kev_ransomware: bool,
+    pub epss_score: Option<f64>,
+    pub epss_percentile: Option<f64>,
+    pub epss_date: Option<NaiveDate>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FindingRow {
     pub id: i64,
@@ -228,6 +241,7 @@ pub struct FindingRow {
     pub fixed_at: Option<DateTime<FixedOffset>>,
     pub ignore_reason: Option<String>,
     pub ignore_expires_at: Option<DateTime<FixedOffset>>,
+    pub exploitation: Exploitation,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -246,6 +260,8 @@ pub struct FindingFilter {
     pub severity: Option<String>,
     pub status: Option<String>,
     pub ecosystem: Option<String>,
+    /// Only known exploited findings (`exploited=1`).
+    pub exploited: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -338,6 +354,7 @@ pub struct Webhook {
     pub url: String,
     pub minimum_severity: Severity,
     pub enabled: bool,
+    pub exploited_only: bool,
     pub last_delivery_at: Option<DateTime<FixedOffset>>,
     pub last_delivery_status: Option<String>,
 }
