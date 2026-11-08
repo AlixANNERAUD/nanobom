@@ -1,12 +1,10 @@
 //! Local sign-in, sessions, rate limiting and cross-site request checks.
 
-mod common;
-
+use crate::common::{local_user, server};
 use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
-use common::{local_user, server};
 
 const PASSWORD: &str = "correct horse battery staple";
 
@@ -54,7 +52,7 @@ async fn local_accounts_sign_in_with_a_session_cookie() {
         panic!(
             "{:?} {}",
             response.status(),
-            common::body_text(response).await
+            crate::common::body_text(response).await
         );
     }
     assert_eq!(location(&response), "/organizations");

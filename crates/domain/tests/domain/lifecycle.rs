@@ -606,3 +606,42 @@ async fn filters_and_overview_count_by_severity() {
     let counts = findings::open_counts(&fixture.database).await.unwrap();
     assert_eq!(counts.total(), 1);
 }
+
+#[tokio::test]
+async fn recent_runs_cover_the_organization_and_hide_instance_errors() {
+    let fixture = Fixture::new().await;
+    let project = fixture.upload(&[LODASH]).await;
+    fixture.run().await;
+    fixture
+        .evaluator
+        .run(
+            Trigger::Manual,
+            Scope::Project(project),
+            Some(fixture.member.user_id),
+        )
+        .await
+        .unwrap();
+    fixture.source.set_failing(true);
+    fixture.run().await;
+
+    let runs =
+        evaluation::recent_runs(&fixture.database, &fixture.viewer, fixture.organization, 10)
+            .await
+            .unwrap();
+    assert_eq!(runs.len(), 3);
+    assert_eq!(runs[0].status, "failed");
+    assert_eq!(
+        runs[0].error.as_deref(),
+        Some("the run could not complete"),
+        "instance-wide errors are summarized for members"
+    );
+    assert_eq!(runs[1].scope, "project");
+    assert_eq!(runs[1].trigger, "manual");
+    let other = organizations::create(&fixture.database, &fixture.owner, "other", "Other")
+        .await
+        .unwrap();
+    let runs = evaluation::recent_runs(&fixture.database, &fixture.owner, other.id, 10)
+        .await
+        .unwrap();
+    assert_eq!(runs.len(), 2, "only instance-wide runs");
+}

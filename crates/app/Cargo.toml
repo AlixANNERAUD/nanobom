@@ -15,13 +15,30 @@ leptos_router.workspace = true
 leptos_meta.workspace = true
 leptos_axum = { workspace = true, optional = true }
 nanobom-domain = { workspace = true, optional = true }
+nanobom-osv = { workspace = true, optional = true }
+nanobom-authentication = { workspace = true, optional = true }
+axum = { workspace = true, optional = true }
+sea-orm = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
 serde.workspace = true
 chrono.workspace = true
+web-sys = { version = "0.3", optional = true, features = ["DomTokenList", "Element", "MediaQueryList", "Storage", "Window"] }
 
 [features]
 default = []
-hydrate = ["leptos/hydrate"]
-ssr = ["leptos/ssr", "leptos_meta/ssr", "leptos_router/ssr", "dep:leptos_axum", "dep:nanobom-domain"]
+hydrate = ["leptos/hydrate", "dep:web-sys"]
+ssr = [
+    "leptos/ssr",
+    "leptos_meta/ssr",
+    "leptos_router/ssr",
+    "dep:leptos_axum",
+    "dep:nanobom-domain",
+    "dep:nanobom-osv",
+    "dep:nanobom-authentication",
+    "dep:axum",
+    "dep:sea-orm",
+    "dep:tracing",
+]
 
 [lints]
 workspace = true

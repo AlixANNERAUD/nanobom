@@ -349,3 +349,85 @@ async fn project_tokens_only_reach_their_project() {
         Err(Error::NotFound)
     ));
 }
+
+#[tokio::test]
+async fn search_finds_components_by_name_and_version_in_visible_organizations() {
+    let fixture = setup().await;
+    let database = &fixture.database;
+    let created = tokens::create(database, &fixture.owner, fixture.organization, None, "CI")
+        .await
+        .unwrap();
+    let token = tokens::authenticate(database, &created.secret)
+        .await
+        .unwrap()
+        .unwrap();
+    inventory::ingest(
+        database,
+        &token,
+        "acme",
+        "web",
+        inventory::parse(&sbom_document("cyclonedx-npm.json")).unwrap(),
+        UploadSource::default(),
+    )
+    .await
+    .unwrap();
+
+    let found = inventory::search(database, &fixture.viewer, "Lodash")
+        .await
+        .unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].organization_slug, "acme");
+    assert_eq!(found[0].project_slug, "web");
+    assert_eq!(found[0].version.as_deref(), Some("4.17.20"));
+    assert_eq!(
+        inventory::search(database, &fixture.viewer, "lodash 4.17")
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        inventory::search(database, &fixture.viewer, "lodash@4.17.2")
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(
+        inventory::search(database, &fixture.viewer, "lodash 5")
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        inventory::search(database, &fixture.viewer, "  ")
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        inventory::search(database, &fixture.viewer, "lod_sh")
+            .await
+            .unwrap()
+            .is_empty(),
+        "wildcards in the query match themselves"
+    );
+
+    let outsider = users::create(
+        database,
+        NewUser {
+            username: "outsider".to_owned(),
+            ..NewUser::default()
+        },
+        true,
+    )
+    .await
+    .unwrap();
+    let outsider = Actor::from_user(&outsider);
+    assert!(
+        inventory::search(database, &outsider, "lodash")
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}

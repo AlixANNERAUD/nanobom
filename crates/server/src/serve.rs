@@ -4,8 +4,13 @@ use std::sync::Arc;
 
 use axum::Router;
 use leptos::config::LeptosOptions;
+use leptos::prelude::provide_context;
 use leptos_axum::{LeptosRoutes, generate_route_list};
-use nanobom_app::{App, shell};
+use nanobom_app::{
+    App,
+    server::{InterfaceContext, InterfaceSettings},
+    shell,
+};
 use nanobom_domain::{evaluation::Evaluator, notifications::Notifier};
 use nanobom_osv::OsvClient;
 use sea_orm::DatabaseConnection;
@@ -14,7 +19,7 @@ use crate::{
     api, authentication,
     command_line::ServeOptions,
     metrics, operations,
-    runner::{self, NotificationSettings, Runner},
+    runner::{self, NotificationSettings, RunRequest, Runner},
     state::AppState,
 };
 
@@ -28,13 +33,49 @@ pub fn leptos_options(options: &ServeOptions) -> LeptosOptions {
         .build()
 }
 
+/// What the interface's pages and server functions need from the server.
+fn interface_context(state: &AppState) -> InterfaceContext {
+    let runner = state.runner.clone();
+    InterfaceContext {
+        database: state.database.clone(),
+        settings: InterfaceSettings {
+            local_accounts: state.options.local_accounts,
+            openid_button: state
+                .openid
+                .as_ref()
+                .map(|_| state.options.openid.oidc_button_label.clone()),
+            password_minimum_length: state.options.accounts.password_minimum_length,
+            personal_organizations: state.options.accounts.personal_organizations,
+        },
+        request_run: Arc::new(move |trigger, scope, triggered_by| {
+            runner.request(RunRequest {
+                trigger,
+                scope,
+                triggered_by,
+            })
+        }),
+    }
+}
+
 /// Every route of the server.
 pub fn router(state: AppState) -> Router {
     let routes = generate_route_list(App);
     let leptos_options = state.leptos_options.clone();
+    let context = interface_context(&state);
+    let fallback_context = context.clone();
     let interface = Router::new()
-        .leptos_routes(&state, routes, move || shell(leptos_options.clone()))
-        .fallback(leptos_axum::file_and_error_handler::<AppState, _>(shell));
+        .leptos_routes_with_context(
+            &state,
+            routes,
+            move || provide_context(context.clone()),
+            move || shell(leptos_options.clone()),
+        )
+        .fallback(leptos_axum::file_and_error_handler_with_context::<
+            AppState,
+            _,
+        >(
+            move || provide_context(fallback_context.clone()), shell
+        ));
     let interface = authentication::layer(interface, &state);
     Router::new()
         .merge(api::router(&state))

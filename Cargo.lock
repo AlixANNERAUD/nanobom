@@ -3101,13 +3101,19 @@ dependencies = [
 name = "nanobom-app"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "chrono",
  "leptos",
  "leptos_axum",
  "leptos_meta",
  "leptos_router",
+ "nanobom-authentication",
  "nanobom-domain",
+ "nanobom-osv",
+ "sea-orm",
  "serde",
+ "tracing",
+ "web-sys",
 ]
 
 [[package]]

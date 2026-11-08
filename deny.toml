@@ -7,6 +7,9 @@ yanked = "deny"
 ignore = [
   # Unmaintained, not vulnerable: a compile-time macro pulled in by Leptos.
   { id = "RUSTSEC-2024-0436", reason = "build-time dependency of Leptos, no known vulnerability" },
+  # Timing attack on private-key RSA operations; openidconnect only verifies ID token signatures
+  # with the provider's public key.
+  { id = "RUSTSEC-2023-0071", reason = "rsa is only used for public-key signature verification" },
 ]
 
 [licenses]

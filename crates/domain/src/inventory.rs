@@ -14,8 +14,11 @@ use cyclonedx_bom::{
 use nanobom_entity::{components, organizations, projects, sbom_uploads, upload_tokens};
 use packageurl::PackageUrl;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
-    QueryOrder, TransactionSession, TransactionTrait,
+    ActiveModelTrait,
+    ActiveValue::Set,
+    ColumnTrait, ConnectionTrait, EntityTrait, ExprTrait, QueryFilter, QueryOrder, QuerySelect,
+    TransactionSession, TransactionTrait,
+    sea_query::{Expr, Func, LikeExpr},
 };
 use serde::{Deserialize, Serialize};
 
@@ -320,4 +323,99 @@ pub async fn components(
         .order_by_asc(components::Column::Purl)
         .all(database)
         .await?)
+}
+
+/// A component found by a search.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ComponentMatch {
+    pub organization_slug: String,
+    pub project_slug: String,
+    pub purl: String,
+    pub ecosystem: String,
+    pub name: String,
+    pub version: Option<String>,
+}
+
+/// At most this many components are returned by a search.
+pub const MAXIMUM_SEARCH_RESULTS: usize = 200;
+
+/// Finds components by name across the organizations the actor can see: `openssl` matches
+/// names containing it, `openssl 3.` (or `openssl@3.`) also requires the version to start with
+/// `3.`.
+pub async fn search(
+    database: &impl ConnectionTrait,
+    actor: &Actor,
+    query: &str,
+) -> Result<Vec<ComponentMatch>> {
+    let query = query.trim();
+    let (name, version) = match query.split_once(['@', ' ']) {
+        Some((name, version)) => (name.trim(), Some(version.trim())),
+        None => (query, None),
+    };
+    if name.is_empty() {
+        return Ok(Vec::new());
+    }
+    let organizations: std::collections::HashMap<i64, String> =
+        crate::organizations::list(database, actor)
+            .await?
+            .into_iter()
+            .map(|organization| (organization.id, organization.slug))
+            .collect();
+    let projects: std::collections::HashMap<i64, (String, String)> = projects::Entity::find()
+        .filter(projects::Column::OrganizationId.is_in(organizations.keys().copied()))
+        .all(database)
+        .await?
+        .into_iter()
+        .map(|project| {
+            let organization = organizations[&project.organization_id].clone();
+            (project.id, (organization, project.slug))
+        })
+        .collect();
+    // Names keep their case in package URLs (Maven, Go), and `LIKE` is case-sensitive on
+    // PostgreSQL, so both sides are compared in lower case.
+    let mut select = components::Entity::find()
+        .filter(components::Column::ProjectId.is_in(projects.keys().copied()))
+        .filter(
+            Expr::expr(Func::lower(Expr::col(components::Column::Name))).like(
+                LikeExpr::new(format!("%{}%", escape_like(&name.to_lowercase()))).escape('\\'),
+            ),
+        );
+    if let Some(version) = version.filter(|version| !version.is_empty()) {
+        select = select.filter(
+            Expr::col(components::Column::Version)
+                .like(LikeExpr::new(format!("{}%", escape_like(version))).escape('\\')),
+        );
+    }
+    let models = select
+        .order_by_asc(components::Column::Name)
+        .order_by_asc(components::Column::Version)
+        .limit(MAXIMUM_SEARCH_RESULTS as u64)
+        .all(database)
+        .await?;
+    Ok(models
+        .into_iter()
+        .map(|component| {
+            let (organization_slug, project_slug) = projects[&component.project_id].clone();
+            ComponentMatch {
+                organization_slug,
+                project_slug,
+                purl: component.purl,
+                ecosystem: component.ecosystem,
+                name: component.name,
+                version: component.version,
+            }
+        })
+        .collect())
+}
+
+/// Escapes the wildcards of a `LIKE` pattern, so `_` in a package name matches itself.
+fn escape_like(value: &str) -> String {
+    let mut escaped = String::with_capacity(value.len());
+    for character in value.chars() {
+        if matches!(character, '%' | '_' | '\\') {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+    escaped
 }

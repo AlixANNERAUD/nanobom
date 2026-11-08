@@ -1,12 +1,10 @@
 //! The SBOM upload endpoint.
 
-mod common;
-
+use crate::common::{body_json, sbom_document, server, user};
 use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
-use common::{body_json, sbom_document, server, user};
 use nanobom_domain::{organizations, projects, tokens};
 
 fn upload(path: &str, token: Option<&str>, body: Vec<u8>) -> Request<Body> {

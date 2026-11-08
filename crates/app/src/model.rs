@@ -1,0 +1,368 @@
+//! What the pages show. These types travel from server functions to components, so they are
+//! defined here, independent of the server-only domain crate.
+
+use chrono::{DateTime, FixedOffset};
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Severity {
+    Unknown,
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+impl Severity {
+    pub const DESCENDING: [Severity; 5] = [
+        Severity::Critical,
+        Severity::High,
+        Severity::Medium,
+        Severity::Low,
+        Severity::Unknown,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Severity::Unknown => "unknown",
+            Severity::Low => "low",
+            Severity::Medium => "medium",
+            Severity::High => "high",
+            Severity::Critical => "critical",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Severity::Unknown => "Unknown",
+            Severity::Low => "Low",
+            Severity::Medium => "Medium",
+            Severity::High => "High",
+            Severity::Critical => "Critical",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::DESCENDING
+            .into_iter()
+            .find(|severity| severity.as_str() == value)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Status {
+    Open,
+    Ignored,
+    Fixed,
+}
+
+impl Status {
+    pub const ALL: [Status; 3] = [Status::Open, Status::Ignored, Status::Fixed];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Status::Open => "open",
+            Status::Ignored => "ignored",
+            Status::Fixed => "fixed",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Status::Open => "Open",
+            Status::Ignored => "Ignored",
+            Status::Fixed => "Fixed",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|status| status.as_str() == value)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    Viewer,
+    Member,
+    Admin,
+    Owner,
+}
+
+impl Role {
+    pub const ALL: [Role; 4] = [Role::Viewer, Role::Member, Role::Admin, Role::Owner];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Role::Viewer => "viewer",
+            Role::Member => "member",
+            Role::Admin => "admin",
+            Role::Owner => "owner",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Role::Viewer => "Viewer",
+            Role::Member => "Member",
+            Role::Admin => "Admin",
+            Role::Owner => "Owner",
+        }
+    }
+
+    pub fn can_triage(self) -> bool {
+        self >= Role::Member
+    }
+
+    pub fn can_manage(self) -> bool {
+        self >= Role::Admin
+    }
+}
+
+/// The signed-in user, for the header.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CurrentUser {
+    pub username: String,
+    pub display_name: String,
+    pub is_instance_administrator: bool,
+    pub organizations: Vec<Organization>,
+}
+
+/// How users can sign in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SignInOptions {
+    pub local_accounts: bool,
+    /// The label of the single sign-on button, when OpenID Connect is configured.
+    pub openid_button: Option<String>,
+    pub signed_in: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Organization {
+    pub slug: String,
+    pub name: String,
+    pub is_personal: bool,
+    pub role: Role,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SeverityCounts {
+    pub critical: u64,
+    pub high: u64,
+    pub medium: u64,
+    pub low: u64,
+    pub unknown: u64,
+}
+
+impl SeverityCounts {
+    pub fn get(&self, severity: Severity) -> u64 {
+        match severity {
+            Severity::Critical => self.critical,
+            Severity::High => self.high,
+            Severity::Medium => self.medium,
+            Severity::Low => self.low,
+            Severity::Unknown => self.unknown,
+        }
+    }
+
+    pub fn total(&self) -> u64 {
+        self.critical + self.high + self.medium + self.low + self.unknown
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectRow {
+    pub slug: String,
+    pub name: String,
+    pub last_upload_at: Option<DateTime<FixedOffset>>,
+    pub open: SeverityCounts,
+    pub ignored: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Run {
+    pub id: i64,
+    pub trigger: String,
+    pub scope: String,
+    pub status: String,
+    pub started_at: DateTime<FixedOffset>,
+    pub finished_at: Option<DateTime<FixedOffset>>,
+    pub error: Option<String>,
+    pub new_findings: i64,
+    pub fixed_findings: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OrganizationData {
+    pub organization: Organization,
+    pub projects: Vec<ProjectRow>,
+    pub runs: Vec<Run>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FindingRow {
+    pub id: i64,
+    pub component_name: String,
+    pub component_version: Option<String>,
+    pub ecosystem: String,
+    pub purl: String,
+    pub vulnerability_id: String,
+    pub aliases: Vec<String>,
+    pub summary: Option<String>,
+    pub severity: Severity,
+    pub cvss_score: Option<f64>,
+    pub status: Status,
+    pub first_seen_at: DateTime<FixedOffset>,
+    pub fixed_at: Option<DateTime<FixedOffset>>,
+    pub ignore_reason: Option<String>,
+    pub ignore_expires_at: Option<DateTime<FixedOffset>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Upload {
+    pub uploaded_at: DateTime<FixedOffset>,
+    pub specification_version: String,
+    pub source_commit: Option<String>,
+    pub image_tag: Option<String>,
+    pub component_count: i64,
+    pub components_without_purl: i64,
+}
+
+/// Filters of the project page, from its query string.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FindingFilter {
+    pub severity: Option<String>,
+    pub status: Option<String>,
+    pub ecosystem: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ProjectData {
+    pub organization: Organization,
+    pub slug: String,
+    pub name: String,
+    pub findings: Vec<FindingRow>,
+    pub ecosystems: Vec<String>,
+    pub uploads: Vec<Upload>,
+    pub component_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Reference {
+    pub kind: String,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AffectedComponent {
+    pub finding_id: i64,
+    pub organization_slug: String,
+    pub project_slug: String,
+    pub purl: String,
+    pub status: Status,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FindingEvent {
+    pub created_at: DateTime<FixedOffset>,
+    /// `opened`, `fixed`, `reopened`, `ignored`, `restored` or `ignore_expired`.
+    pub kind: String,
+    pub actor: Option<String>,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FindingData {
+    pub finding: FindingRow,
+    pub organization_slug: String,
+    pub project_slug: String,
+    pub can_triage: bool,
+    pub details: Option<String>,
+    pub published: Option<DateTime<FixedOffset>>,
+    pub modified: DateTime<FixedOffset>,
+    pub cvss_version: Option<String>,
+    pub cvss_vector: Option<String>,
+    pub fixed_versions: Vec<String>,
+    pub references: Vec<Reference>,
+    pub ignored_by: Option<String>,
+    pub affected_components: Vec<AffectedComponent>,
+    pub events: Vec<FindingEvent>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ComponentMatch {
+    pub organization_slug: String,
+    pub project_slug: String,
+    pub purl: String,
+    pub ecosystem: String,
+    pub name: String,
+    pub version: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Member {
+    pub user_id: i64,
+    pub username: String,
+    pub display_name: String,
+    pub email: Option<String>,
+    pub role: Role,
+    pub manual_role: Option<Role>,
+    pub synchronized_role: Option<Role>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UploadToken {
+    pub id: i64,
+    pub name: String,
+    pub prefix: String,
+    pub project_slug: Option<String>,
+    pub created_at: DateTime<FixedOffset>,
+    pub last_used_at: Option<DateTime<FixedOffset>>,
+    pub revoked: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Webhook {
+    pub url: String,
+    pub minimum_severity: Severity,
+    pub enabled: bool,
+    pub last_delivery_at: Option<DateTime<FixedOffset>>,
+    pub last_delivery_status: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SettingsData {
+    pub organization: Organization,
+    pub current_user_id: i64,
+    pub members: Vec<Member>,
+    pub tokens: Vec<UploadToken>,
+    pub projects: Vec<String>,
+    pub webhook: Option<Webhook>,
+    /// A token created just before, shown once.
+    pub new_token: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UserRow {
+    pub id: i64,
+    pub username: String,
+    pub display_name: String,
+    pub email: Option<String>,
+    pub is_instance_administrator: bool,
+    pub is_disabled: bool,
+    pub has_password: bool,
+    pub last_login_at: Option<DateTime<FixedOffset>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdministrationData {
+    pub current_user_id: i64,
+    pub users: Vec<UserRow>,
+    pub organizations: Vec<Organization>,
+    pub local_accounts: bool,
+    pub password_minimum_length: usize,
+}

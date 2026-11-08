@@ -1,12 +1,10 @@
 //! Runs started by uploads, failure notifications, health and metrics.
 
-mod common;
-
+use crate::common::{body_json, body_text, sbom_document, server, user};
 use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
-use common::{body_json, body_text, sbom_document, server, user};
 use nanobom::runner::RunRequest;
 use nanobom_domain::{
     evaluation::{Scope, Trigger},

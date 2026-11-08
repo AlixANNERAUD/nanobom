@@ -737,3 +737,65 @@ async fn update_project(
     transaction.commit().await?;
     Ok(changes)
 }
+
+/// A run as shown in the interface.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RunSummary {
+    pub id: i64,
+    pub trigger: String,
+    pub scope: String,
+    pub status: String,
+    pub started_at: DateTime<FixedOffset>,
+    pub finished_at: Option<DateTime<FixedOffset>>,
+    pub error: Option<String>,
+    pub new_findings: i64,
+    pub fixed_findings: i64,
+}
+
+/// The latest runs that covered an organization: whole-instance runs, and runs of the
+/// organization or one of its projects.
+pub async fn recent_runs(
+    database: &impl ConnectionTrait,
+    actor: &Actor,
+    organization_id: i64,
+    limit: u64,
+) -> Result<Vec<RunSummary>> {
+    use sea_orm::{Condition, QueryOrder, QuerySelect};
+    actor
+        .authorize(database, organization_id, Permission::View)
+        .await?;
+    let models = runs::Entity::find()
+        .filter(
+            Condition::any()
+                .add(runs::Column::Scope.eq(Scope::All.as_str()))
+                .add(runs::Column::OrganizationId.eq(organization_id)),
+        )
+        .order_by_desc(runs::Column::StartedAt)
+        .order_by_desc(runs::Column::Id)
+        .limit(limit)
+        .all(database)
+        .await?;
+    Ok(models
+        .into_iter()
+        .map(|run| {
+            let error_visible = actor.is_instance_administrator || run.scope != Scope::All.as_str();
+            RunSummary {
+                id: run.id,
+                trigger: run.trigger,
+                scope: run.scope,
+                status: run.status,
+                started_at: run.started_at,
+                finished_at: run.finished_at,
+                // Instance-wide errors may mention other organizations' packages; they are shown
+                // to instance administrators only.
+                error: if error_visible {
+                    run.error
+                } else {
+                    run.error.map(|_| "the run could not complete".to_owned())
+                },
+                new_findings: run.new_findings,
+                fixed_findings: run.fixed_findings,
+            }
+        })
+        .collect())
+}
