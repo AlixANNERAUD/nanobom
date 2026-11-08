@@ -84,7 +84,9 @@ pub async fn get(
         .map(view))
 }
 
-/// Creates or replaces the webhook of an organization.
+/// Creates or replaces the webhook of an organization. Disabling it or changing its URL abandons
+/// its pending deliveries, as removing it does: retries never go to an address the admins
+/// replaced or turned off.
 pub async fn set(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -103,6 +105,9 @@ pub async fn set(
         .await?;
     let model = match existing {
         Some(model) => {
+            if !enabled || model.url != url.as_str() {
+                deliveries::cancel_pending(database, organization_id).await?;
+            }
             let mut active: organization_webhooks::ActiveModel = model.into();
             active.url = Set(url.to_string());
             active.minimum_severity = Set(minimum_severity.as_str().to_owned());

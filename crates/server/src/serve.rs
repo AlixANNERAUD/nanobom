@@ -130,6 +130,7 @@ pub async fn run(
         stale_after_days: options.stale_after_days,
         exploitation_refresh_timeout: runner::EXPLOITATION_REFRESH_TIMEOUT,
     };
+    deliveries::cancel_outdated_failures(&database, settings.failure_webhook.as_ref()).await;
     runner::close_interrupted_runs(&database, &settings).await;
     deliveries::start(
         database.clone(),

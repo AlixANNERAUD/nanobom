@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use chrono::Utc;
 use nanobom_domain::{deliveries, notifications::Notifier};
+use reqwest::Url;
 use sea_orm::DatabaseConnection;
 
 use crate::metrics;
@@ -56,6 +57,23 @@ async fn tick(database: &DatabaseConnection, notifier: &Notifier, pruning: bool)
     match notifier.retry_due(database, RETRIES_PER_TICK).await {
         Ok(outcomes) => metrics::record_deliveries(&outcomes),
         Err(error) => tracing::error!(%error, "retrying webhook deliveries failed"),
+    }
+}
+
+/// Abandons the pending deliveries to a failure webhook address that is not the configured one
+/// any more (`NANOBOM_FAILURE_WEBHOOK_URL` changed or removed). Call it at startup.
+pub async fn cancel_outdated_failures(
+    database: &DatabaseConnection,
+    failure_webhook: Option<&Url>,
+) {
+    let url = failure_webhook.map(Url::as_str);
+    match deliveries::cancel_pending_failures(database, url).await {
+        Ok(0) => {}
+        Ok(count) => tracing::info!(
+            count,
+            "pending deliveries to a former failure webhook address abandoned"
+        ),
+        Err(error) => tracing::warn!(%error, "abandoning outdated failure deliveries failed"),
     }
 }
 

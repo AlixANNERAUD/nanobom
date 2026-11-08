@@ -12,7 +12,7 @@ An organization's admins configure one webhook in **Settings → Webhook**:
 - **Minimum severity**: findings below it are not sent (known exploited ones always are);
 - **Only known exploited vulnerabilities**: send only known exploited findings, whatever their
   severity;
-- **Enabled**: unchecked, nothing is sent.
+- **Enabled**: unchecked, nothing is sent, and deliveries waiting for a retry are abandoned.
 
 Then **Save webhook**. After the next run that opens findings, **Recent deliveries** on the
 settings page lists the documents sent, newest first: the event, whether it was **Delivered**,
@@ -128,6 +128,8 @@ NANOBOM_FAILURE_WEBHOOK_URL=https://hooks.example.org/nanobom-ops/7f3c9a
 ```
 
 It receives a `run.failed` document for every failed run of the instance, whatever its
-organization. Since the error may name the packages of any organization, send it to the
-operators, not to an organization's channel. Pair it with the
-[alert rules](monitoring.md#add-alert-rules), which also catch a schedule that stopped running.
+organization. Changing or removing the variable abandons, at the next start, the `run.failed`
+deliveries still waiting for a retry to the previous address. Since the error may name the
+packages of any organization, send it to the operators, not to an organization's channel. Pair
+it with the [alert rules](monitoring.md#add-alert-rules), which also catch a schedule that
+stopped running.

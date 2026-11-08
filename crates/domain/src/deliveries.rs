@@ -259,6 +259,26 @@ pub async fn cancel_pending(database: &impl ConnectionTrait, organization_id: i6
     Ok(())
 }
 
+/// Abandons the pending deliveries to the instance's failure webhook that do not go to `url`,
+/// its current address (`None`: it is not configured any more); returns how many. Called at
+/// startup, since the address comes from the configuration.
+pub async fn cancel_pending_failures(
+    database: &impl ConnectionTrait,
+    url: Option<&str>,
+) -> Result<u64> {
+    let mut query = webhook_deliveries::Entity::update_many()
+        .col_expr(
+            webhook_deliveries::Column::NextAttemptAt,
+            Expr::value(Option::<DateTime<FixedOffset>>::None),
+        )
+        .filter(webhook_deliveries::Column::OrganizationId.is_null())
+        .filter(webhook_deliveries::Column::NextAttemptAt.is_not_null());
+    if let Some(url) = url {
+        query = query.filter(webhook_deliveries::Column::Url.ne(url));
+    }
+    Ok(query.exec(database).await?.rows_affected)
+}
+
 /// Deletes delivered and failed deliveries created before `now - RETENTION`; returns how many.
 pub async fn prune(database: &impl ConnectionTrait, now: DateTime<FixedOffset>) -> Result<u64> {
     Ok(webhook_deliveries::Entity::delete_many()

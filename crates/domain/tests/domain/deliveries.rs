@@ -493,6 +493,93 @@ async fn an_attempt_does_not_overwrite_a_cancellation_or_a_newer_claim() {
 }
 
 #[tokio::test]
+async fn disabling_or_moving_a_webhook_abandons_its_pending_deliveries() {
+    let database = testing::database().await;
+    let owner = actor(&database, "owner").await;
+    let acme = organizations::create(&database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let set = |url: &'static str, severity: Severity, enabled: bool| {
+        let (database, owner) = (database.clone(), owner);
+        async move {
+            notifications::set(&database, &owner, acme.id, url, severity, enabled, false)
+                .await
+                .unwrap();
+        }
+    };
+    let pending = |url: &'static str| {
+        let database = database.clone();
+        async move {
+            deliveries::enqueue(&database, Some(acme.id), url, "ping", &ping(), now())
+                .await
+                .unwrap()
+                .id
+        }
+    };
+    let old = "https://example.org/old";
+    set(old, Severity::High, true).await;
+
+    let kept = pending(old).await;
+    set(old, Severity::Low, true).await;
+    assert!(
+        row(&database, kept).await.next_attempt_at.is_some(),
+        "same URL, still enabled: kept"
+    );
+
+    set(old, Severity::Low, false).await;
+    assert_eq!(row(&database, kept).await.next_attempt_at, None, "disabled");
+
+    set(old, Severity::Low, true).await;
+    let moved = pending(old).await;
+    set("https://example.org/new", Severity::Low, true).await;
+    assert_eq!(row(&database, moved).await.next_attempt_at, None, "moved");
+}
+
+#[tokio::test]
+async fn failure_deliveries_to_a_former_address_are_abandoned() {
+    let database = testing::database().await;
+    let owner = actor(&database, "owner").await;
+    let acme = organizations::create(&database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let now = now();
+    let (current, former) = ("https://example.org/current", "https://example.org/former");
+    let enqueue = |organization: Option<i64>, url: &'static str| {
+        let database = database.clone();
+        async move {
+            deliveries::enqueue(&database, organization, url, "run.failed", &ping(), now)
+                .await
+                .unwrap()
+                .id
+        }
+    };
+    let to_current = enqueue(None, current).await;
+    let to_former = enqueue(None, former).await;
+    // An organization's webhook is not the failure webhook, whatever its URL.
+    let organization = enqueue(Some(acme.id), former).await;
+
+    assert_eq!(
+        deliveries::cancel_pending_failures(&database, Some(current))
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(row(&database, to_former).await.next_attempt_at, None);
+    assert!(row(&database, to_current).await.next_attempt_at.is_some());
+    assert!(row(&database, organization).await.next_attempt_at.is_some());
+
+    // No failure webhook configured any more.
+    assert_eq!(
+        deliveries::cancel_pending_failures(&database, None)
+            .await
+            .unwrap(),
+        1
+    );
+    assert_eq!(row(&database, to_current).await.next_attempt_at, None);
+    assert!(row(&database, organization).await.next_attempt_at.is_some());
+}
+
+#[tokio::test]
 async fn every_delivery_is_recorded_before_the_first_attempt() {
     let database = testing::database().await;
     let owner = actor(&database, "owner").await;

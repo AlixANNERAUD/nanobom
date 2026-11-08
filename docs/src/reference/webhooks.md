@@ -36,7 +36,11 @@ known exploited vulnerabilities, enabled); see [Get notified](../how-to/notifica
   the attempt number and the status) and counted by `nanobom_webhook_deliveries_total`
   ([metrics](metrics.md)). The latest deliveries to an organization's webhook are listed in its
   settings.
-- Removing an organization's webhook abandons its deliveries still waiting for a retry.
+- Removing an organization's webhook, disabling it or changing its URL abandons its deliveries
+  still waiting for a retry, including one whose attempt is in progress: they never go to an
+  address the admins replaced or turned off. In the same way, the `run.failed` deliveries still
+  waiting for a retry are abandoned at startup when `NANOBOM_FAILURE_WEBHOOK_URL` changed or was
+  removed.
 - Delivered and abandoned deliveries are deleted after 30 days.
 - A document can arrive more than once, when the receiver accepted it but its answer was lost or
   came after 15 seconds. The `event`, with the run's `id` for `findings.new` and `run.failed`,
