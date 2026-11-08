@@ -20,6 +20,10 @@
 //! - `503 Service Unavailable` when the run did not complete in time or failed, since the
 //!   findings would be out of date: an incomplete evaluation never passes the gate.
 //!
+//! VEX statements in the SBOM's `vulnerabilities` ([`nanobom_domain::vex`]) are imported with
+//! the upload's token: after the run and before the gate when the upload waits, so they cover
+//! the findings this run opened and the gate does not count them; at once otherwise.
+//!
 //! For `fail_on=exploited`, the run worker refreshes the exploitation data before answering
 //! waiters, so CVEs first seen in this run count. If that refresh fails or times out, the gate
 //! decides on the data already stored. The threshold is refused when exploitation data is
@@ -37,8 +41,9 @@ use nanobom_domain::{
     evaluation::{Scope, Trigger},
     findings::{self, Finding},
     inventory::{self, ParsedSbom, UploadOutcome, UploadSource},
-    notifications, tokens,
+    notifications, tokens, vex,
 };
+use nanobom_entity::upload_tokens;
 use nanobom_osv::Severity;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
@@ -66,7 +71,7 @@ impl ApiError {
         }
     }
 
-    fn unauthorized() -> Self {
+    pub(crate) fn unauthorized() -> Self {
         Self::new(
             StatusCode::UNAUTHORIZED,
             "a valid upload token is required in the Authorization header (Bearer)",
@@ -139,12 +144,33 @@ pub(crate) async fn parse_sbom(
     state: &AppState,
     document: Bytes,
 ) -> Result<nanobom_domain::Result<ParsedSbom>, tokio::task::JoinError> {
+    parse_document(state, document, inventory::parse).await
+}
+
+/// Parses a CycloneDX document with `parse` on the blocking thread pool, sharing the limit of
+/// SBOM parsing. The outer error is a parsing task that panicked.
+pub(crate) async fn parse_document<T: Send + 'static>(
+    state: &AppState,
+    document: Bytes,
+    parse: fn(&[u8]) -> nanobom_domain::Result<T>,
+) -> Result<nanobom_domain::Result<T>, tokio::task::JoinError> {
     let _permit = state
         .sbom_parsing
         .acquire()
         .await
         .expect("the semaphore is never closed");
-    tokio::task::spawn_blocking(move || inventory::parse(&document)).await
+    tokio::task::spawn_blocking(move || parse(&document)).await
+}
+
+/// The active upload token of the `Authorization` header; anything else is `401`.
+pub(crate) async fn authenticated_token(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<upload_tokens::Model, ApiError> {
+    let secret = bearer_token(headers).ok_or_else(ApiError::unauthorized)?;
+    tokens::authenticate(&state.database, secret)
+        .await?
+        .ok_or_else(ApiError::unauthorized)
 }
 
 /// The run that evaluates a project after an upload.
@@ -250,6 +276,9 @@ pub struct UploadResponse {
     outcome: UploadOutcome,
     #[serde(skip_serializing_if = "Option::is_none")]
     evaluation: Option<Evaluation>,
+    /// What the SBOM's VEX statements (its analysed `vulnerabilities`) did, when it has some.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    vex: Option<vex::ImportOutcome>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -352,10 +381,7 @@ async fn upload_sbom(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<(StatusCode, Json<UploadResponse>), ApiError> {
-    let secret = bearer_token(&headers).ok_or_else(ApiError::unauthorized)?;
-    let token = tokens::authenticate(&state.database, secret)
-        .await?
-        .ok_or_else(ApiError::unauthorized)?;
+    let token = authenticated_token(&state, &headers).await?;
     let threshold = parameters
         .fail_on
         .as_deref()
@@ -370,9 +396,10 @@ async fn upload_sbom(
     }
     let wait = parse_wait(parameters.wait.as_deref())? || threshold.is_some();
 
-    let sbom = parse_sbom(&state, body)
+    let mut sbom = parse_sbom(&state, body)
         .await
         .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal error"))??;
+    let statements = std::mem::take(&mut sbom.vex);
     let outcome = inventory::ingest(
         &state.database,
         &token,
@@ -391,15 +418,24 @@ async fn upload_sbom(
     } else {
         StatusCode::OK
     };
+    let project_id = outcome.project_id;
     let mut response = UploadResponse {
         error: None,
         evaluation: None,
+        vex: None,
         outcome,
     };
     if wait {
         // Waiting runs the project even when runs after uploads are disabled.
         let timeout = Duration::from_secs(state.options.upload_wait_seconds);
         let run = state.runner.request_and_wait(request, timeout).await;
+        // After the run, so that the statements also reach the findings it opened, and before
+        // the gate, which then counts only what the SBOM does not say is unaffected.
+        if !statements.is_empty() {
+            response.vex = Some(
+                vex::import_into_project(&state.database, &token, project_id, &statements).await?,
+            );
+        }
         let findings =
             findings::open_for_upload_token(&state.database, &token, response.outcome.project_id)
                 .await?;
@@ -420,8 +456,17 @@ async fn upload_sbom(
             }
         }
         response.evaluation = Some(evaluation(&run, &findings, &state.options.public_url));
-    } else if state.options.run_after_upload {
-        state.runner.request(request);
+    } else {
+        // Without waiting, only the findings of earlier runs can be matched: the run that
+        // follows may open findings the statements cover, which the next upload then ignores.
+        if !statements.is_empty() {
+            response.vex = Some(
+                vex::import_into_project(&state.database, &token, project_id, &statements).await?,
+            );
+        }
+        if state.options.run_after_upload {
+            state.runner.request(request);
+        }
     }
     Ok((status, Json(response)))
 }

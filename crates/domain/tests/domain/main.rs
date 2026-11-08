@@ -10,3 +10,4 @@ mod inventory;
 mod lifecycle;
 mod notifications;
 mod staleness;
+mod vex;

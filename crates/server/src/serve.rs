@@ -26,6 +26,7 @@ use crate::{
     deliveries, dependency_track, http, metrics, operations,
     runner::{self, NotificationSettings, RunRequest, Runner},
     state::AppState,
+    vex,
 };
 
 /// The options of the web interface: where its assets are and how they are named.
@@ -82,7 +83,8 @@ pub fn router(state: AppState) -> Router {
         >(
             move || provide_context(fallback_context.clone()), shell
         ));
-    let interface = authentication::layer(interface, &state);
+    // The VEX export reads the session, so it sits behind the session layer.
+    let interface = authentication::layer(interface.merge(vex::router(&state)), &state);
     http::layers(
         Router::new()
             .merge(api::router(&state))

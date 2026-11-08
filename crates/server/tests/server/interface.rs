@@ -394,6 +394,15 @@ async fn findings_are_shown_and_ignored_from_the_interface() {
     let html = alice.page("/organizations/acme/projects/web").await;
     assert!(html.contains("GHSA-35jh-r3h4-6jhm"));
     assert!(html.contains("lodash"));
+    // The VEX export is a link that works with the session.
+    assert!(html.contains("href=\"/api/organizations/acme/projects/web/vex\""));
+    let response = alice.get("/api/organizations/acme/projects/web/vex").await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let document = crate::common::body_json(response).await;
+    assert_eq!(
+        document["vulnerabilities"][0]["analysis"]["state"],
+        "in_triage"
+    );
     let html = alice
         .page("/organizations/acme/projects/web?severity=critical")
         .await;
@@ -411,12 +420,18 @@ async fn findings_are_shown_and_ignored_from_the_interface() {
     assert!(html.contains("CVE-2021-23337"));
     assert!(html.contains("4.17.21"), "the fixed version");
     assert!(html.contains("Ignore finding"));
+    assert!(
+        html.contains("name=\"justification\""),
+        "the justification select"
+    );
 
     let response = alice
         .submit(
             &page,
             "ignore_finding",
-            &format!("finding={finding}&reason=Not+reachable&expires_on="),
+            &format!(
+                "finding={finding}&reason=Not+reachable&justification=code_not_reachable&expires_on="
+            ),
         )
         .await;
     assert_eq!(response.status(), StatusCode::FOUND);
@@ -428,8 +443,13 @@ async fn findings_are_shown_and_ignored_from_the_interface() {
         .await
         .unwrap();
     assert_eq!(listed[0].status, Status::Ignored);
+    assert_eq!(
+        listed[0].ignore_justification,
+        Some(nanobom_domain::findings::Justification::CodeNotReachable)
+    );
     let html = alice.page(&page).await;
     assert!(html.contains("Not reachable"));
+    assert!(html.contains("Vulnerable code not reachable"));
     assert!(html.contains("Restore finding"));
 
     let html = alice.page("/search?query=lodash+4.17").await;

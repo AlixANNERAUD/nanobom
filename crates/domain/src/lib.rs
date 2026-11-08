@@ -77,6 +77,7 @@ pub mod projects;
 pub mod staleness;
 pub mod tokens;
 pub mod users;
+pub mod vex;
 
 pub use error::{Error, Result};
 pub use problem::{Field, Problem};

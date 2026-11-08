@@ -22,7 +22,8 @@ The body may be at most `NANOBOM_MAXIMUM_SBOM_SIZE` MiB (16 by default).
 
 Upload tokens are random 256-bit values prefixed with `nanobom_`. nanobom stores only their
 SHA-256 digest: a token is shown once, at creation, and cannot be recovered, only revoked and
-replaced. Tokens authenticate on the upload API only, never on the interface.
+replaced. Tokens authenticate on the upload API and the [VEX API](vex-api.md) only, never on the
+interface.
 
 | Kind | Created with | May |
 | --- | --- | --- |
@@ -76,6 +77,9 @@ In both formats:
 - The graph comes from `dependencies`; the entry of `metadata.component` gives the project's
   direct dependencies.
 - The serial number (`serialNumber`) is recorded with the upload.
+- Entries of `vulnerabilities` with an `analysis.state` are VEX statements: they are imported
+  into the project ([statements inside an SBOM](vex-api.md#statements-inside-an-sbom)). Entries
+  without one, such as a scanner's results, are not read.
 
 ### SPDX
 
@@ -195,6 +199,7 @@ A successful upload returns `201 Created` when it created the project, `200 OK` 
 | `components_without_purl` | Components skipped for a missing or invalid package URL |
 | `skipped` | The first 100 of them, with `name`, `version` and `reason` |
 | `evaluation` | Only with `wait` or `fail_on`, see below |
+| `vex` | Only when the SBOM carries VEX statements: what importing them did, as in the [VEX API](vex-api.md#response) |
 | `error` | Only when the upload fails, as `{"error": "…"}` alone or next to the fields above |
 
 ### The `evaluation` object

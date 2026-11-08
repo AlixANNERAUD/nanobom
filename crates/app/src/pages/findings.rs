@@ -389,6 +389,12 @@ pub fn ProjectPage() -> impl IntoView {
                             <span aria-current="page">{page.name.clone()}</span>
                         </nav>
                         <Heading title=page.name.clone() subtitle>
+                            <LinkButton
+                                href=format!("/api/organizations/{organization_slug}/projects/{project_slug}/vex")
+                                variant=ButtonVariant::Outline
+                            >
+                                {t!("project.export_vex")}
+                            </LinkButton>
                             {check_now}
                         </Heading>
                         {stale}
@@ -408,6 +414,48 @@ pub fn ProjectPage() -> impl IntoView {
                 }}
             />
         </Page>
+    }
+}
+
+/// The justifications offered when ignoring a finding: the CycloneDX impact analysis
+/// justifications, then the false positive state (see `nanobom_domain::findings::Justification`).
+const JUSTIFICATIONS: [&str; 10] = [
+    "code_not_present",
+    "code_not_reachable",
+    "requires_configuration",
+    "requires_dependency",
+    "requires_environment",
+    "protected_by_compiler",
+    "protected_at_runtime",
+    "protected_at_perimeter",
+    "protected_by_mitigating_control",
+    "false_positive",
+];
+
+fn justification_label(value: &str) -> &'static str {
+    match value {
+        "code_not_present" => t!("finding.justification_code_not_present"),
+        "code_not_reachable" => t!("finding.justification_code_not_reachable"),
+        "requires_configuration" => t!("finding.justification_requires_configuration"),
+        "requires_dependency" => t!("finding.justification_requires_dependency"),
+        "requires_environment" => t!("finding.justification_requires_environment"),
+        "protected_by_compiler" => t!("finding.justification_protected_by_compiler"),
+        "protected_at_runtime" => t!("finding.justification_protected_at_runtime"),
+        "protected_at_perimeter" => t!("finding.justification_protected_at_perimeter"),
+        "protected_by_mitigating_control" => {
+            t!("finding.justification_protected_by_mitigating_control")
+        }
+        "false_positive" => t!("finding.justification_false_positive"),
+        _ => t!("finding.justification_none"),
+    }
+}
+
+/// Who made a change: a member, or an upload token importing a VEX document.
+fn changed_by(actor: Option<String>, token: Option<String>) -> Option<String> {
+    match (actor, token) {
+        (Some(actor), _) => Some(tf!("finding.by", actor = actor)),
+        (None, Some(token)) => Some(tf!("finding.by_token", token = token)),
+        (None, None) => None,
     }
 }
 
@@ -492,6 +540,19 @@ fn Triage(page: FindingData) -> impl IntoView {
                     <textarea id="ignore-reason" name="reason" class=TEXTAREA required></textarea>
                 </Field>
                 <Field
+                    label=t!("finding.justification")
+                    input_id="ignore-justification"
+                    hint=t!("finding.justification_hint")
+                >
+                    <select id="ignore-justification" name="justification" class=format!("{SELECT} w-fit")>
+                        <option value="">{t!("finding.justification_none")}</option>
+                        {JUSTIFICATIONS
+                            .iter()
+                            .map(|value| view! { <option value=*value>{justification_label(value)}</option> })
+                            .collect_view()}
+                    </select>
+                </Field>
+                <Field
                     label=t!("finding.ignore_until")
                     input_id="ignore-expiry"
                     hint=t!("finding.ignore_until_hint")
@@ -560,17 +621,27 @@ pub fn FindingPage() -> impl IntoView {
                             </dd>
                         }
                     });
-                    let ignored_by = page.ignored_by.clone();
+                    let ignored_by = changed_by(page.ignored_by.clone(), page.ignored_by_token.clone());
                     let ignore_expires_at = finding.ignore_expires_at;
-                    let ignored = finding.ignore_reason.clone().map(move |reason| {
+                    let ignore_justification = finding.ignore_justification.clone();
+                    // The reason outlives the ignore (see `FindingRow`): shown while ignored only.
+                    let ignored = finding
+                        .ignore_reason
+                        .clone()
+                        .filter(|_| finding.status == Status::Ignored)
+                        .map(move |reason| {
                         view! {
                             <dt class="text-muted-foreground">{t!("finding.ignored")}</dt>
                             <dd>
                                 {reason}
-                                {ignored_by.map(|actor| format!(" ({})", tf!("finding.by", actor = actor)))}
+                                {ignored_by.map(|by| format!(" ({by})"))}
                                 {ignore_expires_at
                                     .map(|date| format!(" {}", tf!("finding.until", date = format_date(date))))}
                             </dd>
+                            {ignore_justification.map(|value| view! {
+                                <dt class="text-muted-foreground">{t!("finding.justification")}</dt>
+                                <dd>{justification_label(&value)}</dd>
+                            })}
                         }
                     });
                     let exploitation = finding.exploitation.clone();
@@ -690,7 +761,11 @@ pub fn FindingPage() -> impl IntoView {
                                                             <span class="font-medium">{event_label(&event.kind)}</span>
                                                             <span class="text-muted-foreground">
                                                                 " · " {format_time(event.created_at)}
-                                                                {event.actor.clone().map(|actor| format!(" · {}", tf!("finding.by", actor = actor)))}
+                                                                {changed_by(event.actor.clone(), event.token.clone()).map(|by| format!(" · {by}"))}
+                                                                {event
+                                                                    .justification
+                                                                    .as_deref()
+                                                                    .map(|value| format!(" · {}", justification_label(value)))}
                                                             </span>
                                                             {event
                                                                 .reason

@@ -26,6 +26,8 @@ pub struct Model {
     pub ignored_by_user_id: Option<i64>,
     pub ignored_at: Option<DateTimeWithTimeZone>,
     pub exploited_notified_at: Option<DateTimeWithTimeZone>,
+    pub ignore_justification: Option<String>,
+    pub ignored_by_upload_token_id: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

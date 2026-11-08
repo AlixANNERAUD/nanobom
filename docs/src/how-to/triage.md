@@ -39,8 +39,12 @@ On the finding's page, under **Triage**:
 
 1. **Reason** (required, up to 2,000 characters): why it does not apply or is accepted. It is kept
    in the finding's history with your name, for whoever reads it next year.
-2. **Ignore until** (optional): a date, `YYYY-MM-DD`, after which the finding opens again.
-3. Select **Ignore finding**.
+2. **Justification** (optional): why the product is not affected, in the CycloneDX vocabulary
+   (**Vulnerable code not reachable**, **Requires a configuration not in use**…), or **False
+   positive**. Leave **None** for an accepted risk. [VEX exports](vex.md) state that the product
+   is not affected only for findings ignored with a justification.
+3. **Ignore until** (optional): a date, `YYYY-MM-DD`, after which the finding opens again.
+4. Select **Ignore finding**.
 
 Good reasons are specific and checkable:
 
@@ -48,7 +52,8 @@ Good reasons are specific and checkable:
 - "Affects the CLI parsing of `foo`; we only use its library API. Revisit when upgrading to 3.x."
 
 An expiry date turns a decision into a reminder: ignore until the date of the planned upgrade,
-not forever. Only open findings can be ignored. What an ignored finding still does, and when it
+not forever. Only open findings can be ignored. Findings can also be ignored by
+[importing VEX statements](vex.md); the history then names the upload token instead of a member. What an ignored finding still does, and when it
 opens again, is described in
 [How findings are kept up to date](../explanation/findings.md#ignored-findings).
 

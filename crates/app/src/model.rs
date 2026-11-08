@@ -262,6 +262,9 @@ pub struct FindingRow {
     pub fixed_at: Option<DateTime<FixedOffset>>,
     pub ignore_reason: Option<String>,
     pub ignore_expires_at: Option<DateTime<FixedOffset>>,
+    /// The CycloneDX name of the ignore's justification (`code_not_reachable`…), or
+    /// `false_positive`.
+    pub ignore_justification: Option<String>,
     pub exploitation: Exploitation,
     /// The project's direct dependencies that lead to the component, sorted by name; empty
     /// when the SBOM's dependency graph does not say.
@@ -343,7 +346,11 @@ pub struct FindingEvent {
     /// `opened`, `fixed`, `reopened`, `ignored`, `restored` or `ignore_expired`.
     pub kind: String,
     pub actor: Option<String>,
+    /// The upload token that imported a VEX statement.
+    pub token: Option<String>,
     pub reason: Option<String>,
+    /// The CycloneDX name of the ignore's justification, or `false_positive`.
+    pub justification: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -361,6 +368,8 @@ pub struct FindingData {
     pub fixed_versions: Vec<String>,
     pub references: Vec<Reference>,
     pub ignored_by: Option<String>,
+    /// The upload token that ignored the finding from a VEX document.
+    pub ignored_by_token: Option<String>,
     /// Other findings filed under the same identifier, in organizations the viewer can see.
     pub affected_components: Vec<AffectedComponent>,
     pub events: Vec<FindingEvent>,

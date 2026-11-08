@@ -10,8 +10,12 @@
 //! - a run reports it: opened;
 //! - open or ignored, a run no longer reports it: fixed;
 //! - fixed, a run reports it again: reopened (open);
-//! - open, a member ignores it: ignored;
+//! - open, a member ignores it, or an upload token imports a VEX statement saying it does not
+//!   apply ([`crate::vex`]): ignored;
 //! - ignored, a member restores it or the first run after its expiry comes: open.
+//!
+//! An ignore always has a free-text reason, and may have a machine-readable [`Justification`]
+//! (the CycloneDX impact analysis vocabulary), which VEX exports carry.
 //!
 //! Listings carry the [`Exploitation`] signals of each finding, and order by them: known
 //! exploited first, then by severity, then by EPSS. The severity stored on a finding is the
@@ -87,7 +91,87 @@ impl FromStr for Status {
     }
 }
 
-/// What happened to a finding. Run events carry the run; member events carry the member.
+/// Why a finding does not affect the product, in machine-readable form: the CycloneDX impact
+/// analysis justifications, plus the `false_positive` state, which takes no justification in
+/// CycloneDX but is the other way to say a vulnerability does not apply. Stored as their
+/// CycloneDX names in `findings.ignore_justification` and `finding_events.justification`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Justification {
+    /// The vulnerable code was removed or tree-shaken.
+    CodeNotPresent,
+    /// The vulnerable code is not invoked at runtime.
+    CodeNotReachable,
+    /// Exploitation requires a configuration option that is not set (or unset).
+    RequiresConfiguration,
+    /// Exploitation requires a dependency that is not present.
+    RequiresDependency,
+    /// Exploitation requires an environment that is not present.
+    RequiresEnvironment,
+    /// Exploitation requires a compiler flag that is not set (or unset).
+    ProtectedByCompiler,
+    /// Exploits are prevented at runtime.
+    ProtectedAtRuntime,
+    /// Attacks are blocked at the physical, logical or network perimeter.
+    ProtectedAtPerimeter,
+    /// Preventive measures reduce the likelihood or impact of the vulnerability.
+    ProtectedByMitigatingControl,
+    /// The vulnerability was wrongly associated with the component.
+    FalsePositive,
+}
+
+impl Justification {
+    /// Every justification, in the order of the CycloneDX specification, then
+    /// [`Justification::FalsePositive`].
+    pub const ALL: [Justification; 10] = [
+        Justification::CodeNotPresent,
+        Justification::CodeNotReachable,
+        Justification::RequiresConfiguration,
+        Justification::RequiresDependency,
+        Justification::RequiresEnvironment,
+        Justification::ProtectedByCompiler,
+        Justification::ProtectedAtRuntime,
+        Justification::ProtectedAtPerimeter,
+        Justification::ProtectedByMitigatingControl,
+        Justification::FalsePositive,
+    ];
+
+    /// The CycloneDX name, also the stored value.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Justification::CodeNotPresent => "code_not_present",
+            Justification::CodeNotReachable => "code_not_reachable",
+            Justification::RequiresConfiguration => "requires_configuration",
+            Justification::RequiresDependency => "requires_dependency",
+            Justification::RequiresEnvironment => "requires_environment",
+            Justification::ProtectedByCompiler => "protected_by_compiler",
+            Justification::ProtectedAtRuntime => "protected_at_runtime",
+            Justification::ProtectedAtPerimeter => "protected_at_perimeter",
+            Justification::ProtectedByMitigatingControl => "protected_by_mitigating_control",
+            Justification::FalsePositive => "false_positive",
+        }
+    }
+
+    /// Parses a CycloneDX name; anything else is [`Problem::UnknownJustification`].
+    pub fn parse(value: &str) -> Result<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|justification| justification.as_str() == value)
+            .ok_or_else(|| {
+                Error::invalid(Problem::UnknownJustification {
+                    justification: value.to_owned(),
+                })
+            })
+    }
+
+    /// Reads a stored value; an unknown one (never written) reads as none.
+    pub(crate) fn from_column(value: Option<&str>) -> Option<Self> {
+        value.and_then(|value| Self::parse(value).ok())
+    }
+}
+
+/// What happened to a finding. Run events carry the run; member events carry the member, or
+/// the upload token for ignores imported from a VEX document.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EventKind {
@@ -152,6 +236,8 @@ pub struct Finding {
     pub ignore_reason: Option<String>,
     /// Like `ignore_reason`, meaningful only while the finding is ignored.
     pub ignore_expires_at: Option<DateTime<FixedOffset>>,
+    /// Like `ignore_reason`, meaningful only while the finding is ignored.
+    pub ignore_justification: Option<Justification>,
     pub exploitation: Exploitation,
     /// The project's direct dependencies that lead to the component (itself when it is one),
     /// per the dependency graph of the latest SBOM, sorted by name. Empty when the graph does
@@ -207,6 +293,7 @@ fn view(
         first_seen_at: finding.first_seen_at,
         last_seen_at: finding.last_seen_at,
         fixed_at: finding.fixed_at,
+        ignore_justification: Justification::from_column(finding.ignore_justification.as_deref()),
         ignore_reason: finding.ignore_reason,
         ignore_expires_at: finding.ignore_expires_at,
         exploitation: Exploitation::default(),
@@ -235,6 +322,32 @@ pub async fn open_for_upload_token(
     token: &upload_tokens::Model,
     project_id: i64,
 ) -> Result<Vec<Finding>> {
+    let filter = Filter {
+        statuses: vec![Status::Open],
+        ..Filter::default()
+    };
+    let mut findings = token_findings(database, token, project_id, &filter).await?;
+    // Stable: findings of the same severity keep the order of `list`.
+    findings.sort_by_key(|finding| std::cmp::Reverse(finding.severity));
+    Ok(findings)
+}
+
+/// Every finding of a project an upload token covers, ordered as `list` orders them; a project
+/// outside the token is [`Error::NotFound`].
+pub async fn for_upload_token(
+    database: &impl ConnectionTrait,
+    token: &upload_tokens::Model,
+    project_id: i64,
+) -> Result<Vec<Finding>> {
+    token_findings(database, token, project_id, &Filter::default()).await
+}
+
+async fn token_findings(
+    database: &impl ConnectionTrait,
+    token: &upload_tokens::Model,
+    project_id: i64,
+    filter: &Filter,
+) -> Result<Vec<Finding>> {
     // The same check as `inventory::ingest`: the token's organization, and its project when
     // the token is limited to one.
     let project = projects::Entity::find_by_id(project_id)
@@ -245,14 +358,7 @@ pub async fn open_for_upload_token(
                 && token.project_id.is_none_or(|allowed| allowed == project.id)
         })
         .ok_or(Error::NotFound)?;
-    let filter = Filter {
-        statuses: vec![Status::Open],
-        ..Filter::default()
-    };
-    let mut findings = project_findings(database, project, &filter).await?;
-    // Stable: findings of the same severity keep the order of `list`.
-    findings.sort_by_key(|finding| std::cmp::Reverse(finding.severity));
-    Ok(findings)
+    project_findings(database, project, filter).await
 }
 
 /// The findings of a project, without authorization: known exploited first, then most severe
@@ -366,8 +472,12 @@ pub async fn ecosystems(
 pub struct Event {
     pub created_at: DateTime<FixedOffset>,
     pub kind: EventKind,
+    /// The member's username.
     pub actor: Option<String>,
+    /// The name of the upload token that imported a VEX statement.
+    pub token: Option<String>,
     pub reason: Option<String>,
+    pub justification: Option<Justification>,
     pub run_id: Option<i64>,
 }
 
@@ -379,6 +489,23 @@ pub struct AffectedComponent {
     pub project_slug: String,
     pub purl: String,
     pub status: Status,
+}
+
+async fn token_names(
+    database: &impl ConnectionTrait,
+    identifiers: impl Iterator<Item = i64>,
+) -> Result<HashMap<i64, String>> {
+    let identifiers: Vec<i64> = identifiers.collect();
+    if identifiers.is_empty() {
+        return Ok(HashMap::new());
+    }
+    Ok(upload_tokens::Entity::find()
+        .filter(upload_tokens::Column::Id.is_in(identifiers))
+        .all(database)
+        .await?
+        .into_iter()
+        .map(|token| (token.id, token.name))
+        .collect())
 }
 
 /// Everything about a finding.
@@ -397,6 +524,8 @@ pub struct FindingDetail {
     pub fixed_versions: Vec<String>,
     pub references: Vec<Reference>,
     pub ignored_by: Option<String>,
+    /// The name of the upload token that ignored the finding from a VEX document.
+    pub ignored_by_token: Option<String>,
     pub affected_components: Vec<AffectedComponent>,
     pub events: Vec<Event>,
     /// How the project pulls in the component; `None` when its latest SBOM did not say which
@@ -481,6 +610,14 @@ pub async fn detail(
             .chain(finding.ignored_by_user_id),
     )
     .await?;
+    let tokens = token_names(
+        database,
+        events
+            .iter()
+            .filter_map(|event| event.upload_token_id)
+            .chain(finding.ignored_by_upload_token_id),
+    )
+    .await?;
 
     let visible = crate::organizations::list(database, actor)
         .await?
@@ -530,12 +667,19 @@ pub async fn detail(
         ignored_by: finding
             .ignored_by_user_id
             .and_then(|id| names.get(&id).cloned()),
+        ignored_by_token: finding
+            .ignored_by_upload_token_id
+            .and_then(|id| tokens.get(&id).cloned()),
         events: events
             .into_iter()
             .map(|event| Event {
                 created_at: event.created_at,
                 kind: EventKind::parse(&event.kind),
                 actor: event.actor_user_id.and_then(|id| names.get(&id).cloned()),
+                token: event
+                    .upload_token_id
+                    .and_then(|id| tokens.get(&id).cloned()),
+                justification: Justification::from_column(event.justification.as_deref()),
                 reason: event.reason,
                 run_id: event.run_id,
             })
@@ -579,24 +723,85 @@ async fn triaged_finding(
     Ok(finding)
 }
 
-/// Ignores an open finding, with a mandatory reason (at most 2000 characters) and an optional
-/// expiry in the future. Requires [`Permission::TriageFindings`]. The finding returns to open
-/// at the first run after the expiry, not at the expiry itself; ignoring a finding that is not
-/// open is a [`Problem::OnlyOpenCanBeIgnored`] conflict.
+/// The longest ignore reason, in characters.
+pub const MAXIMUM_REASON_LENGTH: usize = 2000;
+
+/// Checks an ignore reason and returns it trimmed.
+fn ignore_reason(reason: &str) -> Result<&str> {
+    let reason = reason.trim();
+    if reason.is_empty() {
+        return Err(Error::invalid(Problem::ReasonRequired));
+    }
+    if reason.chars().count() > MAXIMUM_REASON_LENGTH {
+        return Err(Error::invalid(Problem::ReasonTooLong {
+            maximum: MAXIMUM_REASON_LENGTH,
+        }));
+    }
+    Ok(reason)
+}
+
+/// Who ignores a finding.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum IgnoredBy {
+    Member(i64),
+    UploadToken(i64),
+}
+
+/// Marks an open finding ignored and records the event, inside the caller's transaction. The
+/// reason is already checked.
+pub(crate) async fn mark_ignored(
+    transaction: &impl ConnectionTrait,
+    finding: findings::Model,
+    by: IgnoredBy,
+    reason: &str,
+    justification: Option<Justification>,
+    expires_at: Option<DateTime<FixedOffset>>,
+) -> Result<()> {
+    let finding_id = finding.id;
+    let (user, token) = match by {
+        IgnoredBy::Member(user) => (Some(user), None),
+        IgnoredBy::UploadToken(token) => (None, Some(token)),
+    };
+    let now = Utc::now().fixed_offset();
+    let mut active: findings::ActiveModel = finding.into();
+    active.status = Set(Status::Ignored.as_str().to_owned());
+    active.ignore_reason = Set(Some(reason.to_owned()));
+    active.ignore_justification = Set(justification.map(|value| value.as_str().to_owned()));
+    active.ignore_expires_at = Set(expires_at);
+    active.ignored_by_user_id = Set(user);
+    active.ignored_by_upload_token_id = Set(token);
+    active.ignored_at = Set(Some(now));
+    active.update(transaction).await?;
+    finding_events::ActiveModel {
+        finding_id: Set(finding_id),
+        created_at: Set(now),
+        kind: Set(EventKind::Ignored.as_str().to_owned()),
+        actor_user_id: Set(user),
+        upload_token_id: Set(token),
+        reason: Set(Some(reason.to_owned())),
+        justification: Set(justification.map(|value| value.as_str().to_owned())),
+        run_id: Set(None),
+        ..Default::default()
+    }
+    .insert(transaction)
+    .await?;
+    Ok(())
+}
+
+/// Ignores an open finding, with a mandatory reason (at most [`MAXIMUM_REASON_LENGTH`]
+/// characters), an optional machine-readable justification and an optional expiry in the
+/// future. Requires [`Permission::TriageFindings`]. The finding returns to open at the first
+/// run after the expiry, not at the expiry itself; ignoring a finding that is not open is a
+/// [`Problem::OnlyOpenCanBeIgnored`] conflict.
 pub async fn ignore(
     database: &(impl ConnectionTrait + TransactionTrait),
     actor: &Actor,
     finding_id: i64,
     reason: &str,
+    justification: Option<Justification>,
     expires_at: Option<DateTime<FixedOffset>>,
 ) -> Result<()> {
-    let reason = reason.trim();
-    if reason.is_empty() {
-        return Err(Error::invalid(Problem::ReasonRequired));
-    }
-    if reason.chars().count() > 2000 {
-        return Err(Error::invalid(Problem::ReasonTooLong { maximum: 2000 }));
-    }
+    let reason = ignore_reason(reason)?;
     if expires_at.is_some_and(|expiry| expiry <= Utc::now()) {
         return Err(Error::invalid(Problem::ExpiryNotInFuture));
     }
@@ -605,20 +810,13 @@ pub async fn ignore(
     if Status::parse(&finding.status) != Status::Open {
         return Err(Error::conflict(Problem::OnlyOpenCanBeIgnored));
     }
-    let mut active: findings::ActiveModel = finding.into();
-    active.status = Set(Status::Ignored.as_str().to_owned());
-    active.ignore_reason = Set(Some(reason.to_owned()));
-    active.ignore_expires_at = Set(expires_at);
-    active.ignored_by_user_id = Set(Some(actor.user_id));
-    active.ignored_at = Set(Some(Utc::now().fixed_offset()));
-    active.update(&transaction).await?;
-    record_event(
+    mark_ignored(
         &transaction,
-        finding_id,
-        EventKind::Ignored,
-        Some(actor.user_id),
-        Some(reason.to_owned()),
-        None,
+        finding,
+        IgnoredBy::Member(actor.user_id),
+        reason,
+        justification,
+        expires_at,
     )
     .await?;
     transaction.commit().await?;

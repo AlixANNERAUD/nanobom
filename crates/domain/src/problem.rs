@@ -69,6 +69,10 @@ pub enum Problem {
     UnsupportedSpdxVersion { version: String },
     InvalidCycloneDx { detail: String },
     InvalidSpdx { detail: String },
+    VexNotJson { detail: String },
+    VexNotCycloneDx,
+    UnsupportedVexVersion { version: String },
+    InvalidVex { detail: String },
     UsernameTaken { username: String },
     EmailTaken { email: String },
     OwnAccountStatus,
@@ -81,6 +85,7 @@ pub enum Problem {
     UnknownOrganization { slug: String },
     UnknownRole { role: String },
     UnknownSeverity,
+    UnknownJustification { justification: String },
     ReasonRequired,
     ReasonTooLong { maximum: usize },
     ExpiryNotInFuture,
@@ -171,6 +176,28 @@ impl Problem {
                 "problems.invalid_spdx",
                 detail = detail
             ),
+            P::VexNotJson { detail } => translate_write!(
+                output,
+                locale = locale,
+                "problems.vex_not_json",
+                detail = detail
+            ),
+            P::VexNotCycloneDx => {
+                output.write_str(translate!(locale = locale, "problems.vex_not_cyclonedx"))
+            }
+            P::UnsupportedVexVersion { version } => translate_write!(
+                output,
+                locale = locale,
+                "problems.unsupported_vex_version",
+                version = version,
+                supported = crate::inventory::SUPPORTED_VEX_VERSIONS.join(", ")
+            ),
+            P::InvalidVex { detail } => translate_write!(
+                output,
+                locale = locale,
+                "problems.invalid_vex",
+                detail = detail
+            ),
             P::UsernameTaken { username } => translate_write!(
                 output,
                 locale = locale,
@@ -232,6 +259,12 @@ impl Problem {
             P::UnknownSeverity => {
                 output.write_str(translate!(locale = locale, "problems.unknown_severity"))
             }
+            P::UnknownJustification { justification } => translate_write!(
+                output,
+                locale = locale,
+                "problems.unknown_justification",
+                justification = justification
+            ),
             P::ReasonRequired => {
                 output.write_str(translate!(locale = locale, "problems.reason_required"))
             }

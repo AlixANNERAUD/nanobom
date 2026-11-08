@@ -2,7 +2,8 @@
 
 Who can see and do what depends on two things: **instance administration**, a flag on the user
 account, and the user's **organization role**, per organization. Upload tokens are not user
-accounts: they authenticate CI on the [upload API](upload-api.md#tokens) only.
+accounts: they authenticate CI on the [upload API](upload-api.md#tokens) and the
+[VEX API](vex-api.md) only.
 
 ## Organization roles
 
@@ -10,7 +11,7 @@ Each member of an organization has one of four roles, each including the ones be
 
 | Permission | Viewer | Member | Admin | Owner |
 | --- | :---: | :---: | :---: | :---: |
-| See the organization, its projects, components, findings and runs | ✓ | ✓ | ✓ | ✓ |
+| See the organization, its projects, components, findings and runs; export VEX documents | ✓ | ✓ | ✓ | ✓ |
 | Ignore and restore findings | | ✓ | ✓ | ✓ |
 | Start a run (**Check now**) | | ✓ | ✓ | ✓ |
 | Add, change and remove members other than owners | | | ✓ | ✓ |

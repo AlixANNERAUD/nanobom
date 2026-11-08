@@ -269,11 +269,11 @@ async fn ignored_findings_keep_their_reason_and_expire() {
     let database = &fixture.database;
 
     assert!(matches!(
-        findings::ignore(database, &fixture.viewer, finding, "not used", None).await,
+        findings::ignore(database, &fixture.viewer, finding, "not used", None, None).await,
         Err(Error::Forbidden)
     ));
     assert!(matches!(
-        findings::ignore(database, &fixture.member, finding, "  ", None).await,
+        findings::ignore(database, &fixture.member, finding, "  ", None, None).await,
         Err(Error::Invalid(_))
     ));
     assert!(matches!(
@@ -282,6 +282,7 @@ async fn ignored_findings_keep_their_reason_and_expire() {
             &fixture.member,
             finding,
             "later",
+            None,
             Some((Utc::now() - Duration::days(1)).fixed_offset())
         )
         .await,
@@ -293,12 +294,13 @@ async fn ignored_findings_keep_their_reason_and_expire() {
         &fixture.member,
         finding,
         "template helper is never called with user input",
+        None,
         Some(expiry),
     )
     .await
     .unwrap();
     assert!(matches!(
-        findings::ignore(database, &fixture.member, finding, "twice", None).await,
+        findings::ignore(database, &fixture.member, finding, "twice", None, None).await,
         Err(Error::Conflict(_))
     ));
 
@@ -341,9 +343,16 @@ async fn ignored_findings_keep_their_reason_and_expire() {
     );
     assert_eq!(detail.events[1].actor.as_deref(), Some("member"));
 
-    findings::ignore(database, &fixture.member, finding, "accepted risk", None)
-        .await
-        .unwrap();
+    findings::ignore(
+        database,
+        &fixture.member,
+        finding,
+        "accepted risk",
+        None,
+        None,
+    )
+    .await
+    .unwrap();
     findings::restore(database, &fixture.member, finding)
         .await
         .unwrap();
@@ -363,9 +372,16 @@ async fn ignored_findings_that_disappear_are_fixed() {
     let project = fixture.upload(&[LODASH]).await;
     fixture.run().await;
     let finding = fixture.findings(project).await[0].id;
-    findings::ignore(&fixture.database, &fixture.owner, finding, "accepted", None)
-        .await
-        .unwrap();
+    findings::ignore(
+        &fixture.database,
+        &fixture.owner,
+        finding,
+        "accepted",
+        None,
+        None,
+    )
+    .await
+    .unwrap();
     fixture.upload(&[MINIMIST]).await;
     let outcome = fixture.run().await;
     assert_eq!(outcome.fixed_findings, 1);
@@ -392,9 +408,16 @@ async fn the_oldest_finding_of_a_merged_alias_group_is_kept() {
     assert_eq!(fixture.findings(project).await.len(), 2);
     // Updating the oldest row moves it behind the other one in a PostgreSQL table, so an
     // unordered read would return the newer finding first.
-    findings::ignore(&fixture.database, &fixture.owner, oldest, "accepted", None)
-        .await
-        .unwrap();
+    findings::ignore(
+        &fixture.database,
+        &fixture.owner,
+        oldest,
+        "accepted",
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     // The advisory now lists the other identifier as an alias: both are one group.
     fixture
@@ -578,7 +601,7 @@ async fn findings_of_other_organizations_stay_hidden() {
         Err(Error::NotFound)
     ));
     assert!(matches!(
-        findings::ignore(&fixture.database, &stranger, mine, "mine now", None).await,
+        findings::ignore(&fixture.database, &stranger, mine, "mine now", None, None).await,
         Err(Error::NotFound)
     ));
 }
@@ -631,6 +654,7 @@ async fn filters_and_overview_count_by_severity() {
         &fixture.member,
         high[0].id,
         "accepted",
+        None,
         None,
     )
     .await

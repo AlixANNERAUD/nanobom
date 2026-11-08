@@ -46,6 +46,7 @@ pub mod operations;
 pub mod runner;
 pub mod serve;
 pub mod state;
+pub mod vex;
 
 use nanobom_domain::database;
 
