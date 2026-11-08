@@ -1,0 +1,17 @@
+# Uploads the SBOM of a container image to nanobom from GitLab CI, with Syft.
+# CI/CD variables: NANOBOM_URL, and NANOBOM_TOKEN (masked) holding an upload token.
+sbom:
+  stage: deploy
+  image:
+    name: anchore/syft:latest
+    entrypoint: [""]
+  rules:
+    - if: $CI_COMMIT_TAG
+  script:
+    - syft "$CI_REGISTRY_IMAGE:$CI_COMMIT_TAG" --output cyclonedx-json=sbom.json
+    - >
+      wget --quiet --output-document=- --method=PUT
+      --header="Authorization: Bearer $NANOBOM_TOKEN"
+      --header="Content-Type: application/json"
+      --body-file=sbom.json
+      "$NANOBOM_URL/api/organizations/acme/projects/$CI_PROJECT_NAME/sbom?source_commit=$CI_COMMIT_SHA&image_tag=$CI_COMMIT_TAG"

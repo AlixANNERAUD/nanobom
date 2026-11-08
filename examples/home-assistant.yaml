@@ -1,0 +1,25 @@
+# A Home Assistant automation notifying a phone when nanobom finds new vulnerabilities.
+# In nanobom, set the organization's webhook (Settings → Webhook) to
+#   https://home-assistant.example.org/api/webhook/nanobom-acme
+# and choose the minimum severity worth a notification.
+alias: nanobom new vulnerabilities
+triggers:
+  - trigger: webhook
+    webhook_id: nanobom-acme
+    allowed_methods: [POST]
+    local_only: false
+conditions:
+  - condition: template
+    value_template: "{{ trigger.json.event == 'findings.new' }}"
+actions:
+  - action: notify.mobile_app_phone
+    data:
+      title: >-
+        {{ trigger.json.count }} new {{ trigger.json.highest_severity }}
+        vulnerabilities in {{ trigger.json.organization.name }}
+      message: >-
+        {% for finding in trigger.json.findings[:5] %}
+        {{ finding.vulnerability }} ({{ finding.severity }}) in {{ finding.component }}, {{ finding.project }}
+        {% endfor %}
+      data:
+        url: "{{ trigger.json.findings[0].url }}"

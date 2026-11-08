@@ -1,0 +1,31 @@
+# Uploads the SBOM of a Rust project to nanobom on every push to main.
+# Secrets: NANOBOM_TOKEN (an upload token of the organization). Variables: NANOBOM_URL.
+name: SBOM
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  sbom:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Generate the SBOM
+        run: |
+          cargo install cargo-cyclonedx --locked
+          cargo cyclonedx --format json --override-filename sbom
+      - name: Upload it to nanobom
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --request PUT \
+            --header "Authorization: Bearer $NANOBOM_TOKEN" \
+            --header "Content-Type: application/json" \
+            --data-binary @sbom.json \
+            "$NANOBOM_URL/api/organizations/acme/projects/${GITHUB_REPOSITORY#*/}/sbom?source_commit=$GITHUB_SHA"
+        env:
+          NANOBOM_URL: ${{ vars.NANOBOM_URL }}
+          NANOBOM_TOKEN: ${{ secrets.NANOBOM_TOKEN }}
