@@ -50,7 +50,7 @@ use crate::{
     access::{Actor, Permission},
     deliveries::{self, Attempt, Outcome},
     error::{Error, Result},
-    evaluation::{RunOutcome, Scope},
+    evaluation::{self, RunOutcome, Scope},
     exploitation::{self, Exploitation, QUERY_CHUNK},
     problem::Problem,
     staleness,
@@ -695,6 +695,35 @@ pub async fn queue_stale(
     let ids = enqueue(&transaction, &deliveries).await?;
     transaction.commit().await?;
     Ok(ids)
+}
+
+/// Records the runs left `running` by a crash or a restart as failed
+/// ([`evaluation::fail_interrupted`]) and queues their `run.failed` documents to
+/// `failure_webhook` (`None`: not configured), in one transaction, so that a crash in between
+/// cannot leave a run failed with its document lost. Nothing is posted: the retry loop
+/// delivers them. Returns the failed runs.
+pub async fn fail_interrupted_runs(
+    database: &DatabaseConnection,
+    failure_webhook: Option<&Url>,
+    public_url: &Url,
+) -> Result<Vec<RunOutcome>> {
+    let transaction = crate::database::begin_write(database).await?;
+    let outcomes = evaluation::fail_interrupted(&transaction).await?;
+    if let Some(url) = failure_webhook {
+        let failures: Vec<Delivery<RunFailedPayload>> = outcomes
+            .iter()
+            .filter_map(|outcome| {
+                Some(Delivery {
+                    organization_id: None,
+                    url: url.to_string(),
+                    payload: run_failed_payload(outcome, public_url)?,
+                })
+            })
+            .collect();
+        enqueue(&transaction, &failures).await?;
+    }
+    transaction.commit().await?;
+    Ok(outcomes)
 }
 
 /// Sends webhook payloads through the delivery queue.
