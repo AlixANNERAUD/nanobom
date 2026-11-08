@@ -1,0 +1,32 @@
+# nanobom behind a reverse proxy, with its SQLite database in a named volume.
+#
+#   docker compose -f examples/compose.yaml up -d
+#   docker compose -f examples/compose.yaml exec nanobom /app/nanobom create-administrator --username admin
+#
+# Every setting is an environment variable; `/app/nanobom serve --help` lists them.
+services:
+  nanobom:
+    image: ghcr.io/alixanneraud/nanobom:0
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - nanobom-data:/data
+    environment:
+      # The address users reach nanobom at: links, cookies and sign-in redirects use it.
+      NANOBOM_PUBLIC_URL: https://nanobom.example.org
+      # Re-evaluate every project each night (cron, UTC), and after each upload.
+      NANOBOM_SCHEDULE: "0 3 * * *"
+      # Read client addresses from the proxy's headers, for sign-in rate limiting.
+      NANOBOM_TRUST_FORWARDED_HEADERS: "true"
+      # Optional: a webhook receiving a JSON payload when a run fails.
+      # NANOBOM_FAILURE_WEBHOOK_URL: https://hooks.example.org/nanobom
+      # Optional: single sign-on with OpenID Connect.
+      # NANOBOM_OIDC_ISSUER: https://auth.example.org
+      # NANOBOM_OIDC_CLIENT_ID: nanobom
+      # NANOBOM_OIDC_CLIENT_SECRET: change-me
+      # NANOBOM_OIDC_GROUPS_CLAIM: groups
+      # NANOBOM_OIDC_GROUP_MAPPING: "security=acme:admin;developers=acme:member"
+
+volumes:
+  nanobom-data:

@@ -1,0 +1,11 @@
+target
+.git
+.github
+data
+*.db
+*.db-shm
+*.db-wal
+.env
+mise.local.toml
+Dockerfile
+.dockerignore
