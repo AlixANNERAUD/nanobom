@@ -265,13 +265,13 @@ async fn fail_on_a_severity_fails_uploads_with_findings_at_or_above_it() {
 
     let (status, body) = upload_web(&server, &token, "?fail_on=high").await;
     assert_eq!(status, StatusCode::CONFLICT);
-    assert_eq!(body["error"], "1 open findings at or above high");
+    assert_eq!(body["error"], "1 open finding at or above high");
     assert_eq!(body["project"], "web");
     assert_eq!(body["evaluation"]["status"], "succeeded");
 
     let (status, body) = upload_web(&server, &token, "?fail_on=low&wait=false").await;
     assert_eq!(status, StatusCode::CONFLICT, "fail_on implies wait");
-    assert_eq!(body["error"], "1 open findings at or above low");
+    assert_eq!(body["error"], "1 open finding at or above low");
 }
 
 #[tokio::test]
@@ -308,7 +308,7 @@ async fn fail_on_exploited_fails_uploads_with_known_exploited_findings() {
     .unwrap();
     let (status, body) = upload_web(&server, &token, "?fail_on=exploited").await;
     assert_eq!(status, StatusCode::CONFLICT);
-    assert_eq!(body["error"], "1 open findings at or above exploited");
+    assert_eq!(body["error"], "1 open finding is known exploited");
     assert_eq!(body["evaluation"]["known_exploited"], 1);
     assert_eq!(body["evaluation"]["findings"][0]["known_exploited"], true);
 }
@@ -380,6 +380,30 @@ async fn failed_evaluations_fail_only_uploads_with_fail_on() {
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(body["error"], "the evaluation did not complete");
     assert_eq!(body["evaluation"]["status"], "failed");
+}
+
+#[tokio::test]
+async fn evaluations_that_panic_are_reported_as_failed() {
+    let server = server(&[]).await;
+    let token = acme_token(&server).await;
+
+    server.source.panic_once();
+    let (status, body) = upload_web(&server, &token, "?wait=true").await;
+    assert_eq!(status, StatusCode::CREATED);
+    assert!(body.get("error").is_none(), "{body}");
+    assert_eq!(body["evaluation"]["status"], "failed");
+    assert_eq!(body["evaluation"]["run_id"], serde_json::Value::Null);
+
+    server.source.panic_once();
+    let (status, body) = upload_web(&server, &token, "?fail_on=high").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body["error"], "the evaluation did not complete");
+    assert_eq!(body["evaluation"]["status"], "failed");
+    assert_eq!(body["evaluation"]["run_id"], serde_json::Value::Null);
+
+    let (status, body) = upload_web(&server, &token, "?fail_on=high").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["evaluation"]["status"], "succeeded");
 }
 
 #[tokio::test]

@@ -129,8 +129,9 @@ curl --fail-with-body -X PUT \
 }
 ```
 
-`evaluation.status` is `succeeded`, `failed` (OSV was unreachable) or `timed_out`, in which case
-`run_id` is `null` and the run still finishes in the background. `open` counts the project's open
+`evaluation.status` is `succeeded`, `failed` (the run could not complete, OSV being unreachable
+for example; `run_id` is `null` when it was not recorded) or `timed_out`, in which case `run_id`
+is `null` and the run still finishes in the background. `open` counts the project's open
 findings, ignored ones excluded; `findings` lists the most severe first (known exploited ones
 first among equals), at most 100; `known_exploited` counts all of them. `error` is present only
 when the upload fails:

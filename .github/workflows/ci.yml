@@ -1,8 +1,9 @@
 name: CI
 
 on:
+  # Other branches are checked through their pull request, so each commit is built once.
   push:
-    branches: ["**"]
+    branches: [main]
     tags-ignore: ["**"]
   pull_request:
     # `edited` re-checks the title when it changes; only the title check runs then.
