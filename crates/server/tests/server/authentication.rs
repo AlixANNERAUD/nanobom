@@ -5,6 +5,11 @@ use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
+use serde_json::json;
+use wiremock::{
+    Mock, MockServer, ResponseTemplate,
+    matchers::{method, path},
+};
 
 const PASSWORD: &str = "correct horse battery staple";
 
@@ -133,4 +138,82 @@ async fn openid_sign_in_without_a_provider_returns_to_the_sign_in_page() {
         .await;
     assert_eq!(response.status(), StatusCode::SEE_OTHER);
     assert_eq!(location(&response), "/login?error=unavailable&next=%2F");
+}
+
+/// Serves the discovery document of a provider whose issuer is `issuer` (announced verbatim)
+/// and whose endpoints are under `root`.
+async fn provider(root: &str, issuer: impl FnOnce(String) -> String) -> (MockServer, String) {
+    let server = MockServer::start().await;
+    let issuer = issuer(server.uri());
+    let base = format!("{}{root}", server.uri());
+    Mock::given(method("GET"))
+        .and(path(format!("{root}/.well-known/openid-configuration")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "issuer": issuer,
+            "authorization_endpoint": format!("{base}/authorize"),
+            "token_endpoint": format!("{base}/token"),
+            "jwks_uri": format!("{base}/jwks"),
+            "response_types_supported": ["code"],
+            "subject_types_supported": ["public"],
+            "id_token_signing_alg_values_supported": ["RS256"]
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(format!("{root}/jwks")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"keys": []})))
+        .mount(&server)
+        .await;
+    (server, issuer)
+}
+
+/// Starts a sign-in with `NANOBOM_OIDC_ISSUER` set to `configured`, and returns where the
+/// browser is sent.
+async fn start_openid(configured: &str) -> String {
+    let server = server(&[
+        "--oidc-issuer",
+        configured,
+        "--oidc-client-id",
+        "nanobom",
+        "--oidc-client-secret",
+        "secret",
+    ])
+    .await;
+    let response = server
+        .send(
+            Request::get("/auth/oidc/login")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::SEE_OTHER);
+    location(&response).to_owned()
+}
+
+#[tokio::test]
+async fn openid_discovery_works_with_an_issuer_ending_with_a_slash() {
+    let (provider, issuer) = provider("/application/o/nanobom", |origin| {
+        format!("{origin}/application/o/nanobom/")
+    })
+    .await;
+    assert!(issuer.ends_with('/'));
+    let location = start_openid(&issuer).await;
+    assert!(
+        location.starts_with(&format!(
+            "{}/application/o/nanobom/authorize?",
+            provider.uri()
+        )),
+        "redirected to the provider, not back to the sign-in page: {location}"
+    );
+}
+
+#[tokio::test]
+async fn openid_discovery_works_with_an_issuer_without_a_slash() {
+    let (provider, issuer) = provider("", |origin| origin).await;
+    assert!(!issuer.ends_with('/'));
+    let location = start_openid(&issuer).await;
+    assert!(
+        location.starts_with(&format!("{}/authorize?", provider.uri())),
+        "redirected to the provider, not back to the sign-in page: {location}"
+    );
 }
