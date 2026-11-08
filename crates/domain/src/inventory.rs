@@ -40,13 +40,16 @@ use sea_orm::{
     sea_query::{Expr, Func, LikeExpr},
 };
 use serde::{Deserialize, Serialize};
+use serde_json::error::Category;
 
+use self::header::{Context, Header, Text};
 use crate::{
     access::{Actor, Permission},
     error::{Error, Result},
     problem::{Field, Problem},
 };
 
+mod header;
 pub mod spdx;
 
 /// CycloneDX specification versions accepted at upload.
@@ -99,10 +102,10 @@ pub struct ParsedSbom {
     /// The edges of the SBOM's dependency graph between the components kept, sorted and
     /// without duplicates. Edges to or from a component that is not kept are dropped.
     pub dependencies: Vec<DependencyEdge>,
-    /// Whether edges that could lead through a dropped component were lost: a component
-    /// without a usable package URL that the graph reaches and leaves, or a `bom-ref` shared by
-    /// components with different package URLs. Paths derived from the graph may then be
-    /// missing.
+    /// Whether edges that could lead through a dropped component were lost, whatever the
+    /// format: a component without a usable package URL that the graph reaches and leaves, or
+    /// an identifier (`bom-ref`, SPDXID) given to components with different package URLs. Paths
+    /// derived from the graph may then be missing.
     pub dependencies_partial: bool,
 }
 
@@ -115,26 +118,16 @@ pub struct DependencyEdge {
     pub child: String,
 }
 
-#[derive(Deserialize)]
-struct Header {
-    #[serde(rename = "bomFormat")]
-    format: Option<String>,
-    #[serde(rename = "specVersion")]
-    specification_version: Option<String>,
-    #[serde(rename = "spdxVersion")]
-    spdx_version: Option<String>,
-    /// The JSON-LD context of SPDX 3 documents, which have no `spdxVersion`.
-    #[serde(rename = "@context")]
-    context: Option<serde_json::Value>,
-}
-
 /// Parses a CycloneDX or SPDX JSON document, telling them apart by their content
-/// (`bomFormat` or `spdxVersion`), never by a header.
+/// (`bomFormat` or `spdxVersion`), never by a header. A document with both a
+/// `"bomFormat": "CycloneDX"` and an `spdxVersion` is read as CycloneDX.
 ///
 /// Errors are [`Error::Invalid`] with a problem that tells CI what is wrong: not JSON (with a
-/// specific message for XML, SPDX tag-value and SPDX RDF), neither CycloneDX nor SPDX, a
-/// specification version outside [`SUPPORTED_SPECIFICATION_VERSIONS`] or
-/// [`SUPPORTED_SPDX_VERSIONS`], or a document that does not follow it.
+/// specific message for XML, SPDX tag-value and SPDX RDF), neither CycloneDX nor SPDX (with a
+/// specific message for SPDX 3, recognized by its JSON-LD `@context`), a specification version
+/// outside [`SUPPORTED_SPECIFICATION_VERSIONS`] or [`SUPPORTED_SPDX_VERSIONS`], or a document
+/// that does not follow it. Values of the document echoed in a message are cut to 200
+/// characters.
 ///
 /// CycloneDX documents are deserialized once, straight into the model of their specification
 /// version, to keep memory use low on large SBOMs; nested components are flattened. The
@@ -143,41 +136,99 @@ struct Header {
 /// components with different package URLs is ambiguous: no edge goes through it. See [`spdx`]
 /// for SPDX.
 pub fn parse(document: &[u8]) -> Result<ParsedSbom> {
-    let header: Header = serde_json::from_slice(document)
-        .map_err(|error| Error::invalid(not_json(document, &error)))?;
-    if header.format.as_deref() == Some("CycloneDX") {
-        return parse_cyclonedx(document, header.specification_version.unwrap_or_default());
+    let header: Header = match serde_json::from_slice(document) {
+        Ok(header) => header,
+        // Valid JSON, but not an object.
+        Err(error) if error.classify() == Category::Data => {
+            return Err(Error::invalid(Problem::UnknownSbomFormat));
+        }
+        Err(error) => return Err(Error::invalid(not_json(document, &error))),
+    };
+    if matches!(&header.format, Some(Text::Text(format)) if format == "CycloneDX") {
+        return match header.specification_version {
+            Some(Text::Text(version)) => parse_cyclonedx(document, version),
+            Some(Text::Other) => Err(Error::invalid(Problem::InvalidCycloneDx {
+                detail: "specVersion must be a string".to_owned(),
+            })),
+            None => parse_cyclonedx(document, String::new()),
+        };
     }
-    if let Some(version) = header.spdx_version {
-        return spdx::parse(document, version);
+    match header.spdx_version {
+        Some(Text::Text(version)) => return spdx::parse(document, version),
+        Some(Text::Other) => {
+            return Err(Error::invalid(Problem::InvalidSpdx {
+                detail: "spdxVersion must be a string".to_owned(),
+            }));
+        }
+        None => {}
     }
-    if let Some(version) = header.context.as_ref().and_then(spdx::version_3) {
-        return Err(Error::invalid(Problem::UnsupportedSpdxVersion { version }));
+    match header.context {
+        Some(Context {
+            version: Some(version),
+            ..
+        }) => Err(Error::invalid(Problem::UnsupportedSpdxVersion { version })),
+        // JSON-LD naming the SPDX 2 vocabulary: an RDF serialization.
+        Some(Context {
+            names_spdx: true, ..
+        }) => Err(Error::invalid(Problem::SpdxRdf)),
+        _ => Err(Error::invalid(Problem::UnknownSbomFormat)),
     }
-    Err(Error::invalid(Problem::UnknownSbomFormat))
 }
 
-/// Why a document is not JSON, naming the formats CI most likely sent by mistake.
+/// Why a document is not JSON, naming the formats CI most likely sent by mistake. Only XML and
+/// Turtle naming the SPDX vocabulary are SPDX RDF: broken JSON may name it too.
 fn not_json(document: &[u8], error: &serde_json::Error) -> Problem {
     let tag_value = document
         .split(|byte| *byte == b'\n')
         .any(|line| line.trim_ascii_start().starts_with(b"SPDXVersion:"));
-    if tag_value {
-        Problem::SpdxTagValue
-    } else if contains(document, b"spdx.org/rdf") {
-        // RDF/XML and Turtle both name the SPDX vocabulary.
-        Problem::SpdxRdf
-    } else if document
+    let text = document
         .strip_prefix(b"\xEF\xBB\xBF")
         .unwrap_or(document)
-        .trim_ascii_start()
-        .starts_with(b"<")
-    {
-        Problem::SbomXml
+        .trim_ascii_start();
+    let names_spdx = contains(document, b"spdx.org/rdf");
+    if tag_value {
+        Problem::SpdxTagValue
+    } else if text.starts_with(b"<") {
+        if names_spdx {
+            Problem::SpdxRdf
+        } else {
+            Problem::SbomXml
+        }
+    } else if names_spdx && is_turtle(text) {
+        Problem::SpdxRdf
     } else {
         Problem::SbomNotJson {
-            detail: error.to_string(),
+            detail: capped(&error.to_string()),
         }
+    }
+}
+
+/// Whether a document starts like Turtle: comments, then a prefix or base declaration
+/// (`@prefix`, or `PREFIX` in the SPARQL style).
+fn is_turtle(document: &[u8]) -> bool {
+    document
+        .split(|byte| *byte == b'\n')
+        .map(<[u8]>::trim_ascii)
+        .find(|line| !line.is_empty() && !line.starts_with(b"#"))
+        .is_some_and(|line| {
+            ["@prefix", "@base", "prefix ", "base "]
+                .iter()
+                .any(|start| {
+                    line.get(..start.len())
+                        .is_some_and(|head| head.eq_ignore_ascii_case(start.as_bytes()))
+                })
+        })
+}
+
+/// Error messages echo values of the document; this many characters of each are kept.
+const MAXIMUM_ECHOED_LENGTH: usize = 200;
+
+/// `text` cut to [`MAXIMUM_ECHOED_LENGTH`] characters, with an ellipsis when it was longer, to
+/// echo in an error message.
+fn capped(text: &str) -> String {
+    match text.char_indices().nth(MAXIMUM_ECHOED_LENGTH) {
+        Some((end, _)) => format!("{}\u{2026}", &text[..end]),
+        None => text.to_owned(),
     }
 }
 
@@ -200,7 +251,7 @@ fn parse_cyclonedx(document: &[u8], specification_version: String) -> Result<Par
     })?;
     let bom = Bom::parse_from_json_with_version(document, version).map_err(|error| {
         Error::invalid(Problem::InvalidCycloneDx {
-            detail: error.to_string(),
+            detail: capped(&error.to_string()),
         })
     })?;
 
@@ -324,11 +375,7 @@ fn dependency_edges(
     (edges.into_iter().collect(), partial)
 }
 
-fn collect(
-    components: &[Component],
-    collector: &mut Collector,
-    references: &mut References,
-) {
+fn collect(components: &[Component], collector: &mut Collector, references: &mut References) {
     for component in components {
         // Files and the operating system describe what was scanned; they are not packages.
         let is_package = !matches!(
@@ -384,12 +431,6 @@ impl Collector {
         }
     }
 
-    fn ecosystem(&self, purl: &str) -> Option<&str> {
-        self.by_purl
-            .get(purl)
-            .map(|component| component.ecosystem.as_str())
-    }
-
     fn finish(
         self,
         specification_version: String,
@@ -411,14 +452,22 @@ impl Collector {
 
 fn inventory_component(purl: Option<&str>) -> std::result::Result<InventoryComponent, String> {
     let purl = purl.ok_or_else(|| "no package URL".to_owned())?;
-    let parsed = PackageUrl::from_str(purl)
+    let mut parsed = PackageUrl::from_str(purl)
         .map_err(|error| format!("invalid package URL {purl:?}: {error}"))?;
-    if let Some(version) = parsed.version()
-        && is_version_requirement(version)
-    {
-        return Err(format!(
-            "version requirement {version:?} instead of a resolved version"
-        ));
+    if let Some(version) = parsed.version() {
+        // `=1.6.0` (or `==1.6.0`) allows one version, which OSV can match.
+        let exact = version.trim_start_matches('=');
+        if exact.is_empty() || is_version_requirement(exact) {
+            return Err(format!(
+                "version requirement {version:?} instead of a resolved version"
+            ));
+        }
+        if exact.len() != version.len() {
+            let exact = exact.to_owned();
+            parsed
+                .with_version(exact)
+                .map_err(|error| format!("invalid package URL {purl:?}: {error}"))?;
+        }
     }
     let mut query = parsed.clone();
     query.clear_qualifiers().without_subpath();
@@ -436,12 +485,17 @@ fn inventory_component(purl: Option<&str>) -> std::result::Result<InventoryCompo
 }
 
 /// Whether a purl version is a requirement on versions rather than one version. GitHub's
-/// dependency graph export gives the manifest's requirement (`^6.1.2`, `2.*.*`) for packages
-/// no lock file pins, and OSV matches such a string against the wrong releases. A `~` is only
-/// a requirement at the start: Debian versions contain one (`1.0~rc1-2`).
+/// dependency graph export gives the manifest's requirement (`^6.1.2`, `2.*.*`, `1.x`) for
+/// packages no lock file pins, and OSV matches such a string against the wrong releases. A
+/// `~` is only a requirement at the start: Debian versions contain one (`1.0~rc1-2`). Real
+/// versions use `!` (`1!2.0`, a Python epoch), `:` (`1:2.3`, a Debian epoch) and `+`
+/// (`v1.2.3+incompatible`, Go), so those are not requirements.
 fn is_version_requirement(version: &str) -> bool {
-    version.starts_with(['^', '~', '=', '>', '<', '!', '['])
+    version.starts_with(['^', '~', '>', '<', '!', '['])
         || version.contains(['*', ' ', ',', '|', '>', '<'])
+        || version
+            .split('.')
+            .any(|segment| segment.eq_ignore_ascii_case("x"))
 }
 
 /// Where an upload comes from, as given by CI. Both labels are free text kept for display: at

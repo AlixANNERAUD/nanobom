@@ -335,7 +335,11 @@ fn version_requirements_are_skipped_in_every_format() {
         "~1.2",
         ">=1.0",
         "1.%2A",
-        "=1.6.0",
+        "1.x",
+        "1.2.X",
+        "x",
+        "=",
+        "=%3E1.0",
         "%5B1.0,2.0)",
     ] {
         let purl = format!("pkg:npm/ava@{version}");
@@ -351,20 +355,93 @@ fn version_requirements_are_skipped_in_every_format() {
         .unwrap();
         assert!(sbom.components.is_empty(), "{purl}");
     }
-    // Debian versions contain a tilde.
+}
+
+#[test]
+fn versions_are_not_mistaken_for_requirements() {
+    for (purl, version) in [
+        // Debian versions contain a tilde, and epochs a colon.
+        (
+            "pkg:deb/debian/openssl@3.0.11-1~deb12u2",
+            "3.0.11-1~deb12u2",
+        ),
+        ("pkg:deb/debian/curl@1.2.3~rc1-1", "1.2.3~rc1-1"),
+        ("pkg:deb/debian/perl@1:2.3", "1:2.3"),
+        ("pkg:npm/ava@1.0.0-rc.1", "1.0.0-rc.1"),
+        // A Go pseudo-version, and an incompatible major version.
+        (
+            "pkg:golang/golang.org/x/net@v0.0.0-20191109021931-daa7c04131f5",
+            "v0.0.0-20191109021931-daa7c04131f5",
+        ),
+        (
+            "pkg:golang/github.com/docker/docker@v1.2.3%2Bincompatible",
+            "v1.2.3+incompatible",
+        ),
+        // A Python epoch.
+        ("pkg:pypi/foo@1%212.0", "1!2.0"),
+        // An exact requirement allows one version, which is kept.
+        ("pkg:cargo/smallvec@=1.6.0", "1.6.0"),
+        ("pkg:pypi/urllib3@%3D%3D1.26.4", "1.26.4"),
+    ] {
+        let sbom = inventory::parse(&spdx(
+            json!([spdx_package("SPDXRef-package", "package", Some(purl))]),
+            json!([]),
+        ))
+        .unwrap();
+        assert!(sbom.skipped.is_empty(), "{purl}: {:?}", sbom.skipped);
+        assert_eq!(
+            sbom.components[0].version.as_deref(),
+            Some(version),
+            "{purl}"
+        );
+    }
     let sbom = inventory::parse(&spdx(
         json!([spdx_package(
-            "SPDXRef-openssl",
-            "openssl",
-            Some("pkg:deb/debian/openssl@3.0.11-1~deb12u2")
+            "SPDXRef-smallvec",
+            "smallvec",
+            Some("pkg:cargo/smallvec@=1.6.0?arch=x86_64")
         )]),
         json!([]),
     ))
     .unwrap();
     assert_eq!(
-        sbom.components[0].version.as_deref(),
-        Some("3.0.11-1~deb12u2")
+        sbom.components[0].purl,
+        "pkg:cargo/smallvec@1.6.0?arch=x86_64"
     );
+    assert_eq!(sbom.components[0].query_purl, "pkg:cargo/smallvec@1.6.0");
+}
+
+#[test]
+fn spdx_nulls_are_absent_fields() {
+    let mut nameless = spdx_package("SPDXRef-nameless", "nameless", Some("pkg:npm/a@1.0.0"));
+    nameless["name"] = json!(null);
+    let mut without_references = spdx_package("SPDXRef-bare", "bare", None);
+    without_references["externalRefs"] = json!(null);
+    let mut uncategorized = spdx_package("SPDXRef-uncategorized", "uncategorized", None);
+    uncategorized["externalRefs"] =
+        json!([{"referenceType": "purl", "referenceLocator": "pkg:npm/b@1.0.0"}]);
+    let sbom = inventory::parse(&spdx(
+        json!([nameless, without_references, uncategorized]),
+        json!([
+            {"spdxElementId": "SPDXRef-nameless", "relationshipType": "DEPENDS_ON"},
+            {"spdxElementId": "SPDXRef-nameless", "relationshipType": "DEPENDS_ON",
+             "relatedSpdxElement": "SPDXRef-uncategorized"},
+            {"spdxElementId": null, "relationshipType": "DEPENDS_ON",
+             "relatedSpdxElement": "SPDXRef-bare"}
+        ]),
+    ))
+    .unwrap();
+    assert_eq!(purls(&sbom), ["pkg:npm/a@1.0.0", "pkg:npm/b@1.0.0"]);
+    assert_eq!(sbom.skipped_count, 1);
+    assert_eq!(sbom.skipped[0].name, "bare");
+    assert_eq!(sbom.dependencies.len(), 1);
+
+    let sbom = inventory::parse(
+        br#"{"spdxVersion": "SPDX-2.3", "packages": null, "relationships": null,
+             "documentDescribes": null}"#,
+    )
+    .unwrap();
+    assert!(sbom.components.is_empty());
 }
 
 #[test]
@@ -377,9 +454,23 @@ fn unsupported_formats_are_named() {
     assert_eq!(problem(rdf), Problem::SpdxRdf);
     let turtle = b"@prefix spdx: <http://spdx.org/rdf/terms#> .\n";
     assert_eq!(problem(turtle), Problem::SpdxRdf);
+    let turtle = b"# An SBOM\n\nPREFIX spdx: <http://spdx.org/rdf/terms#>\n";
+    assert_eq!(problem(turtle), Problem::SpdxRdf);
+    // JSON-LD with the SPDX 2 vocabulary is RDF too.
+    let json_ld = br#"{"@context": {"spdx": "http://spdx.org/rdf/terms#"}, "@graph": []}"#;
+    assert_eq!(problem(json_ld), Problem::SpdxRdf);
     let xml = br#"<?xml version="1.0"?><bom xmlns="http://cyclonedx.org/schema/bom/1.5"/>"#;
     assert_eq!(problem(xml), Problem::SbomXml);
     assert!(matches!(problem(b"not json"), Problem::SbomNotJson { .. }));
+    // Broken JSON naming the SPDX vocabulary is not RDF.
+    assert!(matches!(
+        problem(br#"{"@context": "https://spdx.org/rdf/3.0.1/spdx-context.jsonld","#),
+        Problem::SbomNotJson { .. }
+    ));
+    // Valid JSON of another shape is not a format nanobom knows, rather than invalid JSON.
+    for document in [&b"[1, 2]"[..], b"3", br#""SPDX-2.3""#, b"null"] {
+        assert_eq!(problem(document), Problem::UnknownSbomFormat);
+    }
 
     let spdx_3 = json!({
         "@context": "https://spdx.org/rdf/3.0.1/spdx-context.jsonld",
@@ -397,6 +488,18 @@ fn unsupported_formats_are_named() {
         "unsupported SPDX version \"SPDX-3.0.1\"; supported versions are SPDX-2.2, SPDX-2.3, \
          in JSON"
     );
+    // An inline context.
+    let spdx_3 = json!({
+        "@context": {"spdx": "https://spdx.org/rdf/3.0.1/terms/",
+                     "name": {"@id": "https://spdx.org/rdf/3.0.1/terms/Core/name"}},
+        "@graph": []
+    });
+    assert_eq!(
+        problem(spdx_3.to_string().as_bytes()),
+        Problem::UnsupportedSpdxVersion {
+            version: "SPDX-3.0.1".to_owned()
+        }
+    );
     assert_eq!(
         problem(br#"{"spdxVersion": "SPDX-2.1", "packages": []}"#),
         Problem::UnsupportedSpdxVersion {
@@ -407,11 +510,81 @@ fn unsupported_formats_are_named() {
         problem(br#"{"spdxVersion": "SPDX-2.3", "packages": 3}"#),
         Problem::InvalidSpdx { .. }
     ));
+    // Type errors in a recognized document are about that document, not about JSON.
+    assert!(matches!(
+        problem(br#"{"spdxVersion": 2, "packages": []}"#),
+        Problem::InvalidSpdx { .. }
+    ));
+    assert!(matches!(
+        problem(br#"{"bomFormat": "CycloneDX", "specVersion": 1.5}"#),
+        Problem::InvalidCycloneDx { .. }
+    ));
     assert_eq!(problem(br#"{"name": "sbom"}"#), Problem::UnknownSbomFormat);
     assert!(
         Problem::UnknownSbomFormat
             .to_string()
             .contains("SPDX JSON document")
+    );
+}
+
+#[test]
+fn echoed_values_are_cut() {
+    let long = "9".repeat(10_000);
+    let cut = format!("{}\u{2026}", &long[..200]);
+    let document = json!({"spdxVersion": format!("SPDX-{long}")});
+    assert_eq!(
+        problem(document.to_string().as_bytes()),
+        Problem::UnsupportedSpdxVersion {
+            version: format!("SPDX-{}\u{2026}", &long[..195])
+        }
+    );
+    let document = json!({"bomFormat": "CycloneDX", "specVersion": long});
+    assert_eq!(
+        problem(document.to_string().as_bytes()),
+        Problem::UnsupportedSpecificationVersion {
+            version: cut.clone()
+        }
+    );
+    let document = json!({"@context": format!("https://spdx.org/rdf/{long}/context")});
+    assert_eq!(
+        problem(document.to_string().as_bytes()),
+        Problem::SpdxRdf,
+        "a segment too long for a version"
+    );
+
+    for document in [
+        json!({"spdxVersion": "SPDX-2.3", "packages": long}),
+        json!({"bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1, "components": long}),
+    ] {
+        let detail = match problem(document.to_string().as_bytes()) {
+            Problem::InvalidSpdx { detail } | Problem::InvalidCycloneDx { detail } => detail,
+            other => panic!("{other:?}"),
+        };
+        assert_eq!(detail.chars().count(), 201, "{detail}");
+        assert!(detail.ends_with('\u{2026}'));
+    }
+}
+
+#[test]
+fn documents_that_claim_both_formats_are_cyclonedx() {
+    let sbom = inventory::parse(
+        br#"{"bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1,
+             "spdxVersion": "SPDX-2.3", "components": []}"#,
+    )
+    .unwrap();
+    assert_eq!(sbom.specification_version, "1.6");
+}
+
+#[test]
+fn large_contexts_are_read_without_building_them() {
+    let mut document = br#"{"name": "sbom", "@context": ["#.to_vec();
+    document.extend(b"0,".repeat(4 * 1024 * 1024));
+    document.extend(br#"{"spdx": "https://spdx.org/rdf/3.0.1/terms/"}]}"#);
+    assert_eq!(
+        problem(&document),
+        Problem::UnsupportedSpdxVersion {
+            version: "SPDX-3.0.1".to_owned()
+        }
     );
 }
 
