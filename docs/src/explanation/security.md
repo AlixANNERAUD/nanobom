@@ -29,7 +29,8 @@ reach operators rather than an organization's channel.
 - Shown once; revocable; their last use is recorded.
 
 The upload API is not exposed to cross-site request forgery: it is authenticated by the
-`Authorization` header, which browsers never add on their own.
+`Authorization` header (`X-Api-Key` for the Dependency-Track API), which browsers never add on
+their own.
 
 ## Sessions and cookies
 

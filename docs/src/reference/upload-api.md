@@ -193,3 +193,82 @@ API messages are always in English, whatever the instance's users read: they end
 | `422` | `unsupported CycloneDX version "1.2"; supported versions are …` |
 | `422` | `invalid CycloneDX document: …` |
 | `503` | `the evaluation did not complete` |
+
+## Dependency-Track API
+
+nanobom also answers the upload requests of Dependency-Track's API, for clients written for it
+(see [Upload with Dependency-Track clients](../how-to/dependency-track-clients.md), and
+[Dependency-Track compatibility](../explanation/dependency-track.md) for what the mapping
+implies). The document, the [tokens](#tokens), the size limit and the run after the upload are
+the same as above.
+
+### Requests
+
+```text
+PUT  /api/v1/bom                 JSON body, the SBOM base64-encoded in "bom"
+POST /api/v1/bom                 multipart/form-data, the SBOM in the "bom" part
+GET  /api/v1/bom/token/{token}   processing status of an upload
+GET  /api/v1/event/token/{token} same as above
+X-Api-Key: nanobom_…
+```
+
+The upload token goes in `X-Api-Key`; `Authorization: Bearer nanobom_…` is accepted too. The
+organization is the token's.
+
+| Field | Value | Effect |
+| --- | --- | --- |
+| `projectName` | text | The project slug: trimmed and folded to lower case, then 1 to 64 characters among letters, digits, `.`, `_` and `-`, starting with a letter or a digit. Required |
+| `projectVersion` | text, up to 300 characters | Recorded as the upload's image tag (`image_tag`) |
+| `autoCreate` | `true` or `false` (default) | Create the project if it does not exist (organization tokens only). Without it, a missing project is a `404` |
+| `bom` | base64 text (`PUT`), file or text part (`POST`) | The CycloneDX JSON document. In `PUT`, line breaks in the base64 text are ignored. A UTF-8 byte order mark is removed. In `POST`, only the first `bom` part is read |
+| `project` | UUID | Refused with a `400` when `projectName` is missing; ignored otherwise |
+| `projectTags`, `parentUUID`, `parentName`, `parentVersion`, `isLatest`, `isActive` | | Accepted and ignored |
+
+In `PUT`, the body is parsed as JSON whatever its `Content-Type`; `autoCreate` may be a boolean
+or the string `"true"`. In `POST`, `autoCreate` is `true` when the field reads `true` in any case.
+
+The decoded SBOM may be at most `NANOBOM_MAXIMUM_SBOM_SIZE` MiB, like a native upload; the `PUT`
+body may be a third larger, for the base64 encoding.
+
+### Response
+
+A stored upload answers `200 OK`, whether or not it created the project:
+
+```json
+{ "token": "0b8f3c2e-5d1a-4c47-9e0b-3a6f1d2c4b5e" }
+```
+
+The processing status endpoints answer `200 OK` with:
+
+```json
+{ "processing": true }
+```
+
+`processing` is `true` from the upload until the run of the project it queued has finished,
+including the refresh of exploitation data, or until `NANOBOM_UPLOAD_WAIT_SECONDS` have passed.
+It is `false` for an unknown token: a finished one, one issued before the server restarted, one
+of another organization, and every token when `NANOBOM_RUN_AFTER_UPLOAD` is `false`. Both
+endpoints need a valid token in `X-Api-Key`.
+
+### Status codes
+
+Error bodies are plain text, as Dependency-Track's, except invalid documents, which are RFC 9457
+problems (`Content-Type: application/problem+json`):
+
+```json
+{ "status": 400, "title": "The uploaded BOM is invalid", "detail": "the SBOM is not valid JSON: …" }
+```
+
+| Status | When | Body |
+| --- | --- | --- |
+| `200` | The SBOM replaced the project's components | `{"token": …}` |
+| `400` | No `projectName` (`projectName is required`), a project given by UUID only (`nanobom cannot find projects by UUID: send projectName (the nanobom project slug) instead of project`), a `projectName` that cannot be a slug (`projectName "…" cannot be a nanobom project slug: …`), a `projectVersion` too long, a request that is not JSON (`invalid upload request: …`), `bom` not base64 (`The BOM must be Base64 encoded`), no SBOM (`No BOM file provided.`) | Plain text |
+| `400` | An invalid document: XML (`nanobom accepts CycloneDX JSON only, not XML: generate the SBOM in JSON`), or any [document error](#error-messages) of the native API | Problem |
+| `401` | No `X-Api-Key`, or a token that is unknown or revoked | `a valid nanobom upload token is required in the X-Api-Key header` |
+| `403` | A project token used for another existing project | `Access to the specified project is forbidden` |
+| `404` | A missing project without `autoCreate`, or with a project token | `The project could not be found.` |
+| `413` | An SBOM larger than `NANOBOM_MAXIMUM_SBOM_SIZE` | Plain text |
+| `500` | A database error | `internal error` |
+
+The status endpoints answer `400` (`the token must be a UUID`) for a token that is not a UUID,
+and `401` like uploads.

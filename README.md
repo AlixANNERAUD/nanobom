@@ -60,6 +60,8 @@ The [nanobom action](https://github.com/AlixANNERAUD/nanobom-action) generates t
 when you don't have one, uploads it, writes the project's open vulnerabilities to the job summary
 and fails the job when they cross your threshold. GitLab CI and any other CI work with a single
 `curl` call: see [uploading from CI](https://alixanneraud.github.io/nanobom/how-to/upload-from-ci.html).
+Pipelines that upload to Dependency-Track (gh-upload-sbom, the Jenkins and Maven plugins, scripts)
+upload to nanobom with a new address and key: see [Dependency-Track clients](https://alixanneraud.github.io/nanobom/how-to/dependency-track-clients.html).
 
 ## What you get
 
