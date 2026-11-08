@@ -294,11 +294,18 @@ impl<S: VulnerabilitySource + 'static> Worker<S> {
         let refresh = exploitation::refresh(&self.database, feeds, outcome.scope);
         let timeout = self.settings.exploitation_refresh_timeout;
         match tokio::time::timeout(timeout, refresh).await {
-            Ok(Ok(summary)) => tracing::info!(
-                cves = summary.cves,
-                known_exploited = summary.known_exploited,
-                "exploitation data refreshed"
-            ),
+            Ok(Ok(summary)) => {
+                tracing::info!(
+                    cves = summary.cves,
+                    known_exploited = summary.known_exploited,
+                    "exploitation data refreshed"
+                );
+                // EPSS was refreshed, but the KEV catalog is not current: still a failure.
+                if let Some(error) = summary.kev_error {
+                    tracing::warn!(%error, "refreshing exploitation data failed");
+                    metrics::record_exploitation_refresh_failure();
+                }
+            }
             Ok(Err(error)) => {
                 tracing::warn!(%error, "refreshing exploitation data failed");
                 metrics::record_exploitation_refresh_failure();
