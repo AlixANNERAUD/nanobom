@@ -1,5 +1,7 @@
+use std::time::Duration;
+
 use nanobom_domain::{database, testing};
-use sea_orm::{ConnectionTrait, DatabaseBackend, Statement};
+use sea_orm::{ConnectionTrait, DatabaseBackend, Statement, TransactionTrait};
 
 #[tokio::test]
 async fn migrations_create_the_schema() {
@@ -98,4 +100,77 @@ async fn backup_refuses_databases_other_than_sqlite() {
     ));
     assert!(error.to_string().contains("pg_dump"));
     assert!(!destination.exists());
+}
+
+async fn count_writes(connection: &impl ConnectionTrait) -> i64 {
+    connection
+        .query_one_raw(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            "SELECT COUNT(*) AS count FROM writes",
+        ))
+        .await
+        .expect("count the rows")
+        .expect("one row")
+        .try_get("", "count")
+        .expect("count column")
+}
+
+const WRITE: &str = "INSERT INTO writes DEFAULT VALUES";
+
+/// Under write-ahead logging, a transaction begun with a plain (deferred) `BEGIN` that read
+/// before another connection committed a write cannot write any more: SQLite fails at once with
+/// `SQLITE_BUSY_SNAPSHOT` (code 517), whatever the busy timeout. [`database::begin_write`] takes
+/// the write lock up front, so the other writer waits for it instead. Write-ahead logging needs a
+/// file, hence a database of its own whatever `NANOBOM_TEST_DATABASE_URL` says.
+#[tokio::test]
+async fn write_transactions_make_concurrent_writers_wait_on_sqlite() {
+    let directory = std::env::temp_dir().join(format!("nanobom-write-lock-{}", std::process::id()));
+    std::fs::remove_dir_all(&directory).ok();
+    std::fs::create_dir_all(&directory).expect("create the temporary directory");
+    let database = database::connect(&format!(
+        "sqlite://{}",
+        directory.join("nanobom.db").display()
+    ))
+    .await
+    .expect("open the database");
+    database
+        .execute_unprepared("CREATE TABLE writes (id INTEGER PRIMARY KEY)")
+        .await
+        .expect("create the table");
+
+    // The failure this guards against: read, another connection writes, then write.
+    let deferred = database.begin().await.expect("begin");
+    assert_eq!(count_writes(&deferred).await, 0);
+    database
+        .execute_unprepared(WRITE)
+        .await
+        .expect("another connection writes");
+    let error = deferred
+        .execute_unprepared(WRITE)
+        .await
+        .expect_err("a stale snapshot cannot be upgraded to a write");
+    assert!(error.to_string().contains("(code: 517)"), "{error}");
+    deferred.rollback().await.expect("roll back");
+
+    let transaction = database::begin_write(&database).await.expect("begin");
+    assert_eq!(count_writes(&transaction).await, 1);
+    let other = tokio::spawn({
+        let database = database.clone();
+        async move { database.execute_unprepared(WRITE).await }
+    });
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!other.is_finished(), "the other writer waits for the lock");
+    transaction
+        .execute_unprepared(WRITE)
+        .await
+        .expect("the transaction holds the write lock");
+    transaction.commit().await.expect("commit");
+    other
+        .await
+        .expect("the other writer's task")
+        .expect("the other writer gets the lock once released");
+    assert_eq!(count_writes(&database).await, 3);
+
+    database.close().await.ok();
+    std::fs::remove_dir_all(&directory).ok();
 }

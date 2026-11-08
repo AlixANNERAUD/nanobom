@@ -269,6 +269,7 @@
     "delivery_sending": "Sending",
     "delivery_pending": "Retrying",
     "delivery_failed": "Failed",
+    "delivery_cancelled": "Cancelled",
     "delivery_next_attempt": "Next attempt {time}",
     "remove_webhook": "Remove webhook",
     "webhook_title": "Webhook",

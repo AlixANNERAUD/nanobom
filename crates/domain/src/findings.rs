@@ -581,7 +581,7 @@ pub async fn ignore(
     if expires_at.is_some_and(|expiry| expiry <= Utc::now()) {
         return Err(Error::invalid(Problem::ExpiryNotInFuture));
     }
-    let transaction = database.begin().await?;
+    let transaction = crate::database::begin_write(database).await?;
     let finding = triaged_finding(&transaction, actor, finding_id).await?;
     if Status::parse(&finding.status) != Status::Open {
         return Err(Error::conflict(Problem::OnlyOpenCanBeIgnored));
@@ -612,7 +612,7 @@ pub async fn restore(
     actor: &Actor,
     finding_id: i64,
 ) -> Result<()> {
-    let transaction = database.begin().await?;
+    let transaction = crate::database::begin_write(database).await?;
     let finding = triaged_finding(&transaction, actor, finding_id).await?;
     if Status::parse(&finding.status) != Status::Ignored {
         return Err(Error::conflict(Problem::OnlyIgnoredCanBeRestored));

@@ -269,6 +269,7 @@
     "delivery_sending": "Envoi en cours",
     "delivery_pending": "Nouvel essai prévu",
     "delivery_failed": "Échec",
+    "delivery_cancelled": "Annulé",
     "delivery_next_attempt": "Prochaine tentative {time}",
     "remove_webhook": "Supprimer le webhook",
     "webhook_title": "Webhook",

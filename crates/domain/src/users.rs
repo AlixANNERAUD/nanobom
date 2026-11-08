@@ -54,7 +54,7 @@ pub async fn create(
         _ => username.clone(),
     };
 
-    let transaction = database.begin().await?;
+    let transaction = crate::database::begin_write(database).await?;
     if find_by_username(&transaction, &username).await?.is_some() {
         return Err(Error::conflict(Problem::UsernameTaken { username }));
     }
@@ -357,7 +357,7 @@ pub async fn create_with_identity(
     issuer: &str,
     subject: &str,
 ) -> Result<users::Model> {
-    let transaction = database.begin().await?;
+    let transaction = crate::database::begin_write(database).await?;
     let created = create(&transaction, user, personal_organization).await?;
     user_identities::ActiveModel {
         user_id: Set(created.id),

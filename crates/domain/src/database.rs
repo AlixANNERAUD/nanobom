@@ -9,8 +9,13 @@ use std::{path::Path, time::Duration};
 use nanobom_migration::{Migrator, MigratorTrait};
 use sea_orm::{
     ConnectOptions, ConnectionTrait, Database, DatabaseBackend, DatabaseConnection, DbErr,
-    Statement,
+    SqliteTransactionMode, Statement, TransactionOptions, TransactionTrait,
 };
+
+/// How long a SQLite connection waits for the write lock, held by another connection, before
+/// failing with `SQLITE_BUSY` ("database is locked"). Writes are short, so a wait this long
+/// only happens if something is stuck.
+pub const BUSY_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Opens a connection pool; the URL scheme picks the backend, SQLite (`sqlite://…`) or
 /// PostgreSQL (`postgres://…`). SQLite databases are created if missing, use write-ahead logging
@@ -18,6 +23,10 @@ use sea_orm::{
 /// project relies on cascades); a PostgreSQL database must exist already. Eight connections cover
 /// the web server and the run worker on either. The schema is not touched: call [`migrate`]
 /// afterwards.
+///
+/// SQLite has one writer at a time: a connection that needs the write lock waits for it up to
+/// [`BUSY_TIMEOUT`]. That wait only covers statements that start a write; transactions that
+/// write must start with [`begin_write`].
 pub async fn connect(url: &str) -> Result<DatabaseConnection, DbErr> {
     let mut options = ConnectOptions::new(url);
     options
@@ -29,11 +38,32 @@ pub async fn connect(url: &str) -> Result<DatabaseConnection, DbErr> {
             options
                 .create_if_missing(true)
                 .foreign_keys(true)
-                .busy_timeout(Duration::from_secs(10))
+                .busy_timeout(BUSY_TIMEOUT)
                 .pragma("journal_mode", "WAL")
                 .pragma("synchronous", "NORMAL")
         });
     Database::connect(options).await
+}
+
+/// Starts a transaction that will write. On SQLite it begins with `BEGIN IMMEDIATE`, which takes
+/// the write lock up front, waiting up to [`BUSY_TIMEOUT`] for it. A plain (deferred) `BEGIN`
+/// would only take it at the first write, and under write-ahead logging, if another connection
+/// committed since the transaction's first read, that upgrade fails at once with
+/// `SQLITE_BUSY_SNAPSHOT`, which the busy timeout does not cover: the transaction read a snapshot
+/// that is no longer the latest, and waiting would not help.
+///
+/// PostgreSQL keeps its default (`READ COMMITTED`), where writers wait for row locks. Inside a
+/// transaction, this starts a savepoint, which takes no lock of its own.
+pub async fn begin_write<C>(database: &C) -> Result<C::Transaction, DbErr>
+where
+    C: TransactionTrait + ?Sized,
+{
+    database
+        .begin_with_options(TransactionOptions {
+            sqlite_transaction_mode: Some(SqliteTransactionMode::Immediate),
+            ..TransactionOptions::default()
+        })
+        .await
 }
 
 /// Applies every pending migration of [`nanobom_migration::Migrator`]. Migrations only move

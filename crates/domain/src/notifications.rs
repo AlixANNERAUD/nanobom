@@ -42,7 +42,7 @@ use nanobom_osv::Severity;
 use reqwest::Url;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseConnection,
-    EntityTrait, ModelTrait, QueryFilter, QueryOrder, TransactionTrait,
+    EntityTrait, ModelTrait, QueryFilter, QueryOrder,
 };
 use serde::{Deserialize, Serialize};
 
@@ -50,7 +50,7 @@ use crate::{
     access::{Actor, Permission},
     deliveries::{self, Attempt, Outcome},
     error::{Error, Result},
-    evaluation::{RunOutcome, Scope},
+    evaluation::{self, RunOutcome, Scope},
     exploitation::{self, Exploitation, QUERY_CHUNK},
     problem::Problem,
     staleness,
@@ -676,7 +676,7 @@ pub async fn queue_new_findings(
     outcome: &RunOutcome,
     public_url: &Url,
 ) -> Result<Vec<i64>> {
-    let transaction = database.begin().await?;
+    let transaction = crate::database::begin_write(database).await?;
     let deliveries = new_findings_deliveries(&transaction, outcome, public_url).await?;
     let ids = enqueue(&transaction, &deliveries).await?;
     transaction.commit().await?;
@@ -690,11 +690,40 @@ pub async fn queue_stale(
     stale_after_days: u32,
     public_url: &Url,
 ) -> Result<Vec<i64>> {
-    let transaction = database.begin().await?;
+    let transaction = crate::database::begin_write(database).await?;
     let deliveries = stale_deliveries(&transaction, stale_after_days, public_url).await?;
     let ids = enqueue(&transaction, &deliveries).await?;
     transaction.commit().await?;
     Ok(ids)
+}
+
+/// Records the runs left `running` by a crash or a restart as failed
+/// ([`evaluation::fail_interrupted`]) and queues their `run.failed` documents to
+/// `failure_webhook` (`None`: not configured), in one transaction, so that a crash in between
+/// cannot leave a run failed with its document lost. Nothing is posted: the retry loop
+/// delivers them. Returns the failed runs.
+pub async fn fail_interrupted_runs(
+    database: &DatabaseConnection,
+    failure_webhook: Option<&Url>,
+    public_url: &Url,
+) -> Result<Vec<RunOutcome>> {
+    let transaction = crate::database::begin_write(database).await?;
+    let outcomes = evaluation::fail_interrupted(&transaction).await?;
+    if let Some(url) = failure_webhook {
+        let failures: Vec<Delivery<RunFailedPayload>> = outcomes
+            .iter()
+            .filter_map(|outcome| {
+                Some(Delivery {
+                    organization_id: None,
+                    url: url.to_string(),
+                    payload: run_failed_payload(outcome, public_url)?,
+                })
+            })
+            .collect();
+        enqueue(&transaction, &failures).await?;
+    }
+    transaction.commit().await?;
+    Ok(outcomes)
 }
 
 /// Sends webhook payloads through the delivery queue.

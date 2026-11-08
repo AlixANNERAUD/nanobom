@@ -259,7 +259,7 @@ pub async fn ingest(
         .filter(|organization| organization.id == token.organization_id)
         .ok_or(Error::NotFound)?;
 
-    let transaction = database.begin().await?;
+    let transaction = crate::database::begin_write(database).await?;
     let existing = crate::projects::find_model(&transaction, organization.id, project_slug).await?;
     let (project, project_created) = match (existing, token.project_id) {
         (Some(project), None) => (project, false),

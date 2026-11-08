@@ -17,7 +17,8 @@ An organization's admins configure one webhook in **Settings → Webhook**:
 Then **Save webhook**. After the next run that opens findings, **Recent deliveries** on the
 settings page lists the documents sent, newest first: the event, whether it is **Sending** (its
 first attempt is in progress), was **Delivered**, is **Retrying** (with the time of the next
-attempt) or **Failed**, the number of attempts, and the time and answer of the last attempt (the
+attempt), **Failed** or **Cancelled** (the webhook was removed, disabled or moved before an
+attempt was recorded), the number of attempts, and the time and answer of the last attempt (the
 HTTP status, or the error). **Remove webhook** deletes the configuration and abandons the
 deliveries still waiting for a retry; disabling the webhook or changing its URL abandons them
 too, so retries never go to the old address.

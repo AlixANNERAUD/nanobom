@@ -341,18 +341,19 @@ pub async fn close_interrupted_runs(
     database: &DatabaseConnection,
     settings: &NotificationSettings,
 ) {
-    match evaluation::fail_interrupted(database).await {
+    match notifications::fail_interrupted_runs(
+        database,
+        settings.failure_webhook.as_ref(),
+        &settings.public_url,
+    )
+    .await
+    {
         Ok(outcomes) => {
-            let mut failures = Vec::new();
             for outcome in outcomes {
                 tracing::warn!(
                     run = outcome.run_id,
                     "a run interrupted by a restart is recorded as failed"
                 );
-                failures.extend(failure_delivery(settings, &outcome));
-            }
-            if let Err(error) = notifications::enqueue(database, &failures).await {
-                tracing::error!(%error, "recording webhook deliveries failed");
             }
         }
         Err(error) => tracing::error!(%error, "recording interrupted runs as failed failed"),
