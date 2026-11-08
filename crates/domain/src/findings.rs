@@ -304,7 +304,11 @@ async fn project_findings(
         })
         .collect();
     let mut exploitations = exploitation::for_findings(database, &keys).await?;
-    let graph = Graph::load(database, project_id).await?;
+    let graph = if findings.is_empty() {
+        Graph::default()
+    } else {
+        Graph::load(database, project_id).await?
+    };
     for finding in &mut findings {
         finding.exploitation = exploitations.remove(&finding.id).unwrap_or_default();
         finding.introduced_via = graph.introduced_via(&finding.purl);

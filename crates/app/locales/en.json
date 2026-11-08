@@ -203,6 +203,7 @@
     "direct_dependency": "direct dependency",
     "no_dependency_graph": "The latest SBOM does not say which components the project depends on directly, so the path to this component is unknown.",
     "not_linked": "The dependency graph of the latest SBOM does not link this component to a direct dependency of the project.",
+    "partial_graph": "Some links of the dependency graph could not be followed (components without a package URL, or a reference shared by several packages), so other paths may exist.",
     "more_paths": {
       "one": "And {count} more direct dependency.",
       "other": "And {count} more direct dependencies."

@@ -238,6 +238,34 @@ async fn findings_show_the_direct_dependency_that_introduces_them() {
     server.runner.wait_until_idle().await;
     let html = alice.page(&page).await;
     assert!(html.contains("does not say which components the project depends on directly"));
+
+    // A link through a component without a package URL is lost, and the page says so.
+    document["components"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"type": "library", "name": "vendored", "bom-ref": "vendored"}));
+    document["dependencies"] = json!([
+        {"ref": "shop", "dependsOn": ["framework"]},
+        {"ref": "framework", "dependsOn": ["engine", "vendored"]},
+        {"ref": "engine", "dependsOn": ["lodash"]},
+        {"ref": "vendored", "dependsOn": ["lodash"]}
+    ]);
+    server.send(upload(&document)).await;
+    server.runner.wait_until_idle().await;
+    let html = alice.page(&page).await;
+    assert!(html.contains("web-framework 2.1.0 → template-engine 0.9.0 → lodash 4.17.20"));
+    assert!(html.contains("Some links of the dependency graph could not be followed"));
+
+    // Once the component is gone the finding is fixed: there is no path to show.
+    document["components"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|component| component["name"] != "lodash");
+    server.send(upload(&document)).await;
+    server.runner.wait_until_idle().await;
+    let html = alice.page(&page).await;
+    assert!(html.contains("Fixed"), "{html}");
+    assert!(!html.contains("Introduced via"));
 }
 
 #[tokio::test]

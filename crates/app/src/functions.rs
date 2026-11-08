@@ -269,6 +269,7 @@ pub async fn load_finding(finding: i64) -> Result<FindingData, ServerFnError> {
                     })
                     .collect(),
                 more: paths.more,
+                partial: paths.partial,
             }),
         finding: crate::server::finding(detail.finding),
     })

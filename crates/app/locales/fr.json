@@ -144,7 +144,7 @@
     "vulnerability": "Vulnérabilité",
     "component": "Composant",
     "via": "Introduit par",
-    "direct": "directe",
+    "direct": "dépendance directe",
     "via_more": "+{count}",
     "via_title": "Dépendances directes du projet qui mènent à ce composant : {names}",
     "status": "Statut",
@@ -203,6 +203,7 @@
     "direct_dependency": "dépendance directe",
     "no_dependency_graph": "Le dernier SBOM n’indique pas de quels composants le projet dépend directement : le chemin jusqu’à ce composant est inconnu.",
     "not_linked": "Le graphe de dépendances du dernier SBOM ne relie ce composant à aucune dépendance directe du projet.",
+    "partial_graph": "Certains liens du graphe de dépendances n’ont pas pu être suivis (composants sans URL de paquet, ou référence partagée par plusieurs paquets) : d’autres chemins peuvent exister.",
     "more_paths": {
       "one": "Et {count} autre dépendance directe.",
       "other": "Et {count} autres dépendances directes."

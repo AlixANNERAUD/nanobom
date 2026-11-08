@@ -15,7 +15,7 @@
 //! [`crate::dependencies`] for what is derived from it and how incomplete graphs are handled.
 
 use std::{
-    collections::{BTreeMap, BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap, HashSet},
     str::FromStr,
 };
 
@@ -90,6 +90,11 @@ pub struct ParsedSbom {
     /// The edges of the SBOM's dependency graph between the components kept, sorted and
     /// without duplicates. Edges to or from a component that is not kept are dropped.
     pub dependencies: Vec<DependencyEdge>,
+    /// Whether edges that could lead through a dropped component were lost: a component
+    /// without a usable package URL that the graph reaches and leaves, or a `bom-ref` shared by
+    /// components with different package URLs. Paths derived from the graph may then be
+    /// missing.
+    pub dependencies_partial: bool,
 }
 
 /// An edge of an SBOM's dependency graph, between package URLs in canonical form.
@@ -117,7 +122,8 @@ struct Header {
 /// document that does not follow it. Nested components are flattened.
 ///
 /// The dependency graph is read from `dependencies`, whose references are the `bom-ref` of
-/// components; a reference to `metadata.component` is the project.
+/// components; a reference to `metadata.component` is the project. A reference carried by
+/// components with different package URLs is ambiguous: no edge goes through it.
 pub fn parse(document: &[u8]) -> Result<ParsedSbom> {
     let header: Header = serde_json::from_slice(document).map_err(|error| {
         Error::invalid(Problem::SbomNotJson {
@@ -151,12 +157,14 @@ pub fn parse(document: &[u8]) -> Result<ParsedSbom> {
         skipped_count: 0,
         skipped: Vec::new(),
         dependencies: Vec::new(),
+        dependencies_partial: false,
     };
     let mut by_purl = BTreeMap::new();
-    let mut references = HashMap::new();
+    let mut references = References::default();
     if let Some(components) = &bom.components {
         collect(&components.0, &mut by_purl, &mut references, &mut parsed);
     }
+    references.forget_ambiguous();
     parsed.components = by_purl.into_values().collect();
     let project = bom
         .metadata
@@ -165,24 +173,68 @@ pub fn parse(document: &[u8]) -> Result<ParsedSbom> {
         .and_then(|component| component.bom_ref.as_ref())
         .map(String::as_str);
     if let Some(dependencies) = &bom.dependencies {
-        parsed.dependencies = dependency_edges(&dependencies.0, project, &references);
+        (parsed.dependencies, parsed.dependencies_partial) =
+            dependency_edges(&dependencies.0, project, &references);
     }
     Ok(parsed)
 }
 
-/// The edges between known components, `references` mapping each kept component's `bom-ref`
-/// to its package URL and `project` being the `bom-ref` of the project.
+/// How the `bom-ref`s of an SBOM resolve to the components kept.
+#[derive(Debug, Default)]
+struct References {
+    /// `bom-ref` to package URL, for the components kept.
+    resolved: HashMap<String, String>,
+    /// `bom-ref`s of components that are not kept for lack of a usable package URL.
+    unstored: HashSet<String>,
+    /// `bom-ref`s given to several components with different package URLs (or to one kept and
+    /// one not kept). An edge naming one cannot be attributed to a component, and mapping it to
+    /// whichever came last would make up a link.
+    ambiguous: HashSet<String>,
+}
+
+impl References {
+    fn keep(&mut self, reference: &str, purl: &str) {
+        if self.unstored.contains(reference)
+            || self
+                .resolved
+                .get(reference)
+                .is_some_and(|known| known != purl)
+        {
+            self.ambiguous.insert(reference.to_owned());
+        }
+        self.resolved
+            .entry(reference.to_owned())
+            .or_insert_with(|| purl.to_owned());
+    }
+
+    fn skip(&mut self, reference: &str) {
+        if self.resolved.contains_key(reference) {
+            self.ambiguous.insert(reference.to_owned());
+        }
+        self.unstored.insert(reference.to_owned());
+    }
+
+    /// Run once every component was seen: ambiguous references resolve to nothing.
+    fn forget_ambiguous(&mut self) {
+        self.resolved
+            .retain(|reference, _| !self.ambiguous.contains(reference));
+    }
+}
+
+/// The edges between known components, `references` telling which `bom-ref` is which kept
+/// component and `project` being the `bom-ref` of the project, and whether links were lost
+/// through components that are not kept (see [`ParsedSbom::dependencies_partial`]).
 fn dependency_edges(
     dependencies: &[Dependency],
     project: Option<&str>,
-    references: &HashMap<String, String>,
-) -> Vec<DependencyEdge> {
+    references: &References,
+) -> (Vec<DependencyEdge>, bool) {
     let mut edges = BTreeSet::new();
     for dependency in dependencies {
         let parent = if Some(dependency.dependency_ref.as_str()) == project {
             None
         } else {
-            match references.get(&dependency.dependency_ref) {
+            match references.resolved.get(&dependency.dependency_ref) {
                 Some(purl) => Some(purl.clone()),
                 None => continue,
             }
@@ -191,7 +243,7 @@ fn dependency_edges(
             if Some(child.as_str()) == project {
                 continue;
             }
-            let Some(child) = references.get(child) else {
+            let Some(child) = references.resolved.get(child) else {
                 continue;
             };
             // Two references can share a package URL, and a package can list itself.
@@ -203,13 +255,30 @@ fn dependency_edges(
             }
         }
     }
-    edges.into_iter().collect()
+    let reached: HashSet<&str> = dependencies
+        .iter()
+        .flat_map(|dependency| dependency.dependencies.iter().map(String::as_str))
+        .collect();
+    // A dropped component only breaks a path if the graph both enters and leaves it; an
+    // ambiguous reference loses every edge that names it.
+    let partial = reached
+        .iter()
+        .any(|reference| references.ambiguous.contains(*reference))
+        || dependencies.iter().any(|dependency| {
+            let reference = dependency.dependency_ref.as_str();
+            let leaves = !dependency.dependencies.is_empty();
+            (leaves && references.ambiguous.contains(reference))
+                || (leaves
+                    && references.unstored.contains(reference)
+                    && reached.contains(reference))
+        });
+    (edges.into_iter().collect(), partial)
 }
 
 fn collect(
     components: &[Component],
     by_purl: &mut BTreeMap<String, InventoryComponent>,
-    references: &mut HashMap<String, String>,
+    references: &mut References,
     parsed: &mut ParsedSbom,
 ) {
     for component in components {
@@ -222,11 +291,14 @@ fn collect(
             match inventory_component(component) {
                 Ok(inventory) => {
                     if let Some(reference) = &component.bom_ref {
-                        references.insert(reference.clone(), inventory.purl.clone());
+                        references.keep(reference, &inventory.purl);
                     }
                     by_purl.entry(inventory.purl.clone()).or_insert(inventory);
                 }
                 Err(reason) => {
+                    if let Some(reference) = &component.bom_ref {
+                        references.skip(reference);
+                    }
                     parsed.skipped_count += 1;
                     if parsed.skipped.len() < MAXIMUM_LISTED_SKIPPED_COMPONENTS {
                         parsed.skipped.push(SkippedComponent {
@@ -407,6 +479,7 @@ async fn store(
         .exec(&transaction)
         .await?;
     let component_count = sbom.components.len();
+    let dependencies_partial = sbom.dependencies_partial;
     let rows: Vec<components::ActiveModel> = sbom
         .components
         .into_iter()
@@ -443,6 +516,7 @@ async fn store(
     .await?;
     let mut updated: projects::ActiveModel = project.clone().into();
     updated.last_upload_at = Set(Some(now));
+    updated.dependencies_partial = Set(dependencies_partial);
     updated.update(&transaction).await?;
     transaction.commit().await?;
 
