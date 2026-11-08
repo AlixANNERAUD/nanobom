@@ -549,6 +549,14 @@ async fn pages_follow_the_chosen_language() {
     assert!(html.contains("Nouvelle organisation"));
 }
 
+/// The table row (`<tr>` to `</tr>`) of a page that mentions `text`.
+fn table_row<'a>(html: &'a str, text: &str) -> &'a str {
+    html.split("<tr")
+        .map(|row| row.split("</tr>").next().unwrap_or(row))
+        .find(|row| row.contains(text))
+        .unwrap_or_else(|| panic!("no row mentions {text}"))
+}
+
 #[tokio::test]
 async fn exploitation_signals_are_shown_and_filtered() {
     let server = server(&[]).await;
@@ -563,6 +571,19 @@ async fn exploitation_signals_are_shown_and_filtered() {
                 "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "4.17.21"}]}]}]
         }),
         &["pkg:npm/lodash@4.17.20"],
+    );
+    // A sibling finding with a CVE scored by EPSS but not in the KEV catalog.
+    server.source.publish(
+        json!({
+            "id": "GHSA-xvch-5gv4-984h",
+            "modified": "2024-01-01T00:00:00Z",
+            "aliases": ["CVE-2021-44906"],
+            "summary": "Prototype Pollution in minimist",
+            "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}],
+            "affected": [{"package": {"ecosystem": "npm", "name": "minimist"},
+                "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "1.2.6"}]}]}]
+        }),
+        &["pkg:npm/minimist@1.2.5"],
     );
     let owner = local_user(&server.database, "alice", PASSWORD).await;
     let organization = organizations::create(&server.database, &owner, "acme", "Acme")
@@ -587,7 +608,10 @@ async fn exploitation_signals_are_shown_and_filtered() {
         .unwrap();
     let finding = findings::list(&server.database, &owner, project.id, &Filter::default())
         .await
-        .unwrap()[0]
+        .unwrap()
+        .into_iter()
+        .find(|finding| finding.vulnerability_id == "GHSA-35jh-r3h4-6jhm")
+        .expect("the lodash finding")
         .id;
     let project_page = "/organizations/acme/projects/web";
     let finding_page = format!("/findings/{finding}");
@@ -611,14 +635,32 @@ async fn exploitation_signals_are_shown_and_filtered() {
     .insert(&server.database)
     .await
     .unwrap();
+    nanobom_entity::exploitation::ActiveModel {
+        cve_id: Set("CVE-2021-44906".to_owned()),
+        known_exploited: Set(false),
+        kev_ransomware: Set(false),
+        epss_score: Set(Some(0.02)),
+        epss_percentile: Set(Some(0.61)),
+        ..Default::default()
+    }
+    .insert(&server.database)
+    .await
+    .unwrap();
 
     let html = alice.page(project_page).await;
-    assert!(html.contains("Known exploited"));
-    assert!(html.contains("CISA due date: 2022-03-22"));
-    assert!(html.contains("97%"));
-    assert!(html.contains("GHSA-35jh-r3h4-6jhm"));
+    let exploited = table_row(&html, "GHSA-35jh-r3h4-6jhm");
+    assert!(exploited.contains("Known exploited"));
+    assert!(exploited.contains("CISA due date: 2022-03-22"));
+    assert!(exploited.contains("97%"));
+    let sibling = table_row(&html, "GHSA-xvch-5gv4-984h");
+    assert!(!sibling.contains("Known exploited"), "{sibling}");
+    assert!(sibling.contains("61%"));
     let html = alice.page(&format!("{project_page}?exploited=1")).await;
     assert!(html.contains("GHSA-35jh-r3h4-6jhm"));
+    assert!(
+        !html.contains("GHSA-xvch-5gv4-984h"),
+        "the filter hides the sibling"
+    );
     let html = alice.page("/organizations/acme").await;
     assert!(html.contains("Known exploited"), "the organization column");
 

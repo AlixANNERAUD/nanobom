@@ -13,6 +13,7 @@ use nanobom::{
     runner::{self, NotificationSettings, RunRequest, Waited},
 };
 use nanobom_domain::{
+    access::Actor,
     evaluation::{self, Scope, Trigger},
     findings::{self, Filter},
     notifications::{self, Notifier},
@@ -76,8 +77,9 @@ async fn uploads_start_a_run_of_their_project() {
     assert_eq!(findings[0].vulnerability_id, "GHSA-35jh-r3h4-6jhm");
 }
 
-/// Uploads the lodash SBOM to a new organization and waits for the run it starts.
-async fn upload_lodash(server: &TestServer) {
+/// Uploads the lodash SBOM to a new organization and waits for the run it starts; returns the
+/// organization's owner and identifier.
+async fn upload_lodash(server: &TestServer) -> (Actor, i64) {
     server
         .source
         .publish(lodash_advisory(), &["pkg:npm/lodash@4.17.20"]);
@@ -99,6 +101,7 @@ async fn upload_lodash(server: &TestServer) {
         .await;
     assert_eq!(response.status(), StatusCode::CREATED);
     server.runner.wait_until_idle().await;
+    (owner, organization.id)
 }
 
 #[tokio::test]
@@ -138,6 +141,19 @@ async fn runs_refresh_exploitation_data() {
     assert_eq!(row.epss_score, Some(0.5));
 }
 
+/// The value of an unlabelled metric on `/metrics`, 0 while it was never recorded.
+async fn metric(server: &TestServer, name: &str) -> f64 {
+    let response = server
+        .send(Request::get("/metrics").body(Body::empty()).unwrap())
+        .await;
+    let text = body_text(response).await;
+    text.lines()
+        .find_map(|line| line.strip_prefix(name)?.strip_prefix(' '))
+        .map_or(0.0, |value| value.parse().expect("a number"))
+}
+
+const REFRESH_FAILURES: &str = "nanobom_exploitation_refresh_failures_total";
+
 #[tokio::test]
 async fn a_failing_feed_does_not_fail_the_run() {
     let feeds = MockServer::start().await;
@@ -146,9 +162,15 @@ async fn a_failing_feed_does_not_fail_the_run() {
         .respond_with(ResponseTemplate::new(500))
         .mount(&feeds)
         .await;
+    Mock::given(method("GET"))
+        .and(path("/epss"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&feeds)
+        .await;
     let kev_url = format!("{}/kev.json", feeds.uri());
     let epss_url = format!("{}/epss", feeds.uri());
     let server = server_with_exploitation(&["--kev-url", &kev_url, "--epss-url", &epss_url]).await;
+    let failures = metric(&server, REFRESH_FAILURES).await;
     upload_lodash(&server).await;
 
     assert!(
@@ -164,6 +186,97 @@ async fn a_failing_feed_does_not_fail_the_run() {
         .unwrap();
     assert_eq!(findings.len(), 1, "the run recorded its finding");
     assert_eq!(findings[0].status, "open");
+    let runs = runs::Entity::find().all(&server.database).await.unwrap();
+    assert_eq!(runs.len(), 1);
+    assert_eq!(runs[0].status, "succeeded");
+    assert_eq!(metric(&server, REFRESH_FAILURES).await, failures + 1.0);
+}
+
+#[tokio::test]
+async fn a_kev_outage_still_refreshes_epss_and_counts_as_a_failure() {
+    let feeds = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/kev.json"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&feeds)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/epss"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": [
+            {"cve": "CVE-2021-23337", "epss": "0.5", "percentile": "0.9", "date": "2026-11-08"}
+        ]})))
+        .expect(1)
+        .mount(&feeds)
+        .await;
+    let kev_url = format!("{}/kev.json", feeds.uri());
+    let epss_url = format!("{}/epss", feeds.uri());
+    let server = server_with_exploitation(&["--kev-url", &kev_url, "--epss-url", &epss_url]).await;
+    let failures = metric(&server, REFRESH_FAILURES).await;
+    upload_lodash(&server).await;
+
+    let row = exploitation::Entity::find_by_id("CVE-2021-23337")
+        .one(&server.database)
+        .await
+        .unwrap()
+        .expect("the EPSS score is stored");
+    assert_eq!(row.epss_score, Some(0.5));
+    assert!(!row.known_exploited);
+    assert_eq!(row.kev_checked_at, None, "KEV was not checked");
+    assert_eq!(metric(&server, REFRESH_FAILURES).await, failures + 1.0);
+}
+
+#[tokio::test]
+async fn gauges_count_known_exploited_findings_and_stale_projects() {
+    let feeds = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/kev.json"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"vulnerabilities": [
+                {"cveID": "CVE-2021-23337", "dateAdded": "2022-03-01"}
+            ]})),
+        )
+        .mount(&feeds)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/epss"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": []})))
+        .mount(&feeds)
+        .await;
+    let kev_url = format!("{}/kev.json", feeds.uri());
+    let epss_url = format!("{}/epss", feeds.uri());
+    let server = server_with_exploitation(&[
+        "--kev-url",
+        &kev_url,
+        "--epss-url",
+        &epss_url,
+        "--stale-after-days",
+        "30",
+    ])
+    .await;
+    let (owner, organization) = upload_lodash(&server).await;
+    for (slug, days) in [("old", 40), ("recent", 10)] {
+        let project = projects::create(&server.database, &owner, organization, slug, slug)
+            .await
+            .unwrap();
+        let mut active: nanobom_entity::projects::ActiveModel = project.into();
+        active.last_upload_at = Set(Some(
+            (Utc::now() - chrono::Duration::days(days)).fixed_offset(),
+        ));
+        active.update(&server.database).await.unwrap();
+    }
+    // The gauges are computed after each run.
+    server.runner.request(RunRequest {
+        trigger: Trigger::Manual,
+        scope: Scope::All,
+        triggered_by: None,
+    });
+    server.runner.wait_until_idle().await;
+
+    assert_eq!(
+        metric(&server, "nanobom_open_findings_known_exploited").await,
+        1.0
+    );
+    assert_eq!(metric(&server, "nanobom_stale_projects").await, 1.0);
 }
 
 #[tokio::test]

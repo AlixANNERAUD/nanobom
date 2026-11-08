@@ -174,3 +174,43 @@ async fn write_transactions_make_concurrent_writers_wait_on_sqlite() {
     database.close().await.ok();
     std::fs::remove_dir_all(&directory).ok();
 }
+
+/// Every migration can be reverted and applied again: `down` steps are otherwise never run.
+#[tokio::test]
+async fn migrations_can_be_reverted_and_applied_again() {
+    use nanobom_migration::{Migrator, MigratorTrait, SchemaManager};
+
+    let connection = testing::database().await;
+    let applied = Migrator::get_applied_migrations(&connection)
+        .await
+        .expect("list the applied migrations")
+        .len();
+    assert_eq!(applied, Migrator::migrations().len());
+
+    Migrator::down(&connection, None)
+        .await
+        .expect("revert every migration");
+    let manager = SchemaManager::new(&connection);
+    for table in ["users", "findings", "exploitation", "webhook_deliveries"] {
+        assert!(
+            !manager.has_table(table).await.expect("look the table up"),
+            "{table} is dropped"
+        );
+    }
+
+    database::migrate(&connection)
+        .await
+        .expect("apply every migration again");
+    let applied = Migrator::get_applied_migrations(&connection)
+        .await
+        .expect("list the applied migrations")
+        .len();
+    assert_eq!(applied, Migrator::migrations().len());
+    connection
+        .query_one_raw(Statement::from_string(
+            connection.get_database_backend(),
+            "SELECT COUNT(*) FROM exploitation",
+        ))
+        .await
+        .expect("the schema is back");
+}
