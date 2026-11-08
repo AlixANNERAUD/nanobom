@@ -4,7 +4,9 @@
 use std::{collections::HashMap, str::FromStr};
 
 use chrono::{DateTime, FixedOffset, Utc};
-use nanobom_entity::{finding_events, findings, organizations, projects, users, vulnerabilities};
+use nanobom_entity::{
+    finding_events, findings, organizations, projects, upload_tokens, users, vulnerabilities,
+};
 use nanobom_osv::{Severity, Vulnerability, schema::Reference};
 use packageurl::PackageUrl;
 use sea_orm::{
@@ -186,6 +188,44 @@ pub async fn list(
     filter: &Filter,
 ) -> Result<Vec<Finding>> {
     let project = crate::projects::authorize(database, actor, project_id, Permission::View).await?;
+    project_findings(database, project, filter).await
+}
+
+/// The open findings of a project an upload token covers, most severe first (then as `list`
+/// orders them), for the evaluation returned to CI after an upload.
+pub async fn open_for_upload_token(
+    database: &impl ConnectionTrait,
+    token: &upload_tokens::Model,
+    project_id: i64,
+) -> Result<Vec<Finding>> {
+    // The same check as `inventory::ingest`: the token's organization, and its project when
+    // the token is limited to one.
+    let project = projects::Entity::find_by_id(project_id)
+        .one(database)
+        .await?
+        .filter(|project| {
+            project.organization_id == token.organization_id
+                && token.project_id.is_none_or(|allowed| allowed == project.id)
+        })
+        .ok_or(Error::NotFound)?;
+    let filter = Filter {
+        statuses: vec![Status::Open],
+        ..Filter::default()
+    };
+    let mut findings = project_findings(database, project, &filter).await?;
+    // Stable: findings of the same severity keep the order of `list`.
+    findings.sort_by_key(|finding| std::cmp::Reverse(finding.severity));
+    Ok(findings)
+}
+
+/// The findings of a project, without authorization: known exploited first, then by EPSS
+/// score, then most severe first.
+async fn project_findings(
+    database: &impl ConnectionTrait,
+    project: projects::Model,
+    filter: &Filter,
+) -> Result<Vec<Finding>> {
+    let project_id = project.id;
     let mut query = findings::Entity::find().filter(findings::Column::ProjectId.eq(project_id));
     if !filter.severities.is_empty() {
         query = query.filter(

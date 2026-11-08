@@ -14,9 +14,12 @@ use nanobom_domain::{
     organizations, projects, tokens,
 };
 use nanobom_entity::exploitation;
-use sea_orm::EntityTrait;
+use sea_orm::{EntityTrait, PaginatorTrait};
 use serde_json::json;
-use std::time::Duration;
+use std::{
+    task::{Context, Waker},
+    time::Duration,
+};
 use wiremock::{
     Mock, MockServer, ResponseTemplate,
     matchers::{method, path},
@@ -200,6 +203,77 @@ async fn duplicate_requests_for_a_waiting_scope_are_merged() {
     let second = server.runner.request(request);
     assert!(first || second);
     server.runner.wait_until_idle().await;
+}
+
+#[tokio::test]
+async fn waiting_requests_wait_for_a_run_that_starts_after_them() {
+    let server = server(&["--run-after-upload", "false"]).await;
+    let owner = user(&server.database, "owner").await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let token = tokens::create(&server.database, &owner, organization.id, None, "CI")
+        .await
+        .unwrap()
+        .secret;
+    let response = server
+        .send(
+            Request::put("/api/organizations/acme/projects/web/sbom")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::from(sbom_document("cyclonedx-npm.json")))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let project = projects::find(&server.database, &owner, organization.id, "web")
+        .await
+        .unwrap();
+    let request = RunRequest {
+        trigger: Trigger::Upload,
+        scope: Scope::Project(project.id),
+        triggered_by: None,
+    };
+    let timeout = Duration::from_secs(30);
+
+    // A run of the project in progress, held by the source.
+    server.source.pause();
+    let runner = server.runner.clone();
+    let in_progress = tokio::spawn(async move { runner.request_and_wait(request, timeout).await });
+    server.source.query_started().await;
+
+    // Polling once queues the request: the first is queued anew behind the run in progress,
+    // the second merges with it, and so does a plain request.
+    let mut context = Context::from_waker(Waker::noop());
+    let mut first = Box::pin(server.runner.request_and_wait(request, timeout));
+    assert!(first.as_mut().poll(&mut context).is_pending());
+    let mut second = Box::pin(server.runner.request_and_wait(request, timeout));
+    assert!(second.as_mut().poll(&mut context).is_pending());
+    assert!(
+        !server.runner.request(request),
+        "merged with the queued request"
+    );
+
+    server.source.resume();
+    let in_progress = in_progress.await.unwrap().expect("the first run finishes");
+    let first = first.await.expect("the queued run finishes");
+    let second = second.await.expect("the queued run finishes");
+    assert_ne!(
+        first.run_id, in_progress.run_id,
+        "a run started after the request"
+    );
+    assert_eq!(
+        first.run_id, second.run_id,
+        "merged requests share their run"
+    );
+    assert!(first.succeeded());
+    server.runner.wait_until_idle().await;
+    assert_eq!(
+        nanobom_entity::runs::Entity::find()
+            .count(&server.database)
+            .await
+            .unwrap(),
+        2
+    );
 }
 
 #[tokio::test]

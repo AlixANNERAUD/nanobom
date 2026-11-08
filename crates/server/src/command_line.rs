@@ -170,6 +170,11 @@ pub struct ServeOptions {
     #[arg(long, env = "NANOBOM_RUN_AFTER_UPLOAD", default_value_t = true, action = ArgAction::Set)]
     pub run_after_upload: bool,
 
+    /// Longest time an upload with `wait` or `fail_on` waits for its project's evaluation, in
+    /// seconds.
+    #[arg(long, env = "NANOBOM_UPLOAD_WAIT_SECONDS", default_value_t = 300)]
+    pub upload_wait_seconds: u64,
+
     /// Address of the OSV API.
     #[arg(long, env = "NANOBOM_OSV_URL", default_value = "https://api.osv.dev/")]
     pub osv_url: reqwest::Url,

@@ -210,7 +210,8 @@ fn run(outcome: &RunOutcome) -> PayloadRun {
     }
 }
 
-fn link(public_url: &Url, path: &str) -> String {
+/// An absolute link to a page of the interface.
+pub fn link(public_url: &Url, path: &str) -> String {
     public_url
         .join(path)
         .map_or_else(|_| public_url.to_string(), |url| url.to_string())

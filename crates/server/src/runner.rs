@@ -20,7 +20,7 @@ use nanobom_domain::{
 use nanobom_osv::VulnerabilitySource;
 use reqwest::Url;
 use sea_orm::DatabaseConnection;
-use tokio::sync::Notify;
+use tokio::sync::{Notify, oneshot};
 
 use crate::metrics;
 
@@ -39,9 +39,15 @@ pub struct NotificationSettings {
     pub failure_webhook: Option<Url>,
 }
 
+/// A request waiting in the queue, with whoever waits for its outcome.
+struct Queued {
+    request: RunRequest,
+    waiters: Vec<oneshot::Sender<RunOutcome>>,
+}
+
 #[derive(Default)]
 struct Shared {
-    queue: Mutex<VecDeque<RunRequest>>,
+    queue: Mutex<VecDeque<Queued>>,
     /// Requests queued or running.
     pending: AtomicUsize,
     wake: Notify,
@@ -68,7 +74,7 @@ impl Runner {
         tokio::spawn(async move {
             loop {
                 let next = shared.queue.lock().expect("not poisoned").pop_front();
-                let Some(request) = next else {
+                let Some(Queued { request, waiters }) = next else {
                     shared.wake.notified().await;
                     continue;
                 };
@@ -78,7 +84,12 @@ impl Runner {
                 {
                     Ok(outcome) => {
                         finish(&database, &notifier, &settings, feeds.as_deref(), &outcome).await;
+                        for waiter in waiters {
+                            // A waiter that gave up has dropped its receiver.
+                            let _ = waiter.send(outcome.clone());
+                        }
                     }
+                    // Dropping the waiters releases them without an outcome.
                     Err(error) => {
                         tracing::error!(%error, "the run could not be recorded");
                         metrics::record_failed_run();
@@ -95,14 +106,57 @@ impl Runner {
     /// Queues a run. A request for a scope that is already waiting is merged with it.
     pub fn request(&self, request: RunRequest) -> bool {
         let mut queue = self.shared.queue.lock().expect("not poisoned");
-        if queue.iter().any(|queued| queued.scope == request.scope) {
+        if queue
+            .iter()
+            .any(|queued| queued.request.scope == request.scope)
+        {
             return false;
         }
-        queue.push_back(request);
+        queue.push_back(Queued {
+            request,
+            waiters: Vec::new(),
+        });
         self.shared.pending.fetch_add(1, Ordering::SeqCst);
         drop(queue);
         self.shared.wake.notify_one();
         true
+    }
+
+    /// Queues a run and waits for the outcome of a run of its scope that starts after this
+    /// call: the request merges with a waiting request of the same scope, while a run of that
+    /// scope already in progress does not count (it is not in the queue), so the request is
+    /// queued anew behind it. Returns `None` when `timeout` elapses first, or when the run could
+    /// not be recorded; the run itself still happens.
+    pub async fn request_and_wait(
+        &self,
+        request: RunRequest,
+        timeout: Duration,
+    ) -> Option<RunOutcome> {
+        let (sender, receiver) = oneshot::channel();
+        let queued_anew = {
+            let mut queue = self.shared.queue.lock().expect("not poisoned");
+            match queue
+                .iter_mut()
+                .find(|queued| queued.request.scope == request.scope)
+            {
+                Some(queued) => {
+                    queued.waiters.push(sender);
+                    false
+                }
+                None => {
+                    queue.push_back(Queued {
+                        request,
+                        waiters: vec![sender],
+                    });
+                    self.shared.pending.fetch_add(1, Ordering::SeqCst);
+                    true
+                }
+            }
+        };
+        if queued_anew {
+            self.shared.wake.notify_one();
+        }
+        tokio::time::timeout(timeout, receiver).await.ok()?.ok()
     }
 
     /// Waits until every queued run has finished.
