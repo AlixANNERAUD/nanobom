@@ -15,7 +15,7 @@ use croner::Cron;
 use nanobom_domain::{
     evaluation::{self, Evaluator, RunOutcome, Scope, Trigger},
     exploitation::{self, Feeds},
-    notifications::{self, Delivery, Notifier, Payload},
+    notifications::{self, Delivery, Notifier, RunFailedPayload},
 };
 use nanobom_osv::VulnerabilitySource;
 use reqwest::Url;
@@ -301,21 +301,26 @@ async fn isolated<T: Send + 'static>(
     }
 }
 
-/// Records the runs left `running` by a crash or a restart as failed, and sends the failure
-/// webhook for each. Call it at startup, before the worker starts.
+/// Records the runs left `running` by a crash or a restart as failed, and queues the failure
+/// webhook for each without posting it: the retry loop delivers it, so an unreachable receiver
+/// does not hold the startup. Call it at startup, before the worker starts. It assumes it is
+/// the only process using the database: another instance's live run would be closed too.
 pub async fn close_interrupted_runs(
     database: &DatabaseConnection,
-    notifier: &Notifier,
     settings: &NotificationSettings,
 ) {
     match evaluation::fail_interrupted(database).await {
         Ok(outcomes) => {
+            let mut failures = Vec::new();
             for outcome in outcomes {
                 tracing::warn!(
                     run = outcome.run_id,
                     "a run interrupted by a restart is recorded as failed"
                 );
-                notify_failure(database, notifier, settings, &outcome).await;
+                failures.extend(failure_delivery(settings, &outcome));
+            }
+            if let Err(error) = notifications::enqueue(database, &failures).await {
+                tracing::error!(%error, "recording webhook deliveries failed");
             }
         }
         Err(error) => tracing::error!(%error, "recording interrupted runs as failed failed"),
@@ -346,59 +351,49 @@ async fn notify(
     metrics::refresh_open_findings(database).await;
     metrics::refresh_known_exploited(database).await;
     metrics::refresh_stale_projects(database, settings.stale_after_days).await;
+    // Every document of a run is queued before the first is posted, so a receiver that hangs
+    // delays the others but cannot make them lost to a restart.
+    let mut queued = Vec::new();
     if outcome.succeeded() {
-        match notifications::new_findings_deliveries(database, outcome, &settings.public_url).await
-        {
-            Ok(deliveries) => deliver(database, notifier, deliveries).await,
+        match notifications::queue_new_findings(database, outcome, &settings.public_url).await {
+            Ok(ids) => queued.extend(ids),
             Err(error) => tracing::error!(%error, "preparing webhook deliveries failed"),
         }
         if outcome.trigger == Trigger::Scheduled {
-            match notifications::stale_deliveries(
+            match notifications::queue_stale(
                 database,
                 settings.stale_after_days,
                 &settings.public_url,
             )
             .await
             {
-                Ok(deliveries) => deliver(database, notifier, deliveries).await,
+                Ok(ids) => queued.extend(ids),
                 Err(error) => tracing::error!(%error, "preparing stale project deliveries failed"),
             }
         }
-    } else {
-        notify_failure(database, notifier, settings, outcome).await;
+    } else if let Some(delivery) = failure_delivery(settings, outcome) {
+        match notifications::enqueue(database, &[delivery]).await {
+            Ok(ids) => queued.extend(ids),
+            Err(error) => tracing::error!(%error, "recording webhook deliveries failed"),
+        }
+    }
+    // The first attempts; the retry loop takes over failed ones.
+    match notifier.attempt_all(database, &queued).await {
+        Ok(outcomes) => metrics::record_deliveries(&outcomes),
+        Err(error) => tracing::error!(%error, "attempting webhook deliveries failed"),
     }
 }
 
-/// Sends a failed run to the instance's failure webhook, if configured.
-async fn notify_failure(
-    database: &DatabaseConnection,
-    notifier: &Notifier,
+/// The delivery of a failed run to the instance's failure webhook, if configured.
+fn failure_delivery(
     settings: &NotificationSettings,
     outcome: &RunOutcome,
-) {
-    if let (Some(url), Some(payload)) = (
-        &settings.failure_webhook,
-        notifications::run_failed_payload(outcome, &settings.public_url),
-    ) {
-        let delivery = Delivery {
-            organization_id: None,
-            url: url.to_string(),
-            payload,
-        };
-        deliver(database, notifier, vec![delivery]).await;
-    }
-}
-
-/// Queues deliveries and makes their first attempt; the retry loop takes over failed ones.
-async fn deliver<T: Payload>(
-    database: &DatabaseConnection,
-    notifier: &Notifier,
-    deliveries: Vec<Delivery<T>>,
-) {
-    match notifier.deliver(database, deliveries).await {
-        Ok(outcomes) => metrics::record_deliveries(&outcomes),
-        Err(error) => tracing::error!(%error, "recording webhook deliveries failed"),
-    }
+) -> Option<Delivery<RunFailedPayload>> {
+    Some(Delivery {
+        organization_id: None,
+        url: settings.failure_webhook.as_ref()?.to_string(),
+        payload: notifications::run_failed_payload(outcome, &settings.public_url)?,
+    })
 }
 
 /// Parses the schedule: a cron expression, or `off`.

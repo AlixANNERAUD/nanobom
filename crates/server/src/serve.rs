@@ -130,7 +130,7 @@ pub async fn run(
         stale_after_days: options.stale_after_days,
         exploitation_refresh_timeout: runner::EXPLOITATION_REFRESH_TIMEOUT,
     };
-    runner::close_interrupted_runs(&database, &notifier, &settings).await;
+    runner::close_interrupted_runs(&database, &settings).await;
     deliveries::start(
         database.clone(),
         notifier.clone(),

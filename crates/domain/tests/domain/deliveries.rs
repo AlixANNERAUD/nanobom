@@ -1,5 +1,7 @@
 //! The webhook delivery queue: backoff, permanent failures, claims, pruning and listing.
 
+use std::time::Duration;
+
 use chrono::{DateTime, FixedOffset, SubsecRound, TimeDelta, Utc};
 use nanobom_domain::{
     Error,
@@ -488,4 +490,82 @@ async fn an_attempt_does_not_overwrite_a_cancellation_or_a_newer_claim() {
     let delivered = row(&database, id).await;
     assert_eq!(delivered.attempts, 1);
     assert_eq!(delivered.delivered_at, Some(later));
+}
+
+#[tokio::test]
+async fn every_delivery_is_recorded_before_the_first_attempt() {
+    let database = testing::database().await;
+    let owner = actor(&database, "owner").await;
+    let mut organizations_ids = Vec::new();
+    for slug in ["acme", "other", "third"] {
+        organizations_ids.push(
+            organizations::create(&database, &owner, slug, slug)
+                .await
+                .unwrap()
+                .id,
+        );
+    }
+    let receiver = MockServer::start().await;
+    // The first receiver never answers in time.
+    Mock::given(method("POST"))
+        .and(path("/hangs"))
+        .respond_with(ResponseTemplate::new(200).set_delay(Duration::from_secs(60)))
+        .mount(&receiver)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/answers"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&receiver)
+        .await;
+    let deliveries: Vec<Delivery<Ping>> = organizations_ids
+        .iter()
+        .enumerate()
+        .map(|(index, &organization)| Delivery {
+            organization_id: Some(organization),
+            url: format!(
+                "{}/{}",
+                receiver.uri(),
+                if index == 0 { "hangs" } else { "answers" }
+            ),
+            payload: ping(),
+        })
+        .collect();
+    let sending = tokio::spawn({
+        let database = database.clone();
+        async move {
+            Notifier::new()
+                .unwrap()
+                .deliver(&database, deliveries)
+                .await
+        }
+    });
+
+    // Wait for the first post to reach the receiver that hangs.
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while receiver.received_requests().await.unwrap().is_empty() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the first delivery is attempted");
+    // A restart now would lose nothing: every organization's document is recorded.
+    let rows = webhook_deliveries::Entity::find()
+        .all(&database)
+        .await
+        .unwrap();
+    let recorded: Vec<Option<i64>> = rows.iter().map(|row| row.organization_id).collect();
+    let expected: Vec<Option<i64>> = organizations_ids.iter().copied().map(Some).collect();
+    assert_eq!(recorded, expected);
+    assert_eq!(
+        receiver.received_requests().await.unwrap().len(),
+        1,
+        "the others wait for the first attempt"
+    );
+    assert!(
+        rows[1..]
+            .iter()
+            .all(|row| row.attempts == 0 && row.next_attempt_at.is_some()),
+        "the others are pending"
+    );
+    sending.abort();
 }

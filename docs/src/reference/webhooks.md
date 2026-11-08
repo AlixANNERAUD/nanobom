@@ -15,8 +15,10 @@ known exploited vulnerabilities, enabled); see [Get notified](../how-to/notifica
 
 - One `POST` per document, `Content-Type: application/json`, with the `User-Agent`
   `nanobom/<version>`.
-- Each document is recorded in the database before it is sent, then posted right away. Deliveries
-  happen after uploads waiting for the run have been answered, so they never slow CI down.
+- Each document is recorded in the database before it is sent, then posted right away. All the
+  documents of a run are recorded before the first is posted, so a receiver that hangs delays
+  the others but a restart meanwhile loses none. Deliveries happen after uploads waiting for the
+  run have been answered, so they never slow CI down.
 - An attempt that takes more than 15 seconds fails.
 - How the receiver's answer is handled:
 
@@ -155,7 +157,8 @@ so enabling one sends the currently stale projects after the next scheduled run.
 
 Sent to `NANOBOM_FAILURE_WEBHOOK_URL` for every failed run of the instance, whatever its
 organization, including a run that stopped unexpectedly (a bug, or nanobom stopped while it
-was running: such a run is closed at the next start):
+was running: such a run is closed at the next start, and its document is sent by the retry loop
+within 30 seconds, so an unreachable receiver does not delay the startup):
 
 ```json
 {

@@ -277,7 +277,7 @@ async fn runs_interrupted_by_a_restart_are_closed_at_startup() {
         stale_after_days: options.stale_after_days,
         exploitation_refresh_timeout: runner::EXPLOITATION_REFRESH_TIMEOUT,
     };
-    runner::close_interrupted_runs(&server.database, &Notifier::new().unwrap(), &settings).await;
+    runner::close_interrupted_runs(&server.database, &settings).await;
 
     let run = runs::Entity::find_by_id(interrupted.id)
         .one(&server.database)
@@ -286,6 +286,29 @@ async fn runs_interrupted_by_a_restart_are_closed_at_startup() {
         .unwrap();
     assert_eq!(run.status, "failed");
     assert!(run.finished_at.is_some());
+    // Queued, not posted: an unreachable receiver cannot hold the startup.
+    assert!(receiver.received_requests().await.unwrap().is_empty());
+    let queued = webhook_deliveries::Entity::find()
+        .one(&server.database)
+        .await
+        .unwrap()
+        .expect("the failure webhook is queued");
+    assert_eq!(queued.event, "run.failed");
+    assert_eq!(queued.attempts, 0);
+
+    let retries = deliveries::start(
+        server.database.clone(),
+        Notifier::new().unwrap(),
+        Duration::from_millis(20),
+    );
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while receiver.received_requests().await.unwrap().is_empty() {
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the retry loop delivers it");
+    retries.abort();
     let requests = receiver.received_requests().await.unwrap();
     let payload: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
     assert_eq!(payload["event"], "run.failed");

@@ -23,8 +23,8 @@ use nanobom_entity::{
 use nanobom_osv::Severity;
 use reqwest::Url;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, ModelTrait,
-    QueryFilter,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseConnection,
+    EntityTrait, ModelTrait, QueryFilter, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 
@@ -613,6 +613,58 @@ pub fn run_failed_payload(outcome: &RunOutcome, public_url: &Url) -> Option<RunF
     })
 }
 
+/// Records deliveries in the queue, due now, and returns their ids. Nothing is posted: the
+/// caller attempts them with [`Notifier::attempt_all`], or leaves them to the retry loop.
+pub async fn enqueue<T: Payload>(
+    database: &impl ConnectionTrait,
+    deliveries: &[Delivery<T>],
+) -> Result<Vec<i64>> {
+    let now = Utc::now().fixed_offset();
+    let mut ids = Vec::with_capacity(deliveries.len());
+    for delivery in deliveries {
+        let row = deliveries::enqueue(
+            database,
+            delivery.organization_id,
+            &delivery.url,
+            delivery.payload.event(),
+            &delivery.payload,
+            now,
+        )
+        .await?;
+        ids.push(row.id);
+    }
+    Ok(ids)
+}
+
+/// Prepares the `findings.new` deliveries of a run ([`new_findings_deliveries`]) and records
+/// them in the queue, in the transaction that marks the findings notified: either every
+/// document is owed to its receiver, or nothing is marked. Returns the ids to attempt.
+pub async fn queue_new_findings(
+    database: &DatabaseConnection,
+    outcome: &RunOutcome,
+    public_url: &Url,
+) -> Result<Vec<i64>> {
+    let transaction = database.begin().await?;
+    let deliveries = new_findings_deliveries(&transaction, outcome, public_url).await?;
+    let ids = enqueue(&transaction, &deliveries).await?;
+    transaction.commit().await?;
+    Ok(ids)
+}
+
+/// Prepares the `projects.stale` deliveries ([`stale_deliveries`]) and records them in the
+/// queue, in the transaction that marks the projects notified. Returns the ids to attempt.
+pub async fn queue_stale(
+    database: &DatabaseConnection,
+    stale_after_days: u32,
+    public_url: &Url,
+) -> Result<Vec<i64>> {
+    let transaction = database.begin().await?;
+    let deliveries = stale_deliveries(&transaction, stale_after_days, public_url).await?;
+    let ids = enqueue(&transaction, &deliveries).await?;
+    transaction.commit().await?;
+    Ok(ids)
+}
+
 /// Sends webhook payloads through the delivery queue.
 #[derive(Debug, Clone)]
 pub struct Notifier {
@@ -645,26 +697,28 @@ impl Notifier {
         }
     }
 
-    /// Records deliveries in the queue, then makes their first attempt. Failed attempts are left
-    /// to [`Notifier::retry_due`].
+    /// Records every delivery in the queue, then makes their first attempts. All rows exist
+    /// before the first post, so a receiver that hangs and a restart meanwhile lose no
+    /// document. Failed attempts are left to [`Notifier::retry_due`].
     pub async fn deliver<T: Payload>(
         &self,
         database: &impl ConnectionTrait,
         deliveries: Vec<Delivery<T>>,
     ) -> Result<Vec<Outcome>> {
+        let ids = enqueue(database, &deliveries).await?;
+        self.attempt_all(database, &ids).await
+    }
+
+    /// Makes the first attempt of queued deliveries, one after the other. A delivery that
+    /// another attempt holds, or that was cancelled, is skipped.
+    pub async fn attempt_all(
+        &self,
+        database: &impl ConnectionTrait,
+        ids: &[i64],
+    ) -> Result<Vec<Outcome>> {
         let mut outcomes = Vec::new();
-        for delivery in deliveries {
-            let now = Utc::now().fixed_offset();
-            let row = deliveries::enqueue(
-                database,
-                delivery.organization_id,
-                &delivery.url,
-                delivery.payload.event(),
-                &delivery.payload,
-                now,
-            )
-            .await?;
-            outcomes.extend(self.attempt(database, row.id).await?);
+        for &id in ids {
+            outcomes.extend(self.attempt(database, id).await?);
         }
         Ok(outcomes)
     }
