@@ -1,4 +1,5 @@
-//! The nanobom binary.
+//! The nanobom binary: parses the command line, sets up logging and hands over to
+//! [`nanobom::run`]. Everything else lives in the library, so integration tests can drive it.
 
 use std::process::ExitCode;
 

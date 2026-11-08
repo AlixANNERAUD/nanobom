@@ -1,5 +1,13 @@
 //! What the pages show. These types travel from server functions to components, so they are
 //! defined here, independent of the server-only domain crate.
+//!
+//! They also compile for the browser bundle, which cannot link the domain crate (it pulls in
+//! the database driver). [`Severity`], [`Status`], [`Role`] and [`DeliveryState`] therefore
+//! mirror domain enumerations: keep them in sync, along with the conversions in
+//! `crate::server`.
+//!
+//! Nothing here grants anything: methods such as [`Role::can_manage`] only decide which
+//! controls a page shows. The domain checks every action again.
 
 /// The error a server function returns while it redirects to the sign-in page; never shown.
 pub const SIGN_IN_REQUIRED: &str = "sign in required";
@@ -9,6 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::t;
 
+/// Mirror of `nanobom_osv::Severity`, ordered from the least to the most severe.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
@@ -49,6 +58,7 @@ impl Severity {
         }
     }
 
+    /// Parses the name used in query strings ([`Severity::as_str`]).
     pub fn parse(value: &str) -> Option<Self> {
         Self::DESCENDING
             .into_iter()
@@ -56,6 +66,7 @@ impl Severity {
     }
 }
 
+/// Mirror of `nanobom_domain::findings::Status`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Status {
@@ -91,6 +102,7 @@ impl Status {
     }
 }
 
+/// Mirror of `nanobom_domain::access::Role`, ordered from the least to the most privileged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Role {
@@ -122,10 +134,12 @@ impl Role {
         }
     }
 
+    /// Whether to show the controls to ignore and restore findings and to start runs.
     pub fn can_triage(self) -> bool {
         self >= Role::Member
     }
 
+    /// Whether to show the organization's settings (members, tokens, webhook, projects).
     pub fn can_manage(self) -> bool {
         self >= Role::Admin
     }
@@ -189,7 +203,9 @@ pub struct ProjectRow {
     pub last_upload_at: Option<DateTime<FixedOffset>>,
     pub open: SeverityCounts,
     pub ignored: u64,
+    /// Open findings with a known exploited CVE.
     pub known_exploited: i64,
+    /// No SBOM for longer than the configured threshold.
     pub stale: bool,
 }
 
@@ -201,6 +217,8 @@ pub struct Run {
     pub status: String,
     pub started_at: DateTime<FixedOffset>,
     pub finished_at: Option<DateTime<FixedOffset>>,
+    /// For instance-wide runs, a generic message unless the viewer is an instance
+    /// administrator.
     pub error: Option<String>,
     pub new_findings: i64,
     pub fixed_findings: i64,
@@ -220,7 +238,9 @@ pub struct Exploitation {
     pub kev_date_added: Option<NaiveDate>,
     pub kev_due_date: Option<NaiveDate>,
     pub kev_ransomware: bool,
+    /// Probability of exploitation in the next 30 days, from 0 to 1.
     pub epss_score: Option<f64>,
+    /// Share of scored CVEs with a lower score, from 0 to 1.
     pub epss_percentile: Option<f64>,
     pub epss_date: Option<NaiveDate>,
 }
@@ -308,6 +328,7 @@ pub struct FindingData {
     pub finding: FindingRow,
     pub organization_slug: String,
     pub project_slug: String,
+    /// Whether the viewer may ignore or restore this finding (shows the controls only).
     pub can_triage: bool,
     pub details: Option<String>,
     pub published: Option<DateTime<FixedOffset>>,
@@ -317,6 +338,7 @@ pub struct FindingData {
     pub fixed_versions: Vec<String>,
     pub references: Vec<Reference>,
     pub ignored_by: Option<String>,
+    /// Other findings filed under the same identifier, in organizations the viewer can see.
     pub affected_components: Vec<AffectedComponent>,
     pub events: Vec<FindingEvent>,
 }

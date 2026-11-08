@@ -37,6 +37,14 @@ run = [
 description = "Run the test suite"
 run = "cargo nextest run $NANOBOM_SERVER_PACKAGES --no-tests=pass"
 
+# Warnings are errors, so a broken intra-doc link or a malformed doc comment fails CI.
+[tasks.doc]
+description = "Build the API documentation, failing on rustdoc warnings"
+run = "cargo doc $NANOBOM_SERVER_PACKAGES --no-deps --document-private-items"
+
+[tasks.doc.env]
+RUSTDOCFLAGS = "-D warnings"
+
 [tasks.coverage]
 description = "Run the test suite with coverage, writing lcov.info"
 run = "cargo llvm-cov nextest $NANOBOM_SERVER_PACKAGES --no-tests=pass --lcov --output-path lcov.info"
@@ -47,7 +55,7 @@ run = "cargo deny check"
 
 [tasks.check]
 description = "Everything CI checks, except the release build"
-depends = ["lint", "test", "deny"]
+depends = ["lint", "doc", "test", "deny"]
 
 [tasks.docs]
 description = "Build the documentation into docs/book"

@@ -3,6 +3,9 @@
 //! Tests use a private in-memory SQLite database by default. Set `NANOBOM_TEST_DATABASE_URL` to
 //! run them against another database such as PostgreSQL; the schema is then dropped and recreated
 //! for each test, so run them one at a time (`--test-threads 1`).
+//!
+//! The module is compiled for this crate's tests and, through the `testing` feature, for the
+//! server's; it is not part of the production build.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -11,7 +14,9 @@ use sea_orm::DatabaseConnection;
 
 static NEXT_DATABASE: AtomicU64 = AtomicU64::new(0);
 
-/// Returns a connection to an empty database with every migration applied.
+/// Returns a connection to an empty database with every migration applied. Each call gets its
+/// own SQLite in-memory database, named after the process and a counter, which lives as long as
+/// a connection to it stays open.
 pub async fn database() -> DatabaseConnection {
     match std::env::var("NANOBOM_TEST_DATABASE_URL") {
         Ok(url) => {
@@ -43,6 +48,9 @@ pub async fn database() -> DatabaseConnection {
 /// An in-memory vulnerability source: records are attached to package URLs and can change
 /// between runs, and the source can be told to fail, to panic once or to hold queries until
 /// resumed.
+///
+/// Package URLs are matched exactly, so attach records to the query form the evaluator sends
+/// (without qualifiers or subpath).
 #[derive(Default)]
 pub struct FakeSource {
     state: std::sync::Mutex<FakeState>,
@@ -83,6 +91,7 @@ impl FakeSource {
         }
     }
 
+    /// Makes every later query fail, as an unreachable OSV would; fetching details still works.
     pub fn set_failing(&self, failing: bool) {
         self.state.lock().expect("not poisoned").failing = failing;
     }

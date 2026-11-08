@@ -1,5 +1,15 @@
 //! The component inventory: parsing CycloneDX SBOMs and replacing a project's components with
 //! each new upload, keeping the upload history.
+//!
+//! An upload is a full snapshot: [`ingest`] deletes the project's components and inserts the
+//! new ones in one transaction, so a project's components are always those of exactly one SBOM.
+//! Findings are not touched here; the next run ([`crate::evaluation`]) compares them with the
+//! new components.
+//!
+//! Components are identified by their package URL (purl), the only identifier OSV can match.
+//! Components without a valid purl are counted and reported back to CI as skipped; files and
+//! the operating system entry are ignored altogether. Two components with the same purl are
+//! stored once.
 
 use std::{collections::BTreeMap, str::FromStr};
 
@@ -45,6 +55,7 @@ pub struct InventoryComponent {
     pub ecosystem: String,
     /// The package name, with its namespace when it has one (`@scope/name`, `group/name`).
     pub name: String,
+    /// The purl's version; components without one are kept but never matched.
     pub version: Option<String>,
 }
 
@@ -53,6 +64,7 @@ pub struct InventoryComponent {
 pub struct SkippedComponent {
     pub name: String,
     pub version: Option<String>,
+    /// Why, in English: no package URL, or why it did not parse.
     pub reason: String,
 }
 
@@ -78,6 +90,10 @@ struct Header {
 
 /// Parses a CycloneDX JSON document. The document is deserialized once, straight into the model
 /// of its specification version, to keep memory use low on large SBOMs.
+///
+/// Errors are [`Error::Invalid`] with a problem that tells CI what is wrong: not JSON, not
+/// CycloneDX, a specification version outside [`SUPPORTED_SPECIFICATION_VERSIONS`], or a
+/// document that does not follow it. Nested components are flattened.
 pub fn parse(document: &[u8]) -> Result<ParsedSbom> {
     let header: Header = serde_json::from_slice(document).map_err(|error| {
         Error::invalid(Problem::SbomNotJson {
@@ -176,7 +192,8 @@ fn inventory_component(component: &Component) -> std::result::Result<InventoryCo
     })
 }
 
-/// Where an upload comes from, as given by CI.
+/// Where an upload comes from, as given by CI. Both labels are free text kept for display: at
+/// most 300 characters without control characters; blank values are dropped.
 #[derive(Debug, Clone, Default)]
 pub struct UploadSource {
     pub source_commit: Option<String>,
@@ -186,13 +203,19 @@ pub struct UploadSource {
 /// The result of an upload, returned to CI.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UploadOutcome {
+    /// The organization slug, normalized.
     pub organization: String,
+    /// The project slug, normalized.
     pub project: String,
     pub project_id: i64,
+    /// Whether this upload created the project (organization-wide tokens only).
     pub project_created: bool,
     pub upload_id: i64,
+    /// Components stored, after removing duplicates.
     pub component_count: usize,
+    /// Components skipped for lack of a usable package URL.
     pub components_without_purl: usize,
+    /// The first skipped components (at most 100), with the reason.
     pub skipped: Vec<SkippedComponent>,
 }
 
@@ -208,6 +231,17 @@ fn optional_label(field: Field, value: Option<String>) -> Result<Option<String>>
 
 /// Replaces the components of a project with those of an SBOM uploaded with `token`, creating
 /// the project first when the token is organization-wide.
+///
+/// The token, already authenticated by [`crate::tokens::authenticate`], is the only
+/// authorization:
+///
+/// - an organization other than the token's is [`Error::NotFound`], like a missing one;
+/// - a project-scoped token may upload to its own project only: another existing project is
+///   [`Error::Forbidden`], a missing one [`Error::NotFound`] (it cannot create projects);
+/// - an organization-wide token may upload to any project of its organization and creates
+///   missing ones, with the slug as name.
+///
+/// No run is started; the caller decides whether to evaluate the project now.
 pub async fn ingest(
     database: &(impl ConnectionTrait + TransactionTrait),
     token: &upload_tokens::Model,
@@ -301,7 +335,7 @@ pub async fn ingest(
     })
 }
 
-/// The upload history of a project, newest first.
+/// The upload history of a project, newest first. Requires [`Permission::View`].
 pub async fn uploads(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -316,7 +350,8 @@ pub async fn uploads(
         .await?)
 }
 
-/// The current components of a project, sorted by package URL.
+/// The current components of a project, sorted by package URL. Requires
+/// [`Permission::View`].
 pub async fn components(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -346,7 +381,9 @@ pub const MAXIMUM_SEARCH_RESULTS: usize = 200;
 
 /// Finds components by name across the organizations the actor can see: `openssl` matches
 /// names containing it, `openssl 3.` (or `openssl@3.`) also requires the version to start with
-/// `3.`.
+/// `3.`. Names match case-insensitively; `%` and `_` are taken literally.
+/// Results are sorted by name then version and capped at [`MAXIMUM_SEARCH_RESULTS`]; an empty
+/// name returns nothing rather than every component.
 pub async fn search(
     database: &impl ConnectionTrait,
     actor: &Actor,

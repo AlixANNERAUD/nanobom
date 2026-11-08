@@ -1,4 +1,29 @@
 //! The HTTP API used by CI, authenticated with upload tokens.
+//!
+//! One route: `PUT /api/organizations/{organization}/projects/{project}/sbom`. The token is
+//! checked before the body is parsed, so an anonymous client cannot make the server parse
+//! anything; the token's reach (its organization, or one project) is then enforced by
+//! [`inventory::ingest`]. Parsing runs on the blocking thread pool, a few SBOMs at a time
+//! ([`AppState::sbom_parsing`](crate::state::AppState::sbom_parsing)), and the body size is capped
+//! by `--maximum-sbom-size`. Errors are English JSON (`{"error": "…"}`), meant for CI logs.
+//!
+//! # The upload gate
+//!
+//! Without `wait` or `fail_on`, the upload answers at once and queues a run of the project
+//! (unless runs after uploads are disabled). With them, it waits for a run of the project that
+//! starts after the upload
+//! ([`Runner::request_and_wait`](crate::runner::Runner::request_and_wait)), at most
+//! `--upload-wait-seconds`, and returns the project's open findings. `fail_on` then turns the
+//! result into a status CI can act on:
+//!
+//! - `409 Conflict` when open findings reach the threshold (a severity, or `exploited`);
+//! - `503 Service Unavailable` when the run did not complete in time or failed, since the
+//!   findings would be out of date: an incomplete evaluation never passes the gate.
+//!
+//! For `fail_on=exploited`, the run worker refreshes the exploitation data before answering
+//! waiters, so CVEs first seen in this run count. If that refresh fails or times out, the gate
+//! decides on the data already stored. The threshold is refused when exploitation data is
+//! disabled, since it could then never fail.
 
 use axum::{
     Json, Router,
@@ -32,6 +57,8 @@ pub struct ApiError {
 }
 
 impl ApiError {
+    /// An error with this status and message; `401` also gets a `WWW-Authenticate: Bearer`
+    /// header.
     pub fn new(status: StatusCode, message: impl Into<String>) -> Self {
         Self {
             status,
@@ -92,6 +119,7 @@ impl From<nanobom_domain::Error> for ApiError {
     }
 }
 
+/// The upload route, with the body limit of `--maximum-sbom-size` (in mebibytes).
 pub fn router(state: &AppState) -> Router<AppState> {
     let maximum_size = state.options.maximum_sbom_size.saturating_mul(1024 * 1024);
     Router::new().route(

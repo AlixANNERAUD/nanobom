@@ -1,5 +1,21 @@
 //! Findings: a vulnerability affecting a component of a project, with its lifecycle (open,
 //! fixed, ignored) and the full history of what happened to it.
+//!
+//! A finding is identified by its project, its package URL and its vulnerability identifier,
+//! and is never deleted while its project exists: a fixed finding that comes back is reopened,
+//! keeping its history. Runs ([`crate::evaluation`]) open, fix and reopen findings; members
+//! only ignore and restore them ([`ignore`], [`restore`]). Every status change appends an
+//! [`Event`] in the same transaction:
+//!
+//! - a run reports it: opened;
+//! - open or ignored, a run no longer reports it: fixed;
+//! - fixed, a run reports it again: reopened (open);
+//! - open, a member ignores it: ignored;
+//! - ignored, a member restores it or the first run after its expiry comes: open.
+//!
+//! Listings carry the [`Exploitation`] signals of each finding, and order by them: known
+//! exploited first, then by severity, then by EPSS. The severity stored on a finding is the
+//! highest among its aliases at the last run that reported it.
 
 use std::{collections::HashMap, str::FromStr};
 
@@ -23,17 +39,23 @@ use crate::{
     problem::Problem,
 };
 
+/// Where a finding stands in its lifecycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Status {
+    /// Reported by the latest run and not ignored.
     Open,
+    /// No longer reported: the component is gone or upgraded, or OSV no longer lists it.
     Fixed,
+    /// Reported, but a member decided it does not apply, possibly until an expiry date.
     Ignored,
 }
 
 impl Status {
+    /// Every status, in the order the interface shows them.
     pub const ALL: [Status; 3] = [Status::Open, Status::Ignored, Status::Fixed];
 
+    /// The name stored in the `findings.status` column.
     pub fn as_str(self) -> &'static str {
         match self {
             Status::Open => "open",
@@ -64,19 +86,24 @@ impl FromStr for Status {
     }
 }
 
-/// What happened to a finding.
+/// What happened to a finding. Run events carry the run; member events carry the member.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EventKind {
     Opened,
     Fixed,
+    /// A fixed finding reported again.
     Reopened,
+    /// Ignored by a member, with a reason.
     Ignored,
+    /// Returned to open by a member.
     Restored,
+    /// Returned to open by a run because the ignore reached its expiry.
     IgnoreExpired,
 }
 
 impl EventKind {
+    /// The name stored in the `finding_events.kind` column.
     pub fn as_str(self) -> &'static str {
         match self {
             EventKind::Opened => "opened",
@@ -119,7 +146,10 @@ pub struct Finding {
     pub first_seen_at: DateTime<FixedOffset>,
     pub last_seen_at: DateTime<FixedOffset>,
     pub fixed_at: Option<DateTime<FixedOffset>>,
+    /// The reason of the latest ignore. It is not cleared when the finding is restored or
+    /// fixed, so read it only while the status is [`Status::Ignored`].
     pub ignore_reason: Option<String>,
+    /// Like `ignore_reason`, meaningful only while the finding is ignored.
     pub ignore_expires_at: Option<DateTime<FixedOffset>>,
     pub exploitation: Exploitation,
 }
@@ -179,7 +209,7 @@ fn view(
 }
 
 /// The findings of a project: known exploited first, then most severe first, then by EPSS
-/// score (findings without one last).
+/// score (findings without one last). Requires [`Permission::View`].
 pub async fn list(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -191,7 +221,9 @@ pub async fn list(
 }
 
 /// The open findings of a project an upload token covers, most severe first (then as `list`
-/// orders them), for the evaluation returned to CI after an upload.
+/// orders them), for the evaluation returned to CI after an upload. The token is the
+/// authorization, checked as [`crate::inventory::ingest`] does; a project outside it is
+/// [`Error::NotFound`].
 pub async fn open_for_upload_token(
     database: &impl ConnectionTrait,
     token: &upload_tokens::Model,
@@ -297,7 +329,8 @@ async fn project_findings(
     Ok(findings)
 }
 
-/// The ecosystems present among a project's findings, for filters.
+/// The ecosystems present among a project's findings, for filters. Requires
+/// [`Permission::View`].
 pub async fn ecosystems(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -341,12 +374,14 @@ pub struct AffectedComponent {
 pub struct FindingDetail {
     pub finding: Finding,
     pub organization_slug: String,
+    /// Whether the actor may ignore or restore this finding.
     pub can_triage: bool,
     pub details: Option<String>,
     pub published: Option<DateTime<FixedOffset>>,
     pub modified: DateTime<FixedOffset>,
     pub cvss_version: Option<String>,
     pub cvss_vector: Option<String>,
+    /// Versions of the package that fix the vulnerability, per the OSV record's ranges.
     pub fixed_versions: Vec<String>,
     pub references: Vec<Reference>,
     pub ignored_by: Option<String>,
@@ -371,7 +406,9 @@ async fn usernames(
         .collect())
 }
 
-/// A finding with its vulnerability, history and the other affected components.
+/// A finding with its vulnerability, history and the other affected components. Requires
+/// [`Permission::View`]. The other affected components are limited to the organizations the
+/// actor can see, so the page never reveals that another organization uses a package.
 pub async fn detail(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -523,8 +560,10 @@ async fn triaged_finding(
     Ok(finding)
 }
 
-/// Ignores an open finding, with a mandatory reason and an optional expiry, after which it
-/// returns to open.
+/// Ignores an open finding, with a mandatory reason (at most 2000 characters) and an optional
+/// expiry in the future. Requires [`Permission::TriageFindings`]. The finding returns to open
+/// at the first run after the expiry, not at the expiry itself; ignoring a finding that is not
+/// open is a [`Problem::OnlyOpenCanBeIgnored`] conflict.
 pub async fn ignore(
     database: &(impl ConnectionTrait + TransactionTrait),
     actor: &Actor,
@@ -567,7 +606,7 @@ pub async fn ignore(
     Ok(())
 }
 
-/// Returns an ignored finding to open.
+/// Returns an ignored finding to open. Requires [`Permission::TriageFindings`].
 pub async fn restore(
     database: &(impl ConnectionTrait + TransactionTrait),
     actor: &Actor,

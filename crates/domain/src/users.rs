@@ -1,5 +1,11 @@
 //! User accounts. Local accounts have a password hash; accounts created through OpenID Connect
 //! have an identity instead, and may have both.
+//!
+//! Usernames and email addresses are unique and stored in lower case. There is no self sign-up:
+//! accounts are created by instance administrators, by the command line, or at a first OpenID
+//! Connect sign-in. Users are not deleted, only disabled ([`set_disabled`]). Functions that
+//! manage other users require an instance administrator; the ones without an actor serve
+//! sign-in and the command line, which authenticate the caller themselves.
 
 use chrono::Utc;
 use nanobom_entity::{memberships, organizations, user_identities, users};
@@ -19,14 +25,23 @@ use crate::{
 /// A user to create.
 #[derive(Debug, Clone, Default)]
 pub struct NewUser {
+    /// Normalized with [`names::slug`].
     pub username: String,
     pub email: Option<String>,
+    /// Defaults to the username when missing or blank.
     pub display_name: Option<String>,
+    /// A hash from [`crate::passwords::hash`], never a plain password; `None` for accounts that
+    /// sign in through an identity provider only.
     pub password_hash: Option<String>,
     pub is_instance_administrator: bool,
 }
 
-/// Creates a user and, when `personal_organization` is set, an organization they own.
+/// Creates a user and, when `personal_organization` is set, an organization they own, named
+/// after them (with a numeric suffix if the slug is taken).
+///
+/// No actor is checked: callers are the command line and identity provider sign-in.
+/// [`create_as`] is the variant for administrators. A taken username or email address is a
+/// conflict.
 pub async fn create(
     database: &(impl ConnectionTrait + TransactionTrait),
     user: NewUser,
@@ -129,10 +144,12 @@ pub(crate) async fn available_organization_slug(
     unreachable!("an unbounded range always yields a free slug")
 }
 
+/// Finds a user by identifier, disabled users included.
 pub async fn find_by_id(database: &impl ConnectionTrait, id: i64) -> Result<Option<users::Model>> {
     Ok(users::Entity::find_by_id(id).one(database).await?)
 }
 
+/// Finds a user by username, case-insensitively; disabled users included.
 pub async fn find_by_username(
     database: &impl ConnectionTrait,
     username: &str,
@@ -143,6 +160,7 @@ pub async fn find_by_username(
         .await?)
 }
 
+/// Finds a user by email address, case-insensitively; disabled users included.
 pub async fn find_by_email(
     database: &impl ConnectionTrait,
     email: &str,
@@ -165,6 +183,7 @@ pub async fn find_by_login(
     }
 }
 
+/// Sets `last_login_at` to now.
 pub async fn record_login(database: &impl ConnectionTrait, user_id: i64) -> Result<()> {
     users::ActiveModel {
         id: Set(user_id),
@@ -197,7 +216,9 @@ async fn administered_user(
     find_by_id(database, user_id).await?.ok_or(Error::NotFound)
 }
 
-/// Disables or re-enables a user. Disabled users cannot sign in and their sessions stop working.
+/// Disables or re-enables a user. Disabled users cannot sign in and their sessions stop working
+/// (see [`Actor::load`]). Instance administrators only, and not on their own account, so the
+/// last administrator cannot lock themselves out.
 pub async fn set_disabled(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -211,7 +232,9 @@ pub async fn set_disabled(
     Ok(())
 }
 
-/// Grants or removes instance administration.
+/// Grants or removes instance administration. Instance administrators only, and not on their
+/// own account. For users managed by an identity provider, the next sign-in may undo the change
+/// ([`synchronize_instance_administrator`]).
 pub async fn set_instance_administrator(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -225,8 +248,10 @@ pub async fn set_instance_administrator(
     Ok(())
 }
 
-/// Sets the password hash of a local account: instance administrators reset anyone's password,
-/// and users change their own.
+/// Sets the password hash of an account: instance administrators reset anyone's password, and
+/// users change their own. This function only stores the hash: the caller checks the
+/// [`crate::passwords::PasswordPolicy`] and, if it wants one, the current password. Setting a
+/// password on an identity provider account also lets it sign in locally.
 pub async fn set_password_hash(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -281,7 +306,10 @@ fn sanitize_username(value: &str) -> Option<String> {
     names::slug(Field::Username, &name).ok()
 }
 
-/// The first free username derived from the candidates, in order, falling back to `user`.
+/// The first free username derived from the candidates (identity provider claims such as the
+/// preferred username or the email address), in order, falling back to `user`. Taken names get
+/// a numeric suffix: `alice`, `alice-2`… The result can still be taken by a concurrent sign-in,
+/// in which case [`create`] reports a conflict.
 pub async fn available_username(
     database: &impl ConnectionTrait,
     candidates: &[&str],
@@ -303,7 +331,8 @@ pub async fn available_username(
     unreachable!("an unbounded range always yields a free username")
 }
 
-/// The user linked to an identity provider account.
+/// The user linked to an identity provider account, identified by its issuer and subject
+/// claims (never by email address, which a provider may let users change).
 pub async fn find_by_identity(
     database: &impl ConnectionTrait,
     issuer: &str,
@@ -320,7 +349,7 @@ pub async fn find_by_identity(
     }
 }
 
-/// Creates a user linked to an identity provider account.
+/// Creates a user linked to an identity provider account, in one transaction.
 pub async fn create_with_identity(
     database: &(impl ConnectionTrait + TransactionTrait),
     user: NewUser,

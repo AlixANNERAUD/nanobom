@@ -1,6 +1,11 @@
 //! Why an operation was refused, in words the user can act on. Each problem renders in every
 //! embedded locale: the interface shows it in the reader's language, while the API and logs use
 //! English through `Display`.
+//!
+//! Messages live in `crates/domain/locales/*.json` and are embedded at compile time; a key
+//! missing from a locale fails the build (`EMBEDDED_I18N_STRICT` in `.cargo/config.toml`). They
+//! are written as lower-case clauses (`the project name must be 1 to 200 characters`), which the
+//! interface turns into sentences.
 
 use std::fmt;
 
@@ -14,7 +19,7 @@ pub const ENGLISH: usize = match embedded_i18n::find_locale("en") {
     None => embedded_i18n::DEFAULT_LOCALE_INDEX,
 };
 
-/// A value the user entered.
+/// A value the user entered, named in [`Problem`] messages that concern it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Field {
     Username,
@@ -45,6 +50,8 @@ impl Field {
     }
 }
 
+/// A reason to refuse an operation, carried by [`crate::Error::Invalid`] and
+/// [`crate::Error::Conflict`]. Variant names follow the locale keys (`problems.<snake_case>`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Problem {
     InvalidSlug(Field),
@@ -79,7 +86,8 @@ pub enum Problem {
 }
 
 impl Problem {
-    /// Writes the problem in the locale with this index (see `embedded_i18n::LOCALES`).
+    /// Writes the problem in the locale with this index (see `embedded_i18n::LOCALES`; [`ENGLISH`]
+    /// is one of them).
     pub fn write(&self, output: &mut impl fmt::Write, locale: usize) -> fmt::Result {
         use Problem as P;
         match self {

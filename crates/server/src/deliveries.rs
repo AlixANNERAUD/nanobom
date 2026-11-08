@@ -1,5 +1,11 @@
 //! The retry loop of the webhook delivery queue: failed deliveries are attempted again when
 //! their backoff expires, and old finished deliveries are pruned.
+//!
+//! First attempts are made by the run worker right after a run; this loop only picks up what
+//! is due afterwards (retries, and deliveries whose first attempt a restart cut short). It
+//! attempts a few deliveries per tick, one after the other, so a receiver that hangs delays the
+//! queue by a tick rather than blocking it. Attempts claim their row first
+//! ([`deliveries::claim`]), so the loop and the worker never post the same delivery at once.
 
 use std::time::Duration;
 

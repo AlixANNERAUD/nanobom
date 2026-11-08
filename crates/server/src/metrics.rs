@@ -1,5 +1,9 @@
 //! Prometheus metrics. Labels stay instance-wide (no organization or project) to keep their
-//! number small.
+//! number small, and so that `/metrics` reveals nothing about a given organization.
+//!
+//! Gauges are recomputed from the database at startup ([`initialize`]) and after each run,
+//! rather than adjusted incrementally, so they cannot drift. The recorder is process-global:
+//! every function here installs it on first use, and tests in the same process share it.
 
 use std::{sync::OnceLock, time::Duration};
 
@@ -12,7 +16,8 @@ use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOr
 
 static HANDLE: OnceLock<PrometheusHandle> = OnceLock::new();
 
-/// The recorder, installed on first use.
+/// The recorder, installed on first use. Its upkeep task (draining histograms) starts only if
+/// a Tokio runtime is running at that moment.
 pub fn handle() -> &'static PrometheusHandle {
     HANDLE.get_or_init(|| {
         let handle = PrometheusBuilder::new()
@@ -77,7 +82,8 @@ fn describe() {
     );
 }
 
-/// Records a finished run.
+/// Records a finished run: its duration, its status and, when it succeeded, its start time as
+/// the last successful run.
 pub fn record_run(outcome: &RunOutcome) {
     handle();
     histogram!("nanobom_run_duration_seconds").record(outcome.duration_seconds);
@@ -91,6 +97,8 @@ pub fn record_run(outcome: &RunOutcome) {
     }
 }
 
+/// Counts a failed run, including one that stopped before producing a [`RunOutcome`] (on a
+/// database error, for example).
 pub fn record_failed_run() {
     handle();
     counter!("nanobom_runs_total", "status" => "failed").increment(1);
@@ -146,7 +154,8 @@ pub async fn refresh_open_findings(database: &DatabaseConnection) {
     }
 }
 
-/// Sets the gauges from the database at startup.
+/// Sets the gauges from the database at startup, so a restart does not report zeros until the
+/// next run. Database errors are logged, never fatal.
 pub async fn initialize(database: &DatabaseConnection, stale_after_days: u32) {
     refresh_open_findings(database).await;
     refresh_stale_projects(database, stale_after_days).await;

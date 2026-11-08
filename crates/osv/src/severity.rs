@@ -3,6 +3,9 @@
 //! Supported vectors: CVSS 2.0, 3.0, 3.1 and 4.0. When a record has several, the most recent CVSS
 //! version wins. Records without a usable vector fall back to the qualitative severity some
 //! databases provide (`database_specific.severity`, as GitHub advisories do), then to unknown.
+//!
+//! The severity is computed once per record when it is cached, and a finding takes the highest
+//! severity among the aliases that matched it. Non-CVSS vectors (`Ubuntu`…) are ignored.
 
 use std::{fmt, str::FromStr};
 
@@ -14,9 +17,13 @@ use crate::schema::{SeverityScore, Vulnerability};
 /// CVSS versions whose vectors are scored.
 pub const SUPPORTED_CVSS_VERSIONS: [&str; 4] = ["2.0", "3.0", "3.1", "4.0"];
 
+/// The qualitative severity of a vulnerability, ordered from [`Severity::Unknown`] (lowest) to
+/// [`Severity::Critical`], following the CVSS rating scale.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
+    /// No usable vector or rating. Ranked lowest so thresholds such as "high and above" leave
+    /// it out; filters can still ask for it explicitly.
     Unknown,
     Low,
     Medium,
@@ -34,6 +41,8 @@ impl Severity {
         Severity::Unknown,
     ];
 
+    /// The lower-case name stored in the database and used in URLs and webhooks; parsed back
+    /// with [`str::parse`].
     pub fn as_str(self) -> &'static str {
         match self {
             Severity::Unknown => "unknown",
@@ -101,6 +110,8 @@ pub struct CvssScore {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Assessment {
     pub severity: Severity,
+    /// The vector the severity was derived from; `None` when it came from a qualitative rating
+    /// or is unknown.
     pub cvss: Option<CvssScore>,
 }
 
@@ -130,7 +141,8 @@ fn score(entry: &SeverityScore) -> Option<CvssScore> {
 }
 
 /// Assesses a record: the most recent CVSS version among its vectors (top level first, then
-/// per affected package), then its qualitative rating.
+/// per affected package), then its qualitative rating. Between vectors of the same version,
+/// the highest score wins. Unparsable vectors are skipped, never an error.
 pub fn assess(vulnerability: &Vulnerability) -> Assessment {
     let best = |entries: &mut dyn Iterator<Item = &SeverityScore>| {
         entries.filter_map(score).max_by(|left, right| {

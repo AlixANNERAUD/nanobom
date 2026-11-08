@@ -1,5 +1,11 @@
 //! The initial schema. Enumerations are stored as text and timestamps with their time zone so the
 //! same schema works on SQLite and PostgreSQL.
+//!
+//! Foreign keys cascade from organizations to projects, memberships, tokens and runs, and from
+//! projects to components, uploads, runs and findings, so deleting an organization or a project
+//! removes everything under it. References that only record who or what did something (the
+//! creator of a token, the token of an upload, the user or run behind a finding event) are set
+//! to null instead, keeping the history.
 
 use sea_orm_migration::{prelude::*, schema::*};
 

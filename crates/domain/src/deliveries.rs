@@ -18,6 +18,11 @@
 //! recorded only if the row still holds that lease: a delivery cancelled meanwhile (its webhook
 //! removed, disabled or moved) stays cancelled, and an attempt whose lease expired does not
 //! overwrite the one that took over.
+//!
+//! A retry posts the very document recorded at enqueue time, so a receiver sees the same body
+//! each time, and may see it twice if an attempt succeeded but its result could not be
+//! recorded. Only [`recent`] takes an actor; the rest serves the run worker and the server's
+//! retry loop.
 
 use chrono::{DateTime, FixedOffset, TimeDelta};
 use nanobom_entity::webhook_deliveries;
@@ -85,6 +90,7 @@ pub enum Outcome {
 }
 
 impl Outcome {
+    /// The value of the `outcome` label of the delivery metrics.
     pub fn as_str(self) -> &'static str {
         match self {
             Outcome::Delivered => "delivered",
@@ -309,7 +315,8 @@ pub struct DeliverySummary {
     pub next_attempt_at: Option<DateTime<FixedOffset>>,
 }
 
-/// The latest deliveries to an organization's webhook, the newest first.
+/// The latest deliveries to an organization's webhook, the newest first. Requires
+/// [`Permission::ManageWebhook`], like the webhook itself.
 pub async fn recent(
     database: &impl ConnectionTrait,
     actor: &Actor,

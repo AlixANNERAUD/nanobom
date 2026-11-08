@@ -1,5 +1,33 @@
 //! The run queue: runs requested by the schedule, by users or after uploads execute one at a
 //! time in the background, then notifications are sent and metrics updated.
+//!
+//! # Queue
+//!
+//! [`Runner`] is a handle to a FIFO queue drained by a single worker task. A request for a
+//! scope that is already waiting merges into it instead of queueing a second run of the same
+//! scope; a run already in progress does not absorb requests, since it may have read the
+//! components before the upload that asked for a new run. Different scopes are not merged:
+//! a project run queued behind an instance-wide run still happens.
+//!
+//! # Stages
+//!
+//! The worker performs each request in stages, in this order:
+//!
+//! 1. the run itself ([`Evaluator::run`]);
+//! 2. the refresh of the exploitation data for the run's scope, bounded by
+//!    [`EXPLOITATION_REFRESH_TIMEOUT`];
+//! 3. answering the waiters ([`Runner::request_and_wait`]), so an upload gate sees both the new
+//!    findings and their exploitation data;
+//! 4. gauges and webhooks, which nobody waits for.
+//!
+//! # Isolation
+//!
+//! Each stage runs in a task of its own, so a panic ends that stage only: the worker logs it and
+//! goes on with the next request. A run that panics or hits a database error after its row was
+//! inserted is closed with [`evaluation::fail_unfinished`] and notified like any failed run;
+//! one that stops before its row exists has no outcome, and its waiters get
+//! [`Waited::NotCompleted`]. Rows left `running` by a crash or a restart are closed at the next
+//! start by [`close_interrupted_runs`], which assumes no other process shares the database.
 
 use std::{
     collections::VecDeque,
@@ -29,6 +57,7 @@ use crate::metrics;
 pub struct RunRequest {
     pub trigger: Trigger,
     pub scope: Scope,
+    /// The user who asked for the run, recorded on it; `None` for scheduled and upload runs.
     pub triggered_by: Option<i64>,
 }
 
@@ -81,7 +110,8 @@ pub struct Runner {
 }
 
 impl Runner {
-    /// Starts the worker that executes requested runs.
+    /// Starts the worker that executes requested runs; it lives as long as the runtime. Call
+    /// [`close_interrupted_runs`] first. `feeds` is `None` when exploitation data is disabled.
     pub fn start<S: VulnerabilitySource + 'static>(
         database: DatabaseConnection,
         evaluator: Arc<Evaluator<S>>,
@@ -114,7 +144,9 @@ impl Runner {
         runner
     }
 
-    /// Queues a run. A request for a scope that is already waiting is merged with it.
+    /// Queues a run. A request for a scope that is already waiting is merged with it, keeping
+    /// the waiting request's trigger and user unless this one is scheduled; returns `false`
+    /// then. Never checks permissions: callers do, with [`evaluation::authorize`].
     pub fn request(&self, request: RunRequest) -> bool {
         let mut queue = self.shared.queue.lock().expect("not poisoned");
         if merge(&mut queue, request).is_some() {

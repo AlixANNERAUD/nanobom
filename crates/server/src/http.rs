@@ -1,4 +1,8 @@
 //! Layers around every route: request logs, compression and security headers.
+//!
+//! Security headers are only added when a handler did not set its own, so a route can relax one
+//! when it must. Request logging is the outermost layer, so the logged status and duration are
+//! those the client sees.
 
 use std::time::Instant;
 

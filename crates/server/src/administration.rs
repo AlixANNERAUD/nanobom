@@ -1,4 +1,8 @@
 //! Command line administration: the first administrator and upload tokens.
+//!
+//! These commands use the database directly, without an actor: whoever can run them can read
+//! the database anyway. A new token's secret is printed on standard output. Logs go to standard
+//! output too, so a script capturing the secret should pass `--log-level off`.
 
 use std::io::BufRead;
 
@@ -11,6 +15,8 @@ use sea_orm::DatabaseConnection;
 
 use crate::command_line::{CreateAdministratorOptions, TokenCommand};
 
+/// Creates a local instance administrator. The password comes from the options or, when
+/// missing, from the first line of standard input, and must follow the password policy.
 pub async fn create_administrator(
     database: &DatabaseConnection,
     options: CreateAdministratorOptions,
@@ -44,6 +50,8 @@ pub async fn create_administrator(
     Ok(())
 }
 
+/// Runs a `token` subcommand. `list` prints one tab-separated line per token: identifier,
+/// prefix, name, project, last use and status.
 pub async fn token(
     database: &DatabaseConnection,
     command: TokenCommand,

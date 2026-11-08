@@ -4,6 +4,19 @@
 //! organization's admins, and a synchronized one, derived from identity provider groups at each
 //! sign-in. They are stored apart so a sign-in never overwrites a manual change; the effective
 //! role is the higher of the two.
+//!
+//! The functions of this module change manual memberships only, except [`synchronize`]. Two
+//! rules protect organizations:
+//!
+//! - granting, changing or removing the owner role requires [`Permission::ManageOwners`], so
+//!   admins cannot promote themselves past admin or demote owners;
+//! - [`set_role`] and [`remove`] run in a transaction that fails with [`Problem::LastOwner`] if
+//!   no owner would remain. Synchronized owners count, so the last manual owner may leave an
+//!   organization whose identity provider group still grants ownership.
+//!
+//! [`synchronize`] does not apply the second rule: when a group stops granting ownership, an
+//! organization can end up without owners, and only an instance administrator can then
+//! appoint one.
 
 use std::collections::BTreeMap;
 
@@ -34,6 +47,7 @@ pub enum Source {
 }
 
 impl Source {
+    /// The name stored in the `memberships.source` column.
     pub fn as_str(self) -> &'static str {
         match self {
             Source::Manual => "manual",
@@ -51,11 +65,15 @@ pub struct Member {
     pub email: Option<String>,
     /// The higher of the manual and synchronized roles.
     pub role: Role,
+    /// The role admins can change or remove, if any.
     pub manual_role: Option<Role>,
+    /// The role granted by identity provider groups, refreshed at each sign-in; it cannot be
+    /// changed here.
     pub synchronized_role: Option<Role>,
 }
 
-/// The members of an organization, sorted by username.
+/// The members of an organization, sorted by username, one entry per user. Requires
+/// [`Permission::View`]: every member can see who else belongs.
 pub async fn list(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -94,8 +112,8 @@ pub async fn list(
     Ok(members.into_values().collect())
 }
 
-/// Checks that the actor may give or take away `role`: admins manage roles up to admin, owners
-/// also manage owners.
+/// Checks that the actor may give or take away each of `roles` (the current and the new one):
+/// admins manage roles up to admin, owners also manage owners.
 async fn authorize_role_change(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -142,7 +160,9 @@ async fn ensure_an_owner_remains(
     Ok(())
 }
 
-/// Adds an existing user, found by username or email address, to an organization.
+/// Adds an existing user, found by username or email address, to an organization with a manual
+/// membership. An unknown login is [`Problem::UnknownUser`]; a user who already has a manual
+/// membership is [`Problem::AlreadyMember`] (a synchronized membership alone does not count).
 pub async fn add(
     database: &(impl ConnectionTrait + TransactionTrait),
     actor: &Actor,
@@ -192,7 +212,8 @@ async fn member(
         .ok_or(Error::NotFound)
 }
 
-/// Changes the manual role of a member.
+/// Changes the manual role of a member. A member with only a synchronized membership is
+/// [`Error::NotFound`]: their role comes from the identity provider.
 pub async fn set_role(
     database: &(impl ConnectionTrait + TransactionTrait),
     actor: &Actor,
@@ -216,7 +237,9 @@ pub async fn set_role(
     member(database, actor, organization_id, user_id).await
 }
 
-/// Removes the manual membership of a user. Members may also leave on their own.
+/// Removes the manual membership of a user. Members may also leave on their own, whatever
+/// their role, as long as an owner remains. A synchronized membership stays, so a user removed
+/// here may keep access through their groups.
 pub async fn remove(
     database: &(impl ConnectionTrait + TransactionTrait),
     actor: &Actor,
@@ -245,6 +268,10 @@ pub async fn remove(
 
 /// Replaces the synchronized memberships of a user with `roles`, keyed by organization slug.
 /// Organizations that do not exist yet are created. Manual memberships are left untouched.
+///
+/// Called at each OpenID Connect sign-in with no actor: the identity provider is the authority
+/// for these memberships. An invalid slug fails the whole call, leaving the previous
+/// memberships in place.
 pub async fn synchronize(
     database: &(impl ConnectionTrait + TransactionTrait),
     user_id: i64,

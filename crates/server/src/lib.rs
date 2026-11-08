@@ -1,4 +1,33 @@
 //! The nanobom server: command line, HTTP API, authentication and the web interface.
+//!
+//! This crate builds the `nanobom` binary and wires the other crates together; it holds little
+//! logic of its own. Everything that touches organization data goes through `nanobom-domain`,
+//! which checks permissions; pages and forms come from `nanobom-app`, rendered on the server by
+//! Leptos; sign-in comes from `nanobom-authentication`.
+//!
+//! # Request paths
+//!
+//! - **Interface** (`/organizations/…`, `/login`, and the app's server functions under `/api/`):
+//!   Leptos routes behind sessions, cross-site request checks and the sign-in routes
+//!   ([`authentication::layer`]). The app acts as the signed-in user.
+//! - **Upload API** (`PUT /api/organizations/{organization}/projects/{project}/sbom`): CI sends
+//!   an SBOM with a bearer upload token ([`api`]). No session is involved.
+//! - **Operations** (`/healthz`, `/metrics`): unauthenticated ([`operations`]).
+//!
+//! Every response goes through [`http::layers`] (security headers, compression, request logs).
+//!
+//! # Background work
+//!
+//! Runs are queued on the [`runner::Runner`] by the schedule, after uploads, or from the
+//! interface. It executes them one at a time, then refreshes exploitation data, sends webhooks
+//! and updates [`metrics`]. Webhook deliveries that fail are retried by the loop of
+//! [`deliveries`]. At startup, before either starts, [`serve::run`] closes the runs a previous
+//! process left `running`; the server therefore expects to be the only process on its database.
+//!
+//! # Where to start reading
+//!
+//! [`run`] dispatches the [`command_line::Command`]s; [`serve::run`] starts the server and
+//! [`serve::router`] assembles the routes.
 
 pub mod administration;
 pub mod api;
@@ -18,8 +47,11 @@ use nanobom_domain::database;
 
 use crate::command_line::{Command, CommandLine};
 
+/// Any error that stops a command; it is logged and the process exits with a failure status.
 pub type Failure = Box<dyn std::error::Error + Send + Sync>;
 
+/// Runs a command. Commands that use the database apply pending migrations first, except
+/// `backup`, which copies the database as it is, and `healthcheck`, which does not open it.
 pub async fn run(command_line: CommandLine) -> Result<(), Failure> {
     let database_url = command_line.database_url;
     let connect = || database::connect(&database_url);

@@ -1,4 +1,9 @@
 //! Command line and configuration. Every option can also be set with an environment variable.
+//!
+//! The doc comments of the fields and variants below are the `--help` text: keep them short and
+//! written for operators, and document the variable in the README's configuration table too.
+//! Boolean options take an explicit value (`--local-accounts false`) so they can be turned off
+//! from the command line as well as from the environment.
 
 use std::{net::SocketAddr, path::PathBuf};
 
@@ -96,9 +101,11 @@ pub struct AccountOptions {
 
 #[derive(Debug, Args)]
 pub struct CreateAdministratorOptions {
+    /// Username of the new administrator, also used to sign in.
     #[arg(long, env = "NANOBOM_ADMINISTRATOR_USERNAME")]
     pub username: String,
 
+    /// Email address, which can also be used to sign in.
     #[arg(long, env = "NANOBOM_ADMINISTRATOR_EMAIL")]
     pub email: Option<String>,
 
@@ -127,6 +134,7 @@ pub enum TokenCommand {
     },
     /// List the upload tokens of an organization.
     List {
+        /// Organization slug.
         #[arg(long, env = "NANOBOM_TOKEN_ORGANIZATION")]
         organization: String,
     },
@@ -235,6 +243,7 @@ pub struct OpenIdOptions {
     #[arg(long, env = "NANOBOM_OIDC_ISSUER")]
     pub oidc_issuer: Option<String>,
 
+    /// Client identifier registered with the provider.
     #[arg(long, env = "NANOBOM_OIDC_CLIENT_ID")]
     pub oidc_client_id: Option<String>,
 

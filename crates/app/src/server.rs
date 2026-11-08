@@ -1,5 +1,14 @@
 //! Server-side helpers for server functions: the request context, the signed-in user, error
 //! mapping, redirects with messages, and conversions from domain types.
+//!
+//! Compiled with the `ssr` feature only. A server function typically starts with [`actor`],
+//! which redirects to the sign-in page when nobody is signed in, calls a domain function with
+//! that actor (the domain checks permissions), and ends with [`finish`], which sends the browser
+//! back to the form's page with a translated notice or error.
+//!
+//! Redirects go to paths: [`back`] uses the `Referer` only when its host is the request's own,
+//! and keeps its path alone. That path is not yet checked against protocol-relative forms such
+//! as `//other.example` (issue #43).
 
 use std::sync::Arc;
 
@@ -15,18 +24,23 @@ use sea_orm::DatabaseConnection;
 
 use crate::{model, t};
 
-/// What the server provides to the interface.
+/// What the server provides to the interface, as a Leptos context on every request. The
+/// interface depends on this rather than on the server crate, which depends on it.
 #[derive(Clone)]
 pub struct InterfaceContext {
     pub database: DatabaseConnection,
     pub settings: InterfaceSettings,
-    /// Queues a run; returns false when an identical request is already waiting.
+    /// Queues a run; returns false when a request for the same scope was already waiting and
+    /// absorbed this one. It does not check permissions: call
+    /// `nanobom_domain::evaluation::authorize` first.
     pub request_run: Arc<dyn Fn(Trigger, Scope, Option<i64>) -> bool + Send + Sync>,
 }
 
+/// The part of the server's configuration the interface shows or enforces.
 #[derive(Debug, Clone)]
 pub struct InterfaceSettings {
     pub local_accounts: bool,
+    /// Label of the single sign-on button; `None` when OpenID Connect is not configured.
     pub openid_button: Option<String>,
     pub password_minimum_length: usize,
     pub personal_organizations: bool,
@@ -34,11 +48,15 @@ pub struct InterfaceSettings {
     pub stale_after_days: u32,
 }
 
+/// The [`InterfaceContext`] of the current request; an error outside a request.
 pub fn context() -> Result<InterfaceContext, ServerFnError> {
     use_context::<InterfaceContext>()
         .ok_or_else(|| ServerFnError::new("the interface context is missing"))
 }
 
+/// The authentication session of the current request, with no user when nobody is signed in.
+/// Prefer [`actor`] for anything done on the user's behalf: it sends anonymous visitors to the
+/// sign-in page.
 pub async fn session() -> Result<AuthenticationSession, ServerFnError> {
     leptos_axum::extract::<AuthenticationSession>()
         .await
@@ -57,7 +75,9 @@ fn request_path() -> String {
         .unwrap_or_else(|| "/".to_owned())
 }
 
-/// The signed-in actor, freshly loaded. Without one, the response redirects to the sign-in page.
+/// The signed-in actor, freshly loaded. Without one, the response redirects to the sign-in page
+/// and the error is [`model::SIGN_IN_REQUIRED`]. The page to come back to is the current page,
+/// or for a form post (under `/api/`) the page the form was on.
 pub async fn actor() -> Result<Actor, ServerFnError> {
     let context = context()?;
     let user = session().await?.user;
@@ -77,7 +97,7 @@ pub async fn actor() -> Result<Actor, ServerFnError> {
     Err(ServerFnError::new(model::SIGN_IN_REQUIRED))
 }
 
-/// Builds `path?key=value…` with percent-encoded values.
+/// Builds `path?key=value…` with percent-encoded values (`/` is kept, so paths stay readable).
 pub fn with_query(path: &str, pairs: &[(&str, &str)]) -> String {
     let query: Vec<String> = pairs
         .iter()
@@ -151,7 +171,8 @@ pub fn failure(error: nanobom_domain::Error) -> ServerFnError {
     ServerFnError::new(message(error))
 }
 
-/// The path of the page the form was sent from, if it is on this site.
+/// The path of the page the form was sent from, if it is on this site: the `Referer`'s host
+/// must equal the request's `Host`, so a forged `Referer` cannot redirect elsewhere.
 fn referer_path() -> Option<String> {
     let parts = use_context::<Parts>()?;
     let referer = parts
@@ -178,7 +199,8 @@ pub fn back_quietly(fallback: &str) {
     redirect_to(&target, None);
 }
 
-/// Redirects to `target` with a notice or an error message.
+/// Redirects to `target` with a notice or an error message, replacing any `notice` or `error`
+/// already in its query string.
 pub fn redirect_with(target: &str, outcome: Result<&str, String>) {
     redirect_to(target, Some(outcome));
 }
@@ -210,13 +232,16 @@ fn redirect_to(target: &str, outcome: Option<Result<&str, String>>) {
     }
 }
 
-/// Runs a mutation and redirects back with its outcome.
+/// Redirects back with the outcome of a mutation: the notice on success, the translated error
+/// otherwise (see [`message`]).
 pub fn finish(result: Result<String, nanobom_domain::Error>, fallback: &str) {
     match result {
         Ok(notice) => back(Ok(&notice), fallback),
         Err(error) => back(Err(message(error)), fallback),
     }
 }
+
+// The interface keeps its own copies of domain enumerations (see `model`); these convert.
 
 pub fn severity(value: nanobom_osv::Severity) -> model::Severity {
     use nanobom_osv::Severity;

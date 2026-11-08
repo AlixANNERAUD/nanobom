@@ -1,4 +1,8 @@
 //! Health and metrics endpoints.
+//!
+//! Both are unauthenticated, for probes and scrapers. They reveal no organization data:
+//! metrics are instance-wide counts (see [`crate::metrics`]). Restrict `/metrics` at the reverse
+//! proxy if even those should stay private.
 
 use axum::{
     Json, Router,
@@ -11,6 +15,7 @@ use serde_json::json;
 
 use crate::state::AppState;
 
+/// The `/healthz` and `/metrics` routes.
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/healthz", get(health))

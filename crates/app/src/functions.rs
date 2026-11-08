@@ -2,6 +2,23 @@
 //!
 //! Actions are sent by plain HTML forms, so the interface works without JavaScript: each
 //! action redirects back to the page it came from with a `notice` or `error` message.
+//!
+//! Each function is served at `/api/{endpoint}` and follows the same shape: [`actor`] (which
+//! sends anonymous visitors to the sign-in page), then domain calls with that actor, which do
+//! every permission check. Page loaders (`load_*`) return a [`crate::model`] type and turn domain
+//! errors into an error status with [`failure`]. Actions return `Ok(())` even when the domain
+//! refused: the outcome travels in the redirect ([`finish`], [`back`]), so the browser always
+//! lands on a page. Cross-site posts are refused before they get here, by the server's CSRF
+//! middleware.
+//!
+//! A few choices are not visible from the signatures:
+//!
+//! - a new upload token's secret goes through the session (`NEW_TOKEN`), never through a URL,
+//!   and is shown once by the next settings page;
+//! - deleting an organization or a project requires typing its slug, checked here before the
+//!   domain is called;
+//! - starting a run only queues it, after [`nanobom_domain::evaluation::authorize`]: the page
+//!   comes back at once and shows the run when it is recorded.
 
 use leptos::prelude::*;
 

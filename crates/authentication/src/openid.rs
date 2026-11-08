@@ -3,6 +3,23 @@
 //! Users are matched by issuer and subject and, when allowed, created at their first sign-in.
 //! At each sign-in, instance administration can be read from a claim, and organization roles
 //! from a groups claim through a configured mapping.
+//!
+//! Security choices worth knowing before changing this module:
+//!
+//! - users are linked to provider accounts by issuer and subject only. An email address from
+//!   the provider is never used to find an existing user, since providers do not all verify
+//!   it; a new user whose address is already taken is created without one;
+//! - the HTTP client does not follow redirects, as the `openidconnect` crate recommends: a
+//!   redirect from the provider's endpoints could otherwise send server-side requests to
+//!   internal addresses;
+//! - when an administrator claim is configured, the provider is the authority: each sign-in
+//!   grants or removes instance administration, whatever was set locally. The same goes for
+//!   synchronized memberships when a groups claim is configured, including removing them all
+//!   when the claim is missing.
+//!
+//! The server calls [`OpenId::start`] to redirect the browser, keeps the [`PendingSignIn`] in
+//! the session, then calls [`OpenId::finish`] from the callback and signs the user in with
+//! [`Credentials::Verified`](crate::Credentials::Verified).
 
 use std::collections::HashMap;
 
@@ -65,34 +82,49 @@ type DiscoveredClient = Client<
     EndpointMaybeSet,
 >;
 
-/// OpenID Connect settings.
+/// OpenID Connect settings, from the command line or environment.
 #[derive(Debug, Clone)]
 pub struct OpenIdSettings {
+    /// The issuer URL; discovery reads `{issuer}/.well-known/openid-configuration`.
     pub issuer: String,
     pub client_id: String,
+    /// `None` for public clients, which rely on PKCE alone.
     pub client_secret: Option<String>,
+    /// Scopes to request; `openid` is always requested and need not be listed.
     pub scopes: Vec<String>,
     /// The callback address registered with the provider.
     pub redirect_url: String,
     /// Create users at their first sign-in; otherwise only linked users may sign in.
     pub create_users: bool,
+    /// Give users created at sign-in a personal organization.
     pub personal_organizations: bool,
+    /// Claim path granting instance administration (see [`claims::is_administrator`]); when
+    /// unset, instance administration is managed locally.
     pub administrator_claim: Option<String>,
+    /// The group or role in [`OpenIdSettings::administrator_claim`] that grants it; when unset,
+    /// the claim must be the boolean `true`.
     pub administrator_value: Option<String>,
+    /// Claim path listing the user's groups; when unset, no membership is synchronized.
     pub groups_claim: Option<String>,
     pub group_mapping: GroupMapping,
 }
 
-/// What the callback needs from the start of a sign-in, kept in the session meanwhile.
+/// What the callback needs from the start of a sign-in, kept in the session meanwhile: the
+/// `state` that ties the callback to this browser, the nonce expected in the ID token and the
+/// PKCE verifier. It must be used once and then removed from the session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PendingSignIn {
     state: String,
     nonce: String,
     verifier: String,
-    /// Where to go after signing in.
+    /// Where to go after signing in, as given to [`OpenId::start`]; the caller validates it
+    /// before redirecting there.
     pub next: Option<String>,
 }
 
+/// Why a sign-in through the provider failed. The server logs the message and shows the user
+/// a generic page, with a specific one only for [`OpenIdError::UnknownUser`] and
+/// [`OpenIdError::Disabled`]: provider and database details stay in the logs.
 #[derive(Debug, thiserror::Error)]
 pub enum OpenIdError {
     #[error("the identity provider could not be reached: {0}")]
@@ -111,7 +143,8 @@ pub enum OpenIdError {
     Domain(#[from] nanobom_domain::Error),
 }
 
-/// The OpenID Connect provider, discovered on first use.
+/// The OpenID Connect provider, discovered on first use rather than at startup, so the server
+/// starts even when the provider is down.
 pub struct OpenId {
     settings: OpenIdSettings,
     http: reqwest::Client,
@@ -119,6 +152,7 @@ pub struct OpenId {
 }
 
 impl OpenId {
+    /// Prepares the client without contacting the provider.
     pub fn new(settings: OpenIdSettings) -> Result<Self, OpenIdError> {
         let http = reqwest::ClientBuilder::new()
             // Following redirects would expose the client to server-side request forgery.
@@ -189,6 +223,12 @@ impl OpenId {
 
     /// Completes a sign-in from the provider's callback and returns the user, created or
     /// updated from the claims.
+    ///
+    /// Verifies the state, exchanges the code with the PKCE verifier, and checks the ID token's
+    /// signature, nonce and, when present, access token hash. Claims of the ID token win over
+    /// those of the user information endpoint, which is read too because providers often put
+    /// groups there; if it fails, the ID token alone is used. Does not open a session: the
+    /// caller does, with [`Credentials::Verified`](crate::Credentials::Verified).
     pub async fn finish(
         &self,
         database: &DatabaseConnection,
