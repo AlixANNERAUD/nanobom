@@ -13,6 +13,8 @@ mr-boxington = "latest"
 # refusing those downloads was failing builds). The versions are cargo-leptos 0.3.11's defaults.
 "github:WebAssembly/binaryen" = { version = "123", version_prefix = "version_" }
 "aqua:tailwindlabs/tailwindcss" = "4.2.1"
+# Builds the documentation in docs/ (mise run docs).
+"github:rust-lang/mdBook" = { version = "0.5.4", bin = "mdbook" }
 
 [env]
 # The browser bundle is built separately for wasm32, so server-side commands leave it out to
@@ -46,6 +48,10 @@ run = "cargo deny check"
 [tasks.check]
 description = "Everything CI checks, except the release build"
 depends = ["lint", "test", "deny"]
+
+[tasks.docs]
+description = "Build the documentation into docs/book"
+run = "mdbook build docs"
 
 [tasks.dev]
 description = "Run the server with live reload"

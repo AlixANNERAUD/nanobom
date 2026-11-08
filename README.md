@@ -9,6 +9,9 @@ project; nanobom checks every component against [OSV](https://osv.dev) after eac
 every night, keeps a history of the vulnerabilities found (open, ignored, fixed), and tells you
 about new ones through a webhook.
 
+**Documentation:** the [user and operator guide](https://alixanneraud.github.io/nanobom/) covers
+installation, CI integration, prioritization, single sign-on and operations in detail.
+
 - **One binary, one SQLite file.** No queue, no cache server; about 20 MB of container image.
 - **Organizations and roles** (viewer, member, admin, owner), each organization isolated from the
   others; local accounts and OpenID Connect single sign-on, with roles mapped from groups.

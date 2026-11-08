@@ -1,0 +1,63 @@
+name: Documentation
+
+# Builds the book in docs/ on pull requests that touch it, and publishes it to GitHub Pages from
+# main (Settings → Pages → Source: GitHub Actions).
+on:
+  pull_request:
+    paths:
+      - "docs/**"
+      - "mise.toml"
+      - ".github/workflows/docs.yml"
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "mise.toml"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Deployments run to completion; pull request builds give way to newer pushes.
+  group: docs-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Only mdBook is installed here: running it must not install the rest of mise.toml.
+  MISE_EXEC_AUTO_INSTALL: "false"
+  MISE_NOT_FOUND_AUTO_INSTALL: "false"
+  MISE_TASK_RUN_AUTO_INSTALL: "false"
+
+jobs:
+  build:
+    name: Build the book
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      # mdBook's version comes from mise.toml, like the other tools.
+      - uses: jdx/mise-action@v5.2.7
+        with:
+          install_args: github:rust-lang/mdBook
+      - run: mdbook build docs
+      - if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v5.0.0
+        with:
+          path: docs/book
+
+  deploy:
+    name: Publish to GitHub Pages
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v6.0.0
+      - id: deployment
+        uses: actions/deploy-pages@v5.0.1

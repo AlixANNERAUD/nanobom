@@ -1,0 +1,121 @@
+# Security model
+
+This page explains what protects what, and why, for whoever reviews a deployment.
+
+## Organization isolation
+
+Every operation on organization data goes through one access check, in the domain layer that
+both the interface and the API use, not in the pages. It resolves the user's role in the
+organization (the higher of the role given in nanobom and the one from identity provider groups)
+and compares it with the permission the operation needs (see
+[Roles and permissions](../reference/accounts.md#organization-roles)). Organizations a user does
+not belong to answer "not found", so their existence does not leak; the upload API answers `404`
+for an organization that is not the token's for the same reason. Instance administrators act as
+owners everywhere.
+
+Shared data is limited to what is not organization-specific: cached OSV records and exploitation
+data per CVE. The error message of a failed instance-wide run can name packages of any
+organization, so it is shown to instance administrators only, and the failure webhook should
+reach operators rather than an organization's channel.
+
+## Upload tokens
+
+- 256 bits of randomness, prefixed with `nanobom_` so secret scanners (and you) can recognize
+  them in logs and repositories.
+- Stored as a SHA-256 digest. A slow password hash is unnecessary for random values of that
+  length, and would slow every upload down.
+- Scoped to an organization or one project; they reach the upload API only, never the interface.
+  A project token limits a leak to one project, and cannot create projects.
+- Shown once; revocable; their last use is recorded.
+
+The upload API is not exposed to cross-site request forgery: it is authenticated by the
+`Authorization` header, which browsers never add on their own.
+
+## Sessions and cookies
+
+The session cookie, `nanobom_session`, holds only a random session identifier; sessions are
+stored in the database, so they survive restarts and can be ended from the server. It is:
+
+- `HttpOnly`, out of reach of scripts;
+- `SameSite=Lax`, not sent with cross-site form submissions;
+- `Secure` when `NANOBOM_PUBLIC_URL` is `https`, so it is only sent over TLS.
+
+Sessions end after `NANOBOM_SESSION_INACTIVITY_DAYS` without activity, on sign-out, on a password
+change and when the user is disabled.
+
+The language cookie, `nanobom_locale`, only holds the chosen language.
+
+## Cross-site request forgery
+
+State-changing requests from the interface (form submissions, which all use `POST`) are refused
+with `403` when:
+
+- the browser reports them as cross-site (`Sec-Fetch-Site` other than `same-origin` or `none`), or
+- their `Origin` header differs from the origin of `NANOBOM_PUBLIC_URL`.
+
+Together with `SameSite=Lax` cookies, which browsers do not send with cross-site `POST` requests,
+this covers current and older browsers without a token in every form. Requests carrying an
+`Authorization` header are not checked, since they do not rely on cookies, and neither are
+requests carrying neither `Sec-Fetch-Site` nor `Origin`: browsers send at least one of them on a
+cross-site `POST`, so such requests come from other clients, which a cookie-based attack cannot
+use. This is why `NANOBOM_PUBLIC_URL` must match the browser's address bar exactly.
+
+## Passwords and sign-in
+
+- Local passwords are hashed with Argon2id. The minimum length is configurable, with no
+  composition rules: length is what makes a password strong, and a password manager is the way to
+  get one.
+- Password sign-in is rate limited per client address (a burst of 5, then one attempt every 4
+  seconds). Behind a proxy, nanobom sees the proxy's address as the client of every request, so
+  all users would share one budget; `NANOBOM_TRUST_FORWARDED_HEADERS` reads the address from the
+  proxy's headers instead. It must stay off unless a proxy you control sets them: otherwise any
+  client can send a made-up header and escape the limit.
+- Redirects after sign-in only go to paths of the same site.
+
+## Single sign-on
+
+- OpenID Connect uses the authorization code flow with PKCE, a `state` and a nonce, and verifies
+  the ID token's signature, issuer, audience and expiry, and the access token hash when present.
+- Users are matched by issuer and subject, never by email address: an attacker who can set an
+  arbitrary email address at a provider cannot take over an account. The price is that a local
+  account and a single sign-on identity with the same address stay two users.
+- The discovery and token requests do not follow redirects, so the issuer cannot be used to make
+  nanobom request other addresses.
+- The provider is the authority for its users: with an administrator claim configured, it grants
+  and removes instance administration at each sign-in, and roles from groups follow the user's
+  groups. A user who loses a group keeps its role until their next sign-in; disabling the user
+  cuts access at once.
+
+## HTTP headers
+
+Every response carries `X-Content-Type-Options: nosniff`, `Referrer-Policy: same-origin`,
+`X-Frame-Options: DENY` and `Content-Security-Policy: frame-ancestors 'none'`, which prevent
+nanobom from being framed by another site. HSTS is left to the TLS-terminating proxy.
+
+## Outbound requests
+
+nanobom makes requests to:
+
+- OSV (`NANOBOM_OSV_URL`), during runs;
+- CISA and FIRST (`NANOBOM_KEV_URL`, `NANOBOM_EPSS_URL`), after runs, unless exploitation data is
+  off;
+- the OpenID Connect provider, at sign-in;
+- webhooks: organization webhooks set by organization admins, and the failure webhook.
+
+Organization admins can make nanobom `POST` to any `http` or `https` address they choose,
+including addresses on its own network. If nanobom runs next to services that trust their
+network, restrict its outbound traffic with a firewall or an egress proxy.
+
+Webhook requests are not signed: receivers should treat them as a hint to look at nanobom, not as
+an authority, and keep their URL secret.
+
+## Unauthenticated endpoints
+
+`/healthz`, `/metrics`, the sign-in page and static assets need no session; the upload API needs a
+token. Metrics are instance-wide counts; restrict `/metrics` at the proxy if even those should
+stay private.
+
+## Data at rest
+
+Everything, password hashes and token digests included, is in the SQLite database: treat it and
+its backups as sensitive.
