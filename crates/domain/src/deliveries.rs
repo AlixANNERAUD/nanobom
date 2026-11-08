@@ -161,6 +161,20 @@ pub async fn enqueue(
     now: DateTime<FixedOffset>,
 ) -> Result<webhook_deliveries::Model> {
     let payload = serde_json::to_string(payload).expect("payloads serialize to JSON");
+    enqueue_body(database, organization_id, url, event, payload, now).await
+}
+
+/// Like [`enqueue`], for a body rendered by the caller: the chat formats of
+/// [`crate::notifications::Format`] are not the serialization of the payload. The body is
+/// stored as is and posted as is by every attempt.
+pub async fn enqueue_body(
+    database: &impl ConnectionTrait,
+    organization_id: Option<i64>,
+    url: &str,
+    event: &str,
+    payload: String,
+    now: DateTime<FixedOffset>,
+) -> Result<webhook_deliveries::Model> {
     Ok(webhook_deliveries::ActiveModel {
         organization_id: Set(organization_id),
         url: Set(url.to_owned()),

@@ -39,6 +39,7 @@
     "only_open_can_be_ignored": "only open findings can be ignored",
     "only_ignored_can_be_restored": "only ignored findings can be restored",
     "invalid_webhook_url": "the webhook URL is not a valid URL",
-    "webhook_scheme": "the webhook URL must be an http or https URL"
+    "webhook_scheme": "the webhook URL must be an http or https URL",
+    "unknown_webhook_format": "unknown webhook format"
   }
 }

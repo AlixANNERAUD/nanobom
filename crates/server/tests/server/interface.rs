@@ -573,6 +573,58 @@ async fn the_webhook_form_saves_the_exploited_only_option() {
 }
 
 #[tokio::test]
+async fn the_webhook_form_saves_the_format() {
+    let server = server(&[]).await;
+    let owner = local_user(&server.database, "alice", PASSWORD).await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let alice = Browser::sign_in(&server, "alice").await;
+    let page = "/organizations/acme/settings";
+    let html = alice.page(page).await;
+    assert!(html.contains("name=\"format\""));
+    assert!(html.contains("Slack message"));
+    assert!(html.contains("Microsoft Teams message (Workflows)"));
+
+    let save = |format: &'static str| {
+        let alice = &alice;
+        async move {
+            let form = format!(
+                "organization=acme&url=https%3A%2F%2Fexample.org%2Fhook&minimum_severity=high&enabled=on{format}"
+            );
+            let response = alice.submit(page, "save_webhook", &form).await;
+            assert_eq!(response.status(), StatusCode::FOUND);
+            location(&response)
+        }
+    };
+    let format = || async {
+        notifications::get(&server.database, &owner, organization.id)
+            .await
+            .unwrap()
+            .expect("a webhook")
+            .format
+    };
+
+    // A form without the field keeps the JSON documents.
+    save("").await;
+    assert_eq!(format().await, notifications::Format::Json);
+    save("&format=teams").await;
+    assert_eq!(format().await, notifications::Format::Teams);
+    let html = alice.page(page).await;
+    assert!(html.contains("<option value=\"teams\" selected"), "{html}");
+    save("&format=slack").await;
+    assert_eq!(format().await, notifications::Format::Slack);
+
+    // An unknown format is refused and the webhook is left as it was.
+    let location = save("&format=email").await;
+    assert!(
+        location.contains("error=Unknown%20webhook%20format"),
+        "{location}"
+    );
+    assert_eq!(format().await, notifications::Format::Slack);
+}
+
+#[tokio::test]
 async fn the_webhook_settings_list_recent_deliveries() {
     let server = server(&[]).await;
     let owner = local_user(&server.database, "alice", PASSWORD).await;

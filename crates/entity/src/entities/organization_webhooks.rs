@@ -13,6 +13,8 @@ pub struct Model {
     pub minimum_severity: String,
     pub enabled: bool,
     pub exploited_only: bool,
+    #[sea_orm(column_type = "Text")]
+    pub format: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

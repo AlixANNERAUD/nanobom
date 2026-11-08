@@ -83,6 +83,7 @@ pub enum Problem {
     OnlyIgnoredCanBeRestored,
     InvalidWebhookUrl,
     WebhookScheme,
+    UnknownWebhookFormat,
 }
 
 impl Problem {
@@ -234,6 +235,10 @@ impl Problem {
             P::WebhookScheme => {
                 output.write_str(translate!(locale = locale, "problems.webhook_scheme"))
             }
+            P::UnknownWebhookFormat => output.write_str(translate!(
+                locale = locale,
+                "problems.unknown_webhook_format"
+            )),
         }
     }
 

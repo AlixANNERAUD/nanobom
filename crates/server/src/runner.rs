@@ -43,7 +43,7 @@ use croner::Cron;
 use nanobom_domain::{
     evaluation::{self, Evaluator, RunOutcome, Scope, Trigger},
     exploitation::{self, Feeds},
-    notifications::{self, Delivery, Notifier, RunFailedPayload},
+    notifications::{self, Delivery, Format, Notifier, RunFailedPayload},
 };
 use nanobom_osv::VulnerabilitySource;
 use reqwest::Url;
@@ -424,6 +424,7 @@ fn failure_delivery(
 ) -> Option<Delivery<RunFailedPayload>> {
     Some(Delivery {
         organization_id: None,
+        format: Format::Json,
         url: settings.failure_webhook.as_ref()?.to_string(),
         payload: notifications::run_failed_payload(outcome, &settings.public_url)?,
     })

@@ -341,10 +341,13 @@ async fn removing_a_webhook_abandons_its_pending_deliveries() {
             &database,
             &owner,
             organization,
-            "https://example.org/hook",
-            Severity::High,
-            true,
-            false,
+            &notifications::Webhook {
+                url: "https://example.org/hook".into(),
+                minimum_severity: Severity::High,
+                enabled: true,
+                exploited_only: false,
+                format: notifications::Format::Json,
+            },
         )
         .await
         .unwrap();
@@ -398,6 +401,7 @@ async fn the_notifier_retries_a_delivery_once_its_backoff_expires() {
             vec![Delivery {
                 organization_id: None,
                 url: format!("{}/hook", receiver.uri()),
+                format: notifications::Format::Json,
                 payload: ping(),
             }],
         )
@@ -511,9 +515,20 @@ async fn disabling_or_moving_a_webhook_abandons_its_pending_deliveries() {
     let set = |url: &'static str, severity: Severity, enabled: bool| {
         let (database, owner) = (database.clone(), owner);
         async move {
-            notifications::set(&database, &owner, acme.id, url, severity, enabled, false)
-                .await
-                .unwrap();
+            notifications::set(
+                &database,
+                &owner,
+                acme.id,
+                &notifications::Webhook {
+                    url: url.into(),
+                    minimum_severity: severity,
+                    enabled,
+                    exploited_only: false,
+                    format: notifications::Format::Json,
+                },
+            )
+            .await
+            .unwrap();
         }
     };
     let pending = |url: &'static str| {
@@ -623,6 +638,7 @@ async fn every_delivery_is_recorded_before_the_first_attempt() {
                 receiver.uri(),
                 if index == 0 { "hangs" } else { "answers" }
             ),
+            format: notifications::Format::Json,
             payload: ping(),
         })
         .collect();

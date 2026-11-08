@@ -452,10 +452,13 @@ async fn waiting_uploads_are_answered_before_webhook_deliveries() {
         &server.database,
         &owner,
         organization.id,
-        &format!("{}/hook", receiver.uri()),
-        Severity::Low,
-        true,
-        false,
+        &notifications::Webhook {
+            url: format!("{}/hook", receiver.uri()),
+            minimum_severity: Severity::Low,
+            enabled: true,
+            exploited_only: false,
+            format: notifications::Format::Json,
+        },
     )
     .await
     .unwrap();

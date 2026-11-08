@@ -413,10 +413,13 @@ async fn scheduled_runs_notify_stale_projects_once() {
         &server.database,
         &owner,
         organization.id,
-        &format!("{}/stale", receiver.uri()),
-        Severity::Critical,
-        true,
-        true,
+        &notifications::Webhook {
+            url: format!("{}/stale", receiver.uri()),
+            minimum_severity: Severity::Critical,
+            enabled: true,
+            exploited_only: true,
+            format: notifications::Format::Json,
+        },
     )
     .await
     .unwrap();
@@ -474,10 +477,13 @@ async fn a_scheduled_request_merged_into_a_manual_one_still_notifies_stale_proje
         &server.database,
         &owner,
         organization.id,
-        &format!("{}/stale", receiver.uri()),
-        Severity::Critical,
-        true,
-        true,
+        &notifications::Webhook {
+            url: format!("{}/stale", receiver.uri()),
+            minimum_severity: Severity::Critical,
+            enabled: true,
+            exploited_only: true,
+            format: notifications::Format::Json,
+        },
     )
     .await
     .unwrap();

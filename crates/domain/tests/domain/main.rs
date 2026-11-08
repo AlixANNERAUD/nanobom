@@ -1,5 +1,6 @@
 //! Integration tests of the domain crate, in one binary to keep linking cheap.
 mod access;
+mod chat;
 mod database;
 mod deliveries;
 mod dependencies;
