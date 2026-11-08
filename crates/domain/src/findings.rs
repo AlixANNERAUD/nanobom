@@ -180,7 +180,8 @@ fn view(
     }
 }
 
-/// The findings of a project: known exploited first, then by EPSS score, then most severe first.
+/// The findings of a project: known exploited first, then most severe first, then by EPSS
+/// score (findings without one last).
 pub async fn list(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -218,8 +219,9 @@ pub async fn open_for_upload_token(
     Ok(findings)
 }
 
-/// The findings of a project, without authorization: known exploited first, then by EPSS
-/// score, then most severe first.
+/// The findings of a project, without authorization: known exploited first, then most severe
+/// first, then by EPSS score (findings without one last), then by CVSS score, component and
+/// vulnerability.
 async fn project_findings(
     database: &impl ConnectionTrait,
     project: projects::Model,
@@ -270,6 +272,7 @@ async fn project_findings(
             .exploitation
             .known_exploited
             .cmp(&left.exploitation.known_exploited)
+            .then(right.severity.cmp(&left.severity))
             .then(
                 right
                     .exploitation
@@ -277,7 +280,6 @@ async fn project_findings(
                     .unwrap_or(-1.0)
                     .total_cmp(&left.exploitation.epss_score.unwrap_or(-1.0)),
             )
-            .then(right.severity.cmp(&left.severity))
             .then_with(|| {
                 right
                     .cvss_score
