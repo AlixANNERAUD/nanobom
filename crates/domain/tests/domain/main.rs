@@ -2,6 +2,7 @@
 mod access;
 mod database;
 mod exploitation;
+mod findings;
 mod inventory;
 mod lifecycle;
 mod notifications;
