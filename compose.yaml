@@ -1,0 +1,31 @@
+# nanobom with Docker Compose:
+#
+#   docker compose up -d --wait
+#   docker compose exec nanobom /app/nanobom create-administrator --username admin
+#
+# then open http://localhost:8080. The published image is used (amd64 and arm64); without it,
+# or with `docker compose up --build`, the image is built from this checkout.
+#
+# Settings come from the environment or a `.env` file next to this one; every NANOBOM_*
+# variable of the README works under `environment`. For a deployment behind a reverse proxy,
+# see examples/compose.yaml.
+services:
+  nanobom:
+    image: ${NANOBOM_IMAGE:-ghcr.io/alixanneraud/nanobom:latest}
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${NANOBOM_PORT:-8080}:8080"
+    volumes:
+      - nanobom-data:/data
+    environment:
+      # The address users reach nanobom at: links, cookies and sign-in redirects use it.
+      NANOBOM_PUBLIC_URL: ${NANOBOM_PUBLIC_URL:-http://localhost:8080}
+      NANOBOM_SCHEDULE: ${NANOBOM_SCHEDULE:-0 3 * * *}
+      NANOBOM_LOG_FORMAT: ${NANOBOM_LOG_FORMAT:-json}
+      # Optional settings must be absent rather than empty, so set them here, for example:
+      # NANOBOM_FAILURE_WEBHOOK_URL: https://hooks.example.org/nanobom
+    # The image checks itself with `nanobom healthcheck`; `--wait` waits for it.
+
+volumes:
+  nanobom-data:

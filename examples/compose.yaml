@@ -6,7 +6,7 @@
 # Every setting is an environment variable; `/app/nanobom serve --help` lists them.
 services:
   nanobom:
-    image: ghcr.io/alixanneraud/nanobom:0
+    image: ghcr.io/alixanneraud/nanobom:latest
     restart: unless-stopped
     ports:
       - "8080:8080"

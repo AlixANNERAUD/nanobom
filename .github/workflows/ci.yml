@@ -73,19 +73,15 @@ jobs:
           platforms: linux/${{ matrix.architecture }}
           cache-from: type=gha,scope=image-${{ matrix.architecture }}
           cache-to: type=gha,scope=image-${{ matrix.architecture }},mode=max
+      # Through compose.yaml, so the file users start from is tested too.
       - name: Start the image and wait until it reports healthy
         run: |
-          docker run --detach --name nanobom --publish 8080:8080 nanobom:ci
-          for attempt in $(seq 1 30); do
-            status=$(docker inspect --format '{{.State.Health.Status}}' nanobom)
-            echo "health: $status"
-            if [ "$status" = healthy ]; then
-              curl --fail --silent http://localhost:8080/login > /dev/null
-              exit 0
-            fi
-            sleep 5
-          done
-          docker logs nanobom
-          exit 1
+          if ! docker compose up --detach --no-build --wait --wait-timeout 150; then
+            docker compose logs
+            exit 1
+          fi
+          curl --fail --silent http://localhost:8080/login > /dev/null
+        env:
+          NANOBOM_IMAGE: nanobom:ci
       - name: Report size
         run: docker image ls nanobom:ci

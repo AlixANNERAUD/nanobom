@@ -18,12 +18,22 @@ about new ones through a webhook.
 
 ## Quick start
 
+With Docker Compose, from a clone of this repository ([`compose.yaml`](compose.yaml)):
+
+```sh
+docker compose up -d --wait
+
+# The first instance administrator; the password is read from standard input.
+docker compose exec nanobom /app/nanobom create-administrator --username admin
+```
+
+It uses the published image, or builds it from the checkout when there is none. Settings go in
+the environment or a `.env` file (`NANOBOM_PUBLIC_URL`, `NANOBOM_PORT`, …). Without Compose:
+
 ```sh
 docker run -d --name nanobom -p 8080:8080 -v nanobom-data:/data \
   -e NANOBOM_PUBLIC_URL=http://localhost:8080 \
-  ghcr.io/alixanneraud/nanobom:0
-
-# The first instance administrator; the password is read from standard input.
+  ghcr.io/alixanneraud/nanobom:latest
 docker exec -it nanobom /app/nanobom create-administrator --username admin
 ```
 
