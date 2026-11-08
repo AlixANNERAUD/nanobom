@@ -272,7 +272,7 @@
     "delivery_next_attempt": "Next attempt {time}",
     "remove_webhook": "Remove webhook",
     "webhook_title": "Webhook",
-    "webhook_description": "After each check, new findings at or above the chosen severity are sent as one JSON document (documented in the README).",
+    "webhook_description": "After each check, new findings at or above the chosen severity are sent as one JSON document (described in the guide's webhook reference: https://alixanneraud.github.io/nanobom/reference/webhooks.html).",
     "webhook_url": "URL",
     "minimum_severity": "Minimum severity",
     "enabled": "Enabled",
