@@ -92,9 +92,10 @@ Generators fill the graph unevenly. With the versions nanobom is tested with:
 | cargo-cyclonedx 0.5.9 | complete, from the crate | yes |
 | cyclonedx-npm 6.0.1 | complete, from the package | yes |
 | cyclonedx-py 8.0.1, `environment` | between installed packages; no `metadata.component` | no |
-| Syft 1.57.0, on an image | between packages; the image is in `metadata.component`, but nothing links it to them | no |
+| Syft 1.57.0, CycloneDX, on an image | between packages; the image is in `metadata.component`, but nothing links it to them | no |
 | Syft 1.33.0, SPDX, on an image or a lock file | between packages; the image or directory only contains them | no |
 | Trivy 0.76.2, SPDX, on a lock file | through the lock file's entry, which has no package URL | no |
+| GitHub dependency graph export (SPDX), `package-lock.json` | complete, from the repository | yes, except for direct dependencies that have no dependency and that no other package depends on ([why](spdx.md#dependency-graph)) |
 | GitHub dependency graph export (SPDX), `Cargo.lock` | the repository depends on every crate, none on another | no |
 
 Whether your generator links the project to its dependencies shows in its output: the entry of

@@ -12,7 +12,19 @@ is lost.
 An SPDX document lists `packages`, and says which of them it is about with a `DESCRIBES`
 relationship. nanobom keeps the packages that have a package URL, like CycloneDX components, and
 treats the described package as the project, like the CycloneDX `metadata.component`. A
-package without a package URL is skipped and reported to CI the same way in both formats.
+package without a package URL is skipped and reported to CI the same way in both formats. A
+package with several package URLs (several `purl` references) gets the first one: CycloneDX
+gives a component one package URL, and the others usually name the same package in another
+ecosystem's terms.
+
+Generators also disagree on which fields they fill. nanobom reads a `null` or missing field as
+absent rather than refusing the document, even for fields SPDX requires: a package without a
+name is still matched by its package URL, a relationship missing one of its ends is ignored.
+
+Two packages with the same `SPDXID` break the document's own rules. If they have the same
+package URL, nothing is lost; otherwise a relationship naming that identifier cannot be traced
+to one of them, so it is ignored rather than attributed to either, and the graph is marked
+incomplete.
 
 Generators do not describe the same thing. Syft and Trivy describe what they scanned (a
 directory or an image), GitHub describes the repository. None of these is a package of an
@@ -36,15 +48,19 @@ entry of `metadata.component`. SPDX expresses dependencies with relationships (`
   URL. nanobom does not bridge edges through packages it does not store, so the project's direct
   dependencies are not known, as with Trivy's CycloneDX output.
 - **GitHub's dependency graph export** makes the repository `DEPENDS_ON` its dependencies. For
-  `package-lock.json` these are the direct dependencies, with edges between packages below
-  them. For `Cargo.lock` the repository depends on every crate, transitive ones included, with no
-  edge between crates.
+  `package-lock.json` these are the direct dependencies, development ones included, with
+  `DEPENDS_ON` between packages below them. For `Cargo.lock` the repository depends on every
+  crate, transitive ones included, with no edge between crates.
 
-The last case would show every crate as a direct dependency. nanobom keeps the edges from the
-project to packages of an ecosystem only when the document also has edges between packages of
-that ecosystem. A flat list is then ignored: the path is missing rather than wrong, the rule of
-[Dependency paths](dependency-paths.md#limits). The price is a project whose only dependencies
-are direct ones, with no edge between them, which gets no path either.
+The last case would show every crate as a direct dependency, and a repository can hold such a
+flat list next to a graphed lock file of the same ecosystem (two npm projects in one
+repository, for example). Nothing in the document tells the two apart, so nanobom keeps an
+edge from the project to a package only when that package is also linked to another package,
+as a dependency or a dependent. A flat list is then ignored: the path is missing rather than
+wrong, the rule of [Dependency paths](dependency-paths.md#limits). The price is a direct
+dependency that depends on nothing and that no other package depends on, such as a small
+utility library: it gets no path, even from a complete graph. A project whose only
+dependencies are such packages gets no path at all.
 
 In practice, **introduced via** is shown less often for SPDX uploads than for CycloneDX ones from
 the ecosystem's own generator. If you rely on it, prefer a CycloneDX generator that describes the

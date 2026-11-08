@@ -8,9 +8,9 @@ Authorization: Bearer nanobom_…
 ```
 
 The body is the CycloneDX or SPDX JSON document, as is; the `Content-Type` header is not
-checked, and a multipart form is not read. One request replaces the project's components with those of the
-document and records the upload in the project's history. The project is created if it does not
-exist and the token allows it.
+checked, and a multipart form is not read. One request replaces the project's components with
+those of the document and records the upload in the project's history. The project is created
+if it does not exist and the token allows it.
 
 Organization and project slugs are case-insensitive (`Web` and `web` are the same project). A new
 project's slug must be 1 to 64 characters among lower-case letters, digits, `.`, `_` and `-`,
@@ -43,10 +43,12 @@ nanobom reads two formats, told apart by the document's content, never by a head
 | **CycloneDX JSON** | `"bomFormat": "CycloneDX"` | `specVersion` 1.3 to 1.7 | `1.6` |
 | **SPDX JSON** | `spdxVersion` | `SPDX-2.2` and `SPDX-2.3` | `SPDX-2.3` |
 
+A document with both `"bomFormat": "CycloneDX"` and an `spdxVersion` is read as CycloneDX.
 Anything else is refused with a `422` and a message naming what was sent: XML (CycloneDX XML),
-SPDX tag-value, SPDX RDF (RDF/XML or Turtle), SPDX 3.0 JSON-LD, older or newer versions of
-either format ([error messages](#error-messages)). The recorded version is shown in the
-project's upload history.
+SPDX tag-value, SPDX RDF (RDF/XML, Turtle, or JSON-LD with the SPDX 2 vocabulary), SPDX 3.0
+JSON-LD (recognized by its `@context`), older or newer versions of either format
+([error messages](#error-messages)). The recorded version is shown in the project's upload
+history.
 
 In both formats:
 
@@ -78,8 +80,10 @@ In both formats:
 ### SPDX
 
 - Only `packages` count; `files` and `snippets` are ignored. A package's package URL is its
-  `externalRefs` entry of type `purl` in the `PACKAGE-MANAGER` category (`PACKAGE_MANAGER` in
-  SPDX 2.2).
+  first `externalRefs` entry of type `purl` in the `PACKAGE-MANAGER` category
+  (`PACKAGE_MANAGER` in SPDX 2.2, or no category).
+- A `null` or missing field counts as absent, even one SPDX requires: a package without a
+  `name` is kept, a relationship missing one of its ends is ignored.
 - The package the document describes (a `DESCRIBES` relationship from the document, or
   `documentDescribes`) is the project, not a component.
 - Packages whose `primaryPackagePurpose` is `FILE` or `OPERATING-SYSTEM` are skipped silently.
@@ -93,10 +97,13 @@ In both formats:
   | `CONTAINS` from the project | none: a scanned directory or image contains every package, direct dependency or not |
   | any other | none |
 
-  Edges from the project are its direct dependencies, but only to packages of an ecosystem
-  (purl type) the document also links between packages: a document whose project depends on
-  every crate of a lock file, with no edge between crates, gives no direct dependency for
-  crates ([why](../explanation/spdx.md#dependency-graph)).
+  Edges from the project are its direct dependencies, but only to packages that are also
+  linked to another package (as a dependency or a dependent): a document whose project
+  depends on every crate of a lock file, with no edge between crates, gives no direct
+  dependency, and neither does a direct dependency that depends on nothing and that no other
+  package depends on ([why](../explanation/spdx.md#dependency-graph)).
+- An `SPDXID` given to several packages with different package URLs (or with and without
+  one) is ambiguous: relationships naming it are ignored.
 - The document namespace (`documentNamespace`) is recorded with the upload as its serial
   number.
 
@@ -226,6 +233,8 @@ gate fails. A `422` for a parameter is answered before anything is stored.
 ## Error messages
 
 API messages are always in English, whatever the instance's users read: they end up in CI logs.
+Values of the document they quote (a version, the part of the document a parse error names) are
+cut to 200 characters, followed by `…`.
 
 | Status | `error` |
 | --- | --- |

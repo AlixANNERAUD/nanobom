@@ -103,9 +103,12 @@ For SPDX:
 ```sh
 jq '{version: .spdxVersion,
      packages: (.packages | length),
-     without_purl: ([.packages[] | select(all(.externalRefs[]?; .referenceType != "purl"))]
+     without_purl: ([.packages[]
+                     | select(.primaryPackagePurpose | IN("FILE", "OPERATING-SYSTEM") | not)
+                     | select(all(.externalRefs[]?; .referenceType != "purl"))]
                     | length)}' sbom.spdx.json
 ```
 
-`version` must be `SPDX-2.2` or `SPDX-2.3`. `without_purl` includes the package the document
-describes (the scanned directory or image), which is the project and not a component.
+`version` must be `SPDX-2.2` or `SPDX-2.3`. `without_purl` leaves out files and the operating
+system, which nanobom ignores, but counts the package the document describes (the scanned
+directory or image) when it has no package URL, though it is the project and not a component.
