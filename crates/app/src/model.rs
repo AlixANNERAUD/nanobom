@@ -405,6 +405,8 @@ pub struct UploadToken {
     pub name: String,
     pub prefix: String,
     pub project_slug: Option<String>,
+    /// A read token, which cannot upload.
+    pub read_only: bool,
     pub created_at: DateTime<FixedOffset>,
     pub last_used_at: Option<DateTime<FixedOffset>>,
     pub revoked: bool,

@@ -44,7 +44,7 @@ use serde_json::error::Category;
 
 use self::header::{Context, Header, Text};
 use crate::{
-    access::{Actor, Permission},
+    access::{Permission, Reader},
     error::{Error, Result},
     problem::{Field, Problem},
 };
@@ -588,6 +588,8 @@ fn optional_label(field: Field, value: Option<String>) -> Result<Option<String>>
 /// authorization:
 ///
 /// - an organization other than the token's is [`Error::NotFound`], like a missing one;
+/// - a read token ([`crate::tokens::Scope::Read`]) is [`Error::Forbidden`] in its own
+///   organization: it neither uploads nor creates projects;
 /// - a project-scoped token may upload to its own project only: another existing project is
 ///   [`Error::Forbidden`], a missing one [`Error::NotFound`] (it cannot create projects);
 /// - an organization-wide token may upload to any project of its organization and creates
@@ -658,6 +660,7 @@ async fn store(
     source: UploadSource,
     create_missing: bool,
 ) -> Result<UploadOutcome> {
+    crate::tokens::require_upload_scope(token)?;
     let source_commit = optional_label(Field::SourceCommit, source.source_commit)?;
     let image_tag = optional_label(Field::ImageTag, source.image_tag)?;
     let transaction = crate::database::begin_write(database).await?;
@@ -788,10 +791,10 @@ async fn store_dependencies(
 /// The upload history of a project, newest first. Requires [`Permission::View`].
 pub async fn uploads(
     database: &impl ConnectionTrait,
-    actor: &Actor,
+    reader: impl Into<Reader>,
     project_id: i64,
 ) -> Result<Vec<sbom_uploads::Model>> {
-    crate::projects::authorize(database, actor, project_id, Permission::View).await?;
+    crate::projects::authorize(database, reader, project_id, Permission::View).await?;
     Ok(sbom_uploads::Entity::find()
         .filter(sbom_uploads::Column::ProjectId.eq(project_id))
         .order_by_desc(sbom_uploads::Column::UploadedAt)
@@ -804,10 +807,10 @@ pub async fn uploads(
 /// [`Permission::View`].
 pub async fn components(
     database: &impl ConnectionTrait,
-    actor: &Actor,
+    reader: impl Into<Reader>,
     project_id: i64,
 ) -> Result<Vec<components::Model>> {
-    crate::projects::authorize(database, actor, project_id, Permission::View).await?;
+    crate::projects::authorize(database, reader, project_id, Permission::View).await?;
     Ok(components::Entity::find()
         .filter(components::Column::ProjectId.eq(project_id))
         .order_by_asc(components::Column::Purl)
@@ -829,16 +832,17 @@ pub struct ComponentMatch {
 /// At most this many components are returned by a search.
 pub const MAXIMUM_SEARCH_RESULTS: usize = 200;
 
-/// Finds components by name across the organizations the actor can see: `openssl` matches
+/// Finds components by name across the projects the reader can see: `openssl` matches
 /// names containing it, `openssl 3.` (or `openssl@3.`) also requires the version to start with
 /// `3.`. Names and versions match case-insensitively; `%` and `_` are taken literally.
 /// Results are sorted by name then version and capped at [`MAXIMUM_SEARCH_RESULTS`]; an empty
 /// name returns nothing rather than every component.
 pub async fn search(
     database: &impl ConnectionTrait,
-    actor: &Actor,
+    reader: impl Into<Reader>,
     query: &str,
 ) -> Result<Vec<ComponentMatch>> {
+    let reader = reader.into();
     let query = query.trim();
     let (name, version) = match query.split_once(['@', ' ']) {
         Some((name, version)) => (name.trim(), Some(version.trim())),
@@ -848,7 +852,7 @@ pub async fn search(
         return Ok(Vec::new());
     }
     let organizations: std::collections::HashMap<i64, String> =
-        crate::organizations::list(database, actor)
+        crate::organizations::list(database, reader)
             .await?
             .into_iter()
             .map(|organization| (organization.id, organization.slug))
@@ -858,6 +862,7 @@ pub async fn search(
         .all(database)
         .await?
         .into_iter()
+        .filter(|project| reader.reaches_project(project.id))
         .map(|project| {
             let organization = organizations[&project.organization_id].clone();
             (project.id, (organization, project.slug))

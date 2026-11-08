@@ -15,6 +15,9 @@
 //! - **Dependency-Track API** (`/api/v1/bom`, `/api/v1/event/token/…`): the same uploads from
 //!   clients written for Dependency-Track, with the upload token in `X-Api-Key`
 //!   ([`dependency_track`]).
+//! - **Read API** (`GET /api/organizations…`, `/api/findings/…`, `/api/components`): JSON
+//!   reads with a token of either scope or the session ([`read_api`]), next to the VEX
+//!   documents of a project ([`vex`]).
 //! - **Operations** (`/healthz`, `/metrics`): unauthenticated ([`operations`]).
 //!
 //! Every response goes through [`http::layers`] (security headers, compression, request logs).
@@ -43,6 +46,7 @@ pub mod http;
 pub mod logging;
 pub mod metrics;
 pub mod operations;
+pub mod read_api;
 pub mod runner;
 pub mod serve;
 pub mod state;

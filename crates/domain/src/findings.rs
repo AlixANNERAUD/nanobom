@@ -36,7 +36,7 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    access::{Actor, Permission},
+    access::{Actor, Permission, Reader},
     dependencies::{ComponentRef, DependencyPaths, Graph},
     error::{Error, Result},
     evaluation::record_event,
@@ -305,18 +305,18 @@ fn view(
 /// score (findings without one last). Requires [`Permission::View`].
 pub async fn list(
     database: &impl ConnectionTrait,
-    actor: &Actor,
+    reader: impl Into<Reader>,
     project_id: i64,
     filter: &Filter,
 ) -> Result<Vec<Finding>> {
-    let project = crate::projects::authorize(database, actor, project_id, Permission::View).await?;
+    let project =
+        crate::projects::authorize(database, reader, project_id, Permission::View).await?;
     project_findings(database, project, filter).await
 }
 
 /// The open findings of a project an upload token covers, most severe first (then as `list`
-/// orders them), for the evaluation returned to CI after an upload. The token is the
-/// authorization, checked as [`crate::inventory::ingest`] does; a project outside it is
-/// [`Error::NotFound`].
+/// orders them), for the evaluation returned to CI after an upload. A project outside the
+/// token is [`Error::NotFound`].
 pub async fn open_for_upload_token(
     database: &impl ConnectionTrait,
     token: &upload_tokens::Model,
@@ -326,39 +326,10 @@ pub async fn open_for_upload_token(
         statuses: vec![Status::Open],
         ..Filter::default()
     };
-    let mut findings = token_findings(database, token, project_id, &filter).await?;
+    let mut findings = list(database, token, project_id, &filter).await?;
     // Stable: findings of the same severity keep the order of `list`.
     findings.sort_by_key(|finding| std::cmp::Reverse(finding.severity));
     Ok(findings)
-}
-
-/// Every finding of a project an upload token covers, ordered as `list` orders them; a project
-/// outside the token is [`Error::NotFound`].
-pub async fn for_upload_token(
-    database: &impl ConnectionTrait,
-    token: &upload_tokens::Model,
-    project_id: i64,
-) -> Result<Vec<Finding>> {
-    token_findings(database, token, project_id, &Filter::default()).await
-}
-
-async fn token_findings(
-    database: &impl ConnectionTrait,
-    token: &upload_tokens::Model,
-    project_id: i64,
-    filter: &Filter,
-) -> Result<Vec<Finding>> {
-    // The same check as `inventory::ingest`: the token's organization, and its project when
-    // the token is limited to one.
-    let project = projects::Entity::find_by_id(project_id)
-        .one(database)
-        .await?
-        .filter(|project| {
-            project.organization_id == token.organization_id
-                && token.project_id.is_none_or(|allowed| allowed == project.id)
-        })
-        .ok_or(Error::NotFound)?;
-    project_findings(database, project, filter).await
 }
 
 /// The findings of a project, without authorization: known exploited first, then most severe
@@ -451,10 +422,10 @@ async fn project_findings(
 /// [`Permission::View`].
 pub async fn ecosystems(
     database: &impl ConnectionTrait,
-    actor: &Actor,
+    reader: impl Into<Reader>,
     project_id: i64,
 ) -> Result<Vec<String>> {
-    crate::projects::authorize(database, actor, project_id, Permission::View).await?;
+    crate::projects::authorize(database, reader, project_id, Permission::View).await?;
     let mut ecosystems: Vec<String> = findings::Entity::find()
         .filter(findings::Column::ProjectId.eq(project_id))
         .all(database)
@@ -481,7 +452,7 @@ pub struct Event {
     pub run_id: Option<i64>,
 }
 
-/// Another component affected by the same vulnerability, in a project the actor can see.
+/// Another component affected by the same vulnerability, in a project the reader can see.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AffectedComponent {
     pub finding_id: i64,
@@ -513,7 +484,7 @@ async fn token_names(
 pub struct FindingDetail {
     pub finding: Finding,
     pub organization_slug: String,
-    /// Whether the actor may ignore or restore this finding.
+    /// Whether the reader may ignore or restore this finding (never for a token).
     pub can_triage: bool,
     pub details: Option<String>,
     pub published: Option<DateTime<FixedOffset>>,
@@ -551,20 +522,21 @@ async fn usernames(
 }
 
 /// A finding with its vulnerability, history and the other affected components. Requires
-/// [`Permission::View`]. The other affected components are limited to the organizations the
-/// actor can see, so the page never reveals that another organization uses a package.
+/// [`Permission::View`]. The other affected components are limited to the projects the reader
+/// can see, so the page never reveals that another organization uses a package.
 pub async fn detail(
     database: &impl ConnectionTrait,
-    actor: &Actor,
+    reader: impl Into<Reader>,
     finding_id: i64,
 ) -> Result<FindingDetail> {
+    let reader = reader.into();
     let finding = findings::Entity::find_by_id(finding_id)
         .one(database)
         .await?
         .ok_or(Error::NotFound)?;
     let project =
-        crate::projects::authorize(database, actor, finding.project_id, Permission::View).await?;
-    let role = actor
+        crate::projects::authorize(database, reader, finding.project_id, Permission::View).await?;
+    let role = reader
         .authorize(database, project.organization_id, Permission::View)
         .await?;
     let organization = organizations::Entity::find_by_id(project.organization_id)
@@ -619,7 +591,7 @@ pub async fn detail(
     )
     .await?;
 
-    let visible = crate::organizations::list(database, actor)
+    let visible = crate::organizations::list(database, reader)
         .await?
         .into_iter()
         .map(|organization| (organization.id, organization.slug))
@@ -638,6 +610,9 @@ pub async fn detail(
         let Some(organization_slug) = visible.get(&other_project.organization_id) else {
             continue;
         };
+        if !reader.reaches_project(other_project.id) {
+            continue;
+        }
         affected_components.push(AffectedComponent {
             finding_id: other.id,
             organization_slug: organization_slug.clone(),
@@ -905,12 +880,12 @@ pub struct ProjectOverview {
 /// is the stale threshold (0: never stale).
 pub async fn overview(
     database: &impl ConnectionTrait,
-    actor: &Actor,
+    reader: impl Into<Reader>,
     organization_id: i64,
     stale_after_days: u32,
 ) -> Result<Vec<ProjectOverview>> {
     let now = chrono::Utc::now().fixed_offset();
-    let projects = crate::projects::list(database, actor, organization_id).await?;
+    let projects = crate::projects::list(database, reader, organization_id).await?;
     let mut overviews: Vec<ProjectOverview> = projects
         .iter()
         .map(|project| ProjectOverview {

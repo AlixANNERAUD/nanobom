@@ -41,7 +41,7 @@ async fn token_create_prints_the_secret_alone_on_standard_output() {
         "standard output holds more than the secret: {stdout:?}"
     );
     assert!(
-        stderr.contains("upload token created"),
+        stderr.contains("token created"),
         "the log line is expected on standard error: {stderr:?}"
     );
     assert!(!stderr.contains(secret), "the secret must not be logged");

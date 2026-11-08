@@ -56,7 +56,7 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    access::Actor,
+    access::Reader,
     error::{Error, Result},
     exploitation::{QUERY_CHUNK, vulnerability_facts},
     findings::{Finding, IgnoredBy, Justification, MAXIMUM_REASON_LENGTH, Status},
@@ -250,36 +250,24 @@ fn component(purl: &str) -> DocumentComponent {
 }
 
 /// A project's findings as a CycloneDX VEX document. Requires [`crate::access::Permission::View`]
-/// in the organization; a missing organization or project is [`Error::NotFound`].
+/// in the organization; a missing organization or project, or one outside a token's reach, is
+/// [`Error::NotFound`].
 pub async fn export(
     database: &impl ConnectionTrait,
-    actor: &Actor,
+    reader: impl Into<Reader>,
     organization_slug: &str,
     project_slug: &str,
 ) -> Result<Document> {
-    let organization = crate::organizations::find(database, actor, organization_slug).await?;
-    let project = crate::projects::find(database, actor, organization.id, project_slug).await?;
+    let reader = reader.into();
+    let organization = crate::organizations::find(database, reader, organization_slug).await?;
+    let project = crate::projects::find(database, reader, organization.id, project_slug).await?;
     let findings = crate::findings::list(
         database,
-        actor,
+        reader,
         project.id,
         &crate::findings::Filter::default(),
     )
     .await?;
-    document(database, &organization.slug, project, findings).await
-}
-
-/// Like [`export`], for an upload token: the project must be in the token's organization, and
-/// be the token's project when it has one; any other project is [`Error::NotFound`].
-pub async fn export_for_upload_token(
-    database: &impl ConnectionTrait,
-    token: &upload_tokens::Model,
-    organization_slug: &str,
-    project_slug: &str,
-) -> Result<Document> {
-    let (organization, project) =
-        token_project(database, token, organization_slug, project_slug).await?;
-    let findings = crate::findings::for_upload_token(database, token, project.id).await?;
     document(database, &organization.slug, project, findings).await
 }
 
@@ -719,7 +707,8 @@ pub struct ImportOutcome {
 
 /// Imports VEX statements into a project with an upload token: the project must be in the
 /// token's organization, and be the token's project when it has one; any other project is
-/// [`Error::NotFound`]. The ignores are recorded as made by the token. Runs in one transaction.
+/// [`Error::NotFound`]. A read token ([`crate::tokens::Scope::Read`]) is [`Error::Forbidden`].
+/// The ignores are recorded as made by the token. Runs in one transaction.
 pub async fn import(
     database: &(impl ConnectionTrait + TransactionTrait),
     token: &upload_tokens::Model,
@@ -774,6 +763,7 @@ async fn apply(
     project_id: i64,
     statements: &[Statement],
 ) -> Result<ImportOutcome> {
+    crate::tokens::require_upload_scope(token)?;
     let transaction = crate::database::begin_write(database).await?;
     let candidates = findings::Entity::find()
         .filter(findings::Column::ProjectId.eq(project_id))

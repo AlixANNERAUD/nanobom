@@ -360,9 +360,7 @@ async fn an_export_imports_back_after_its_analysis_changes() {
     .await;
     let token = token(database, &fixture.owner, fixture.organization, None).await;
 
-    let document = vex::export_for_upload_token(database, &token, "acme", "web")
-        .await
-        .unwrap();
+    let document = vex::export(database, &token, "acme", "web").await.unwrap();
     let mut document = serde_json::to_value(&document).unwrap();
     document["vulnerabilities"][0]["analysis"] = json!({
         "state": "not_affected",
@@ -678,7 +676,7 @@ async fn tokens_and_members_reach_only_their_projects() {
             Err(Error::NotFound)
         ));
         assert!(matches!(
-            vex::export_for_upload_token(database, token, organization, "web").await,
+            vex::export(database, token, organization, "web").await,
             Err(Error::NotFound)
         ));
     }

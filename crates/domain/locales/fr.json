@@ -43,6 +43,7 @@
     "unknown_role": "rôle « {role} » inconnu ; rôles possibles : viewer, member, admin ou owner",
     "unknown_severity": "gravité inconnue",
     "unknown_justification": "justification « {justification} » inconnue",
+    "unknown_token_scope": "portée de jeton « {scope} » inconnue ; portées possibles : upload ou read",
     "reason_required": "une raison est requise pour ignorer une vulnérabilité",
     "reason_too_long": "la raison doit compter au plus {maximum} caractères",
     "expiry_not_in_future": "la date d’expiration doit être dans le futur",

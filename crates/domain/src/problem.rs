@@ -86,6 +86,7 @@ pub enum Problem {
     UnknownRole { role: String },
     UnknownSeverity,
     UnknownJustification { justification: String },
+    UnknownTokenScope { scope: String },
     ReasonRequired,
     ReasonTooLong { maximum: usize },
     ExpiryNotInFuture,
@@ -264,6 +265,12 @@ impl Problem {
                 locale = locale,
                 "problems.unknown_justification",
                 justification = justification
+            ),
+            P::UnknownTokenScope { scope } => translate_write!(
+                output,
+                locale = locale,
+                "problems.unknown_token_scope",
+                scope = scope
             ),
             P::ReasonRequired => {
                 output.write_str(translate!(locale = locale, "problems.reason_required"))

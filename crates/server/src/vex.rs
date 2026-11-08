@@ -1,11 +1,12 @@
 //! VEX documents of a project ([`nanobom_domain::vex`]), on
 //! `/api/organizations/{organization}/projects/{project}/vex`:
 //!
-//! - `GET` exports the project's findings as a CycloneDX 1.6 VEX document. It accepts an
-//!   upload token (`Authorization: Bearer`) for CI, or the session cookie, so the project page
-//!   can link to it; a token's reach is the same as for uploads, read-only here.
-//! - `PUT` imports a CycloneDX VEX document, with an upload token only: the ignores it makes are
-//!   recorded as made by the token. The body is limited like an SBOM (`--maximum-sbom-size`).
+//! - `GET` exports the project's findings as a CycloneDX 1.6 VEX document. It accepts the
+//!   callers of the read API ([`read_api::reader`]): a token of either scope, or the session
+//!   cookie, so the project page can link to it.
+//! - `PUT` imports a CycloneDX VEX document, with an upload token only (read tokens are `403`):
+//!   the ignores it makes are recorded as made by the token. The body is limited like an SBOM
+//!   (`--maximum-sbom-size`).
 //!
 //! The routes sit behind the session layer, unlike [`crate::api`], so that the export can read
 //! the session; the cross-site request check lets requests with an `Authorization` header
@@ -20,10 +21,11 @@ use axum::{
     routing::get,
 };
 use nanobom_authentication::AuthenticationSession;
-use nanobom_domain::{access::Actor, vex};
+use nanobom_domain::vex;
 
 use crate::{
     api::{self, ApiError},
+    read_api,
     state::AppState,
 };
 
@@ -46,22 +48,8 @@ async fn export(
     headers: HeaderMap,
     session: AuthenticationSession,
 ) -> Result<Response, ApiError> {
-    let document = if headers.contains_key(header::AUTHORIZATION) {
-        let token = api::authenticated_token(&state, &headers).await?;
-        vex::export_for_upload_token(&state.database, &token, &organization, &project).await?
-    } else {
-        let actor = match &session.user {
-            Some(user) => Actor::load(&state.database, user.id).await.ok(),
-            None => None,
-        }
-        .ok_or_else(|| {
-            ApiError::new(
-                StatusCode::UNAUTHORIZED,
-                "sign in, or send an upload token in the Authorization header (Bearer)",
-            )
-        })?;
-        vex::export(&state.database, &actor, &organization, &project).await?
-    };
+    let reader = read_api::reader(&state, &headers, &session).await?;
+    let document = vex::export(&state.database, reader, &organization, &project).await?;
     // The project's reference is `organization/project`, both slugs.
     let file_name = format!(
         "{}.vex.cdx.json",
@@ -90,7 +78,7 @@ async fn import(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<vex::ImportOutcome>, ApiError> {
-    let token = api::authenticated_token(&state, &headers).await?;
+    let token = api::upload_token(&state, &headers).await?;
     let statements = api::parse_document(&state, body, vex::parse)
         .await
         .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal error"))??;

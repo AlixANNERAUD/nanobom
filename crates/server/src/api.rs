@@ -1,8 +1,8 @@
 //! The HTTP API used by CI, authenticated with upload tokens.
 //!
 //! One route: `PUT /api/organizations/{organization}/projects/{project}/sbom`. The token is
-//! checked before the body is parsed, so an anonymous client cannot make the server parse
-//! anything; the token's reach (its organization, or one project) is then enforced by
+//! checked before the body is parsed, so an anonymous client, or one with a read token, cannot
+//! make the server parse anything; the token's reach (its organization, or one project) is then enforced by
 //! [`inventory::ingest`]. Parsing runs on the blocking thread pool, a few SBOMs at a time
 //! ([`AppState::sbom_parsing`](crate::state::AppState::sbom_parsing)), and the body size is capped
 //! by `--maximum-sbom-size`. Errors are English JSON (`{"error": "…"}`), meant for CI logs.
@@ -162,8 +162,24 @@ pub(crate) async fn parse_document<T: Send + 'static>(
     tokio::task::spawn_blocking(move || parse(&document)).await
 }
 
-/// The active upload token of the `Authorization` header; anything else is `401`.
-pub(crate) async fn authenticated_token(
+/// The active token of the `Authorization` header, if it may upload: anything else is `401`,
+/// and a read token `403`, before the body is parsed.
+pub(crate) async fn upload_token(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<upload_tokens::Model, ApiError> {
+    let token = authenticated_token(state, headers).await?;
+    match tokens::Scope::of(&token) {
+        tokens::Scope::Upload => Ok(token),
+        tokens::Scope::Read => Err(ApiError::new(
+            StatusCode::FORBIDDEN,
+            "this token is read-only: uploads need a token with the upload scope",
+        )),
+    }
+}
+
+/// The active token of the `Authorization` header, of any scope; anything else is `401`.
+async fn authenticated_token(
     state: &AppState,
     headers: &HeaderMap,
 ) -> Result<upload_tokens::Model, ApiError> {
@@ -381,7 +397,7 @@ async fn upload_sbom(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<(StatusCode, Json<UploadResponse>), ApiError> {
-    let token = authenticated_token(&state, &headers).await?;
+    let token = upload_token(&state, &headers).await?;
     let threshold = parameters
         .fail_on
         .as_deref()

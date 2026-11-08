@@ -56,7 +56,7 @@ use serde::{Deserialize, Serialize};
 use tokio::{sync::Mutex, task::JoinSet};
 
 use crate::{
-    access::{Actor, Permission},
+    access::{Actor, Permission, Reader},
     error::{Error, Result},
     findings::{EventKind, Status},
 };
@@ -918,23 +918,33 @@ pub struct RunSummary {
 
 /// The latest runs that covered an organization: whole-instance runs, and runs of the
 /// organization or one of its projects, newest first. Requires [`Permission::View`]. Errors of
-/// whole-instance runs are replaced by a generic message unless the actor is an instance
+/// whole-instance runs are replaced by a generic message unless the reader is an instance
 /// administrator.
+///
+/// A project token sees whole-instance runs and runs of its project only: the counts of an
+/// organization run cover the other projects too.
 pub async fn recent_runs(
     database: &impl ConnectionTrait,
-    actor: &Actor,
+    reader: impl Into<Reader>,
     organization_id: i64,
     limit: u64,
 ) -> Result<Vec<RunSummary>> {
     use sea_orm::{Condition, QuerySelect};
-    actor
+    let reader = reader.into();
+    reader
         .authorize(database, organization_id, Permission::View)
         .await?;
+    let covered = match reader.project_limit() {
+        None => Condition::all().add(runs::Column::OrganizationId.eq(organization_id)),
+        Some(project_id) => Condition::all()
+            .add(runs::Column::OrganizationId.eq(organization_id))
+            .add(runs::Column::ProjectId.eq(project_id)),
+    };
     let models = runs::Entity::find()
         .filter(
             Condition::any()
                 .add(runs::Column::Scope.eq(Scope::All.as_str()))
-                .add(runs::Column::OrganizationId.eq(organization_id)),
+                .add(covered),
         )
         .order_by_desc(runs::Column::StartedAt)
         .order_by_desc(runs::Column::Id)
@@ -944,7 +954,8 @@ pub async fn recent_runs(
     Ok(models
         .into_iter()
         .map(|run| {
-            let error_visible = actor.is_instance_administrator || run.scope != Scope::All.as_str();
+            let error_visible =
+                reader.is_instance_administrator() || run.scope != Scope::All.as_str();
             RunSummary {
                 id: run.id,
                 trigger: run.trigger,

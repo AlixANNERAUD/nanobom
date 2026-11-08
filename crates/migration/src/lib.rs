@@ -18,6 +18,7 @@ mod m20261108_000003_component_dependencies;
 mod m20261108_000004_dependency_graph_partial;
 mod m20261108_000005_webhook_format;
 mod m20261108_000006_vex;
+mod m20261108_000007_token_scope;
 
 /// Every migration of nanobom, in the order they apply; used by
 /// `nanobom_domain::database::migrate` and by the `migrate` command.
@@ -34,6 +35,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261108_000004_dependency_graph_partial::Migration),
             Box::new(m20261108_000005_webhook_format::Migration),
             Box::new(m20261108_000006_vex::Migration),
+            Box::new(m20261108_000007_token_scope::Migration),
         ]
     }
 }

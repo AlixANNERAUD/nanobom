@@ -219,6 +219,21 @@ async fn authenticate(
         .ok_or_else(Error::unauthorized)
 }
 
+/// Like [`authenticate`], refusing read tokens: they cannot upload.
+async fn upload_token(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<upload_tokens::Model, Error> {
+    let token = authenticate(state, headers).await?;
+    match tokens::Scope::of(&token) {
+        tokens::Scope::Upload => Ok(token),
+        tokens::Scope::Read => Err(Error::new(
+            StatusCode::FORBIDDEN,
+            "This nanobom token is read-only: uploads need a token with the upload scope.",
+        )),
+    }
+}
+
 /// The body of `PUT /api/v1/bom` (Dependency-Track's `BomSubmitRequest`); other fields are
 /// ignored.
 #[derive(Debug, Deserialize)]
@@ -253,7 +268,7 @@ async fn upload_json(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Json<UploadResponse>, Error> {
-    let token = authenticate(&state, &headers).await?;
+    let token = upload_token(&state, &headers).await?;
     let (request, bom) = decode_request(body)?;
     let auto_create = match &request.auto_create {
         Value::Bool(value) => *value,
@@ -298,7 +313,7 @@ async fn upload_form(
     headers: HeaderMap,
     mut form: Multipart,
 ) -> Result<Json<UploadResponse>, Error> {
-    let token = authenticate(&state, &headers).await?;
+    let token = upload_token(&state, &headers).await?;
     let mut submission = Submission {
         project: None,
         project_name: None,

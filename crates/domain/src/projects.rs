@@ -12,23 +12,29 @@ use sea_orm::{
 };
 
 use crate::{
-    access::{Actor, Permission},
+    access::{Actor, Permission, Reader},
     error::{Error, Result},
     names,
     problem::{Field, Problem},
 };
 
-/// The projects of an organization, sorted by slug. Requires [`Permission::View`].
+/// The projects of an organization, sorted by slug: only its own for a project token.
+/// Requires [`Permission::View`].
 pub async fn list(
     database: &impl ConnectionTrait,
-    actor: &Actor,
+    reader: impl Into<Reader>,
     organization_id: i64,
 ) -> Result<Vec<projects::Model>> {
-    actor
+    let reader = reader.into();
+    reader
         .authorize(database, organization_id, Permission::View)
         .await?;
-    Ok(projects::Entity::find()
-        .filter(projects::Column::OrganizationId.eq(organization_id))
+    let mut query =
+        projects::Entity::find().filter(projects::Column::OrganizationId.eq(organization_id));
+    if let Some(project_id) = reader.project_limit() {
+        query = query.filter(projects::Column::Id.eq(project_id));
+    }
+    Ok(query
         .order_by_asc(projects::Column::Slug)
         .all(database)
         .await?)
@@ -47,18 +53,21 @@ pub(crate) async fn find_model(
 }
 
 /// Finds a project of an organization by slug (case-insensitive). Requires
-/// [`Permission::View`] in the organization; a missing project is [`Error::NotFound`].
+/// [`Permission::View`] in the organization; a missing project, or one outside a project
+/// token, is [`Error::NotFound`].
 pub async fn find(
     database: &impl ConnectionTrait,
-    actor: &Actor,
+    reader: impl Into<Reader>,
     organization_id: i64,
     slug: &str,
 ) -> Result<projects::Model> {
-    actor
+    let reader = reader.into();
+    reader
         .authorize(database, organization_id, Permission::View)
         .await?;
     find_model(database, organization_id, slug)
         .await?
+        .filter(|project| reader.reaches_project(project.id))
         .ok_or(Error::NotFound)
 }
 
@@ -67,15 +76,17 @@ pub async fn find(
 /// the project row, never from the caller.
 pub(crate) async fn authorize(
     database: &impl ConnectionTrait,
-    actor: &Actor,
+    reader: impl Into<Reader>,
     project_id: i64,
     permission: Permission,
 ) -> Result<projects::Model> {
+    let reader = reader.into();
     let project = projects::Entity::find_by_id(project_id)
         .one(database)
         .await?
+        .filter(|project| reader.reaches_project(project.id))
         .ok_or(Error::NotFound)?;
-    actor
+    reader
         .authorize(database, project.organization_id, permission)
         .await?;
     Ok(project)

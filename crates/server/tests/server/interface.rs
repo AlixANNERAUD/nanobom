@@ -489,6 +489,49 @@ async fn new_tokens_are_shown_once() {
 }
 
 #[tokio::test]
+async fn read_tokens_are_created_from_the_settings() {
+    let server = server(&[]).await;
+    let owner = local_user(&server.database, "alice", PASSWORD).await;
+    organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let alice = Browser::sign_in(&server, "alice").await;
+    let page = "/organizations/acme/settings";
+    let html = alice.page(page).await;
+    assert!(html.contains("name=\"scope\""), "the form offers a scope");
+    let response = alice
+        .submit(
+            page,
+            "create_token",
+            "organization=acme&name=Dashboard&project=&scope=read",
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::FOUND);
+    let html = alice.page(page).await;
+    let secret_start = html.find("value=\"nanobom_").expect("the token is shown") + 7;
+    let secret = &html[secret_start..secret_start + 8 + 64];
+    let token = tokens::authenticate(&server.database, secret)
+        .await
+        .unwrap()
+        .expect("an active token");
+    assert_eq!(tokens::Scope::of(&token), tokens::Scope::Read);
+    assert!(html.contains("Read only"));
+
+    // An unknown scope creates nothing.
+    alice
+        .submit(
+            page,
+            "create_token",
+            "organization=acme&name=Other&project=&scope=admin",
+        )
+        .await;
+    let listed = tokens::list(&server.database, &owner, token.organization_id)
+        .await
+        .unwrap();
+    assert_eq!(listed.len(), 1);
+}
+
+#[tokio::test]
 async fn administration_is_for_instance_administrators() {
     let server = server(&[]).await;
     local_user(&server.database, "alice", PASSWORD).await;

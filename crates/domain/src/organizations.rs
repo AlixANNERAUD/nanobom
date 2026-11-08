@@ -17,7 +17,7 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    access::{Actor, Permission, Role},
+    access::{Actor, Permission, Reader, Role},
     error::{Error, Result},
     memberships::Source,
     names,
@@ -96,8 +96,23 @@ async fn find_model_by_slug(
         .await?)
 }
 
-/// The organizations the actor can see, sorted by name.
-pub async fn list(database: &impl ConnectionTrait, actor: &Actor) -> Result<Vec<Organization>> {
+/// The organizations the reader can see, sorted by name: a token sees its own, as a
+/// [`Role::Viewer`].
+pub async fn list(
+    database: &impl ConnectionTrait,
+    reader: impl Into<Reader>,
+) -> Result<Vec<Organization>> {
+    let actor = match reader.into() {
+        Reader::User(actor) => actor,
+        Reader::Token(reach) => {
+            return Ok(organizations::Entity::find_by_id(reach.organization_id)
+                .one(database)
+                .await?
+                .map(|model| Organization::new(model, Role::Viewer))
+                .into_iter()
+                .collect());
+        }
+    };
     let mut roles: BTreeMap<i64, Role> = BTreeMap::new();
     let memberships = memberships::Entity::find()
         .filter(memberships::Column::UserId.eq(actor.user_id))
@@ -130,17 +145,18 @@ pub async fn list(database: &impl ConnectionTrait, actor: &Actor) -> Result<Vec<
         .collect())
 }
 
-/// Finds an organization by slug (case-insensitive). Organizations the actor cannot see are
+/// Finds an organization by slug (case-insensitive). Organizations the reader cannot see are
 /// [`Error::NotFound`], like missing ones.
 pub async fn find(
     database: &impl ConnectionTrait,
-    actor: &Actor,
+    reader: impl Into<Reader>,
     slug: &str,
 ) -> Result<Organization> {
+    let reader = reader.into();
     let model = find_model_by_slug(database, slug)
         .await?
         .ok_or(Error::NotFound)?;
-    let role = actor
+    let role = reader
         .authorize(database, model.id, Permission::View)
         .await?;
     Ok(Organization::new(model, role))

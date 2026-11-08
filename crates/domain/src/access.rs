@@ -18,10 +18,14 @@
 //!     .authorize(database, organization_id, Permission::ManageProjects)
 //!     .await?;
 //! ```
+//!
+//! Functions that only read take a [`Reader`] instead: a user, or a token of the read API. A
+//! token reads as a viewer of its own organization and of nothing else, and a project token
+//! sees only its project, so the same checks serve the interface and the API.
 
 use std::fmt;
 
-use nanobom_entity::{memberships, users};
+use nanobom_entity::{memberships, upload_tokens, users};
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 
@@ -233,4 +237,115 @@ pub(crate) async fn membership_role(
         highest = highest.max(Some(role));
     }
     Ok(highest)
+}
+
+/// Whoever reads organization data: a signed-in user, or a token through the read API.
+///
+/// Read functions take `impl Into<Reader>`, so they accept an [`Actor`] as well. Write
+/// functions keep taking an [`Actor`]: tokens write only through the upload paths, which check
+/// them separately ([`crate::inventory::ingest`], [`crate::vex::import`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reader {
+    User(Actor),
+    Token(TokenReach),
+}
+
+/// What a token reaches: its organization, or a single project of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TokenReach {
+    pub token_id: i64,
+    pub organization_id: i64,
+    /// The only project a project token reaches; `None` for an organization token.
+    pub project_id: Option<i64>,
+}
+
+impl From<Actor> for Reader {
+    fn from(actor: Actor) -> Self {
+        Reader::User(actor)
+    }
+}
+
+impl From<&Actor> for Reader {
+    fn from(actor: &Actor) -> Self {
+        Reader::User(*actor)
+    }
+}
+
+/// Any active token reads within its reach, whatever its scope: upload tokens already receive
+/// findings after an upload, so refusing them reads would protect nothing.
+impl From<&upload_tokens::Model> for Reader {
+    fn from(token: &upload_tokens::Model) -> Self {
+        Reader::Token(TokenReach {
+            token_id: token.id,
+            organization_id: token.organization_id,
+            project_id: token.project_id,
+        })
+    }
+}
+
+impl Reader {
+    /// The user behind the reader, if it is one.
+    pub fn actor(&self) -> Option<&Actor> {
+        match self {
+            Reader::User(actor) => Some(actor),
+            Reader::Token(_) => None,
+        }
+    }
+
+    /// Whether the reader is an instance administrator, who sees every organization.
+    pub fn is_instance_administrator(&self) -> bool {
+        self.actor()
+            .is_some_and(|actor| actor.is_instance_administrator)
+    }
+
+    /// The only project the reader may see, for project tokens.
+    pub fn project_limit(&self) -> Option<i64> {
+        match self {
+            Reader::User(_) => None,
+            Reader::Token(reach) => reach.project_id,
+        }
+    }
+
+    /// Whether the project limit, if any, lets the reader see this project. It says nothing
+    /// about the project's organization: check that with [`Reader::authorize`].
+    pub fn reaches_project(&self, project_id: i64) -> bool {
+        self.project_limit()
+            .is_none_or(|allowed| allowed == project_id)
+    }
+
+    /// The reader's role in an organization, as [`Actor::role_in`]; a token is a
+    /// [`Role::Viewer`] of its own organization and has no role elsewhere.
+    pub async fn role_in(
+        &self,
+        database: &impl ConnectionTrait,
+        organization_id: i64,
+    ) -> Result<Option<Role>> {
+        match self {
+            Reader::User(actor) => actor.role_in(database, organization_id).await,
+            Reader::Token(reach) => {
+                Ok((reach.organization_id == organization_id).then_some(Role::Viewer))
+            }
+        }
+    }
+
+    /// Checks a permission in an organization, as [`Actor::authorize`]: no role is
+    /// [`Error::NotFound`], too low a role [`Error::Forbidden`]. A project token passes for its
+    /// organization; callers listing the organization's projects filter them with
+    /// [`Reader::reaches_project`].
+    pub async fn authorize(
+        &self,
+        database: &impl ConnectionTrait,
+        organization_id: i64,
+        permission: Permission,
+    ) -> Result<Role> {
+        let role = self
+            .role_in(database, organization_id)
+            .await?
+            .ok_or(Error::NotFound)?;
+        if role.allows(permission) {
+            Ok(role)
+        } else {
+            Err(Error::Forbidden)
+        }
+    }
 }

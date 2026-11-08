@@ -10,4 +10,5 @@ mod inventory;
 mod lifecycle;
 mod notifications;
 mod staleness;
+mod tokens;
 mod vex;
