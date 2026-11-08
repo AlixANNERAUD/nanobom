@@ -220,8 +220,10 @@ pub struct Run {
     /// For instance-wide runs, a generic message unless the viewer is an instance
     /// administrator.
     pub error: Option<String>,
-    pub new_findings: i64,
-    pub fixed_findings: i64,
+    /// `None` for instance-wide runs, unless the viewer is an instance administrator: the
+    /// counts span every organization.
+    pub new_findings: Option<i64>,
+    pub fixed_findings: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

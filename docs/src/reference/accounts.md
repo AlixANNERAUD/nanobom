@@ -41,7 +41,7 @@ Instance administrators:
 - see every organization on the **Administration** page;
 - create local accounts, reset passwords, disable and enable users, and grant or remove
   instance administration;
-- see the error messages of failed instance-wide runs.
+- see the error messages and the finding counts of instance-wide runs.
 
 They cannot disable themselves or remove their own administration. The first one is created with
 [`nanobom create-administrator`](command-line.md#nanobom-create-administrator); with OpenID

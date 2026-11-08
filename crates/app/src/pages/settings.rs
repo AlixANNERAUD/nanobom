@@ -122,7 +122,7 @@ fn Members(page: SettingsData) -> impl IntoView {
                     <form
                         method="post"
                         action={action::<AddMember>()}
-                        class="grid gap-4 sm:grid-cols-[2fr_1fr_1fr_auto] sm:items-end"
+                        class="grid gap-4 sm:grid-cols-[2fr_1fr_auto] sm:items-end"
                     >
                         <input type="hidden" name="organization" value=organization.clone() />
                         <Field

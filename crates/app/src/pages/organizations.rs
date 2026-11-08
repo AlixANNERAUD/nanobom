@@ -245,15 +245,17 @@ fn RunHistory(runs: Vec<Run>) -> impl IntoView {
                                 {format_time(run.started_at)} " · " {trigger_label(&run.trigger)} " · "
                                 {scope_label(&run.scope)}
                             </span>
-                            {(!failed && run.status == "succeeded")
-                                .then(|| {
-                                    view! {
+                            {match (run.new_findings, run.fixed_findings) {
+                                (Some(new), Some(fixed)) if !failed && run.status == "succeeded" => {
+                                    Some(view! {
                                         <span>
-                                            {tp!("organization.run_new", run.new_findings)} ", "
-                                            {tp!("organization.run_fixed", run.fixed_findings)}
+                                            {tp!("organization.run_new", new)} ", "
+                                            {tp!("organization.run_fixed", fixed)}
                                         </span>
-                                    }
-                                })}
+                                    })
+                                }
+                                _ => None,
+                            }}
                             {run.error.map(|error| view! { <span class="text-destructive">{error}</span> })}
                         </li>
                     }

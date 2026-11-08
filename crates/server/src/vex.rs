@@ -25,7 +25,7 @@ use nanobom_domain::vex;
 
 use crate::{
     api::{self, ApiError},
-    read_api,
+    read_api::{self, ApiPath},
     state::AppState,
 };
 
@@ -41,10 +41,24 @@ pub fn router(state: &AppState) -> Router<AppState> {
     )
 }
 
-/// `GET …/vex`: the project's findings as a CycloneDX VEX document, as a download.
+/// `GET …/vex`: the project's findings as a CycloneDX VEX document, as a download. Like the
+/// read API's, the response is private to its caller ([`read_api::private`]), errors included.
 async fn export(
+    state: State<AppState>,
+    path: ApiPath<(String, String)>,
+    headers: HeaderMap,
+    session: AuthenticationSession,
+) -> Response {
+    let mut response = export_document(state, path, headers, session)
+        .await
+        .into_response();
+    read_api::private(&mut response);
+    response
+}
+
+async fn export_document(
     State(state): State<AppState>,
-    Path((organization, project)): Path<(String, String)>,
+    ApiPath((organization, project)): ApiPath<(String, String)>,
     headers: HeaderMap,
     session: AuthenticationSession,
 ) -> Result<Response, ApiError> {

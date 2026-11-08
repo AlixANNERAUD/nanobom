@@ -17,7 +17,10 @@
 //! Lists are objects with an `items` array; paginated lists add `total`, `limit` and `offset`
 //! (`limit` defaults to [`DEFAULT_LIMIT`], at most [`MAXIMUM_LIMIT`]). Invalid query
 //! parameters are `422`, and every error is `{"error": "…"}` in English, as on the upload API.
-//! Responses carry a weak `ETag`, and a matching `If-None-Match` is answered `304`.
+//! Responses carry a weak `ETag`, and a matching `If-None-Match` is answered `304`. Every
+//! response is `Cache-Control: private, no-cache` and varies on the credentials:
+//! the same URL answers differently per caller, so a shared cache must never serve one caller's
+//! response to another.
 //!
 //! The paths are unversioned, like the upload API's. The OpenAPI description
 //! (`/api/openapi.json`, [`OPENAPI`]) is written by hand and checked against the responses
@@ -30,8 +33,9 @@ use std::collections::HashMap;
 
 use axum::{
     Router,
-    extract::{Path, Query, State, rejection::QueryRejection},
-    http::{HeaderMap, HeaderValue, StatusCode, header},
+    extract::{FromRequestParts, Path, Query, State, rejection::QueryRejection},
+    http::{HeaderMap, HeaderValue, StatusCode, header, request::Parts},
+    middleware,
     response::{IntoResponse, Response},
     routing::get,
 };
@@ -46,7 +50,7 @@ use nanobom_domain::{
     inventory, notifications, organizations, projects, tokens,
 };
 use nanobom_osv::Severity;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
 
 use crate::{api::ApiError, state::AppState};
@@ -85,6 +89,43 @@ pub fn router() -> Router<AppState> {
         .route(PATHS[5], get(list_runs))
         .route(PATHS[6], get(finding))
         .route(PATHS[7], get(search_components))
+        .layer(middleware::map_response(private_response))
+}
+
+/// Marks a response as private to its caller: stored by the caller's own cache only, and
+/// revalidated before reuse. Without it, a shared proxy could keep the JSON a session cookie
+/// obtained and serve it to anyone asking for the same URL. `Vary` names every credential
+/// that changes the answer. The VEX export, which the same callers read, sets it too.
+pub(crate) fn private(response: &mut Response) {
+    let headers = response.headers_mut();
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("private, no-cache"),
+    );
+    headers.insert(
+        header::VARY,
+        HeaderValue::from_static("Cookie, Authorization, X-Api-Key"),
+    );
+}
+
+async fn private_response(mut response: Response) -> Response {
+    private(&mut response);
+    response
+}
+
+/// [`Path`] whose rejection (a segment that is not valid percent-encoded UTF-8) is a JSON
+/// error like every other, not axum's plain text.
+pub(crate) struct ApiPath<T>(pub T);
+
+impl<S: Send + Sync, T: DeserializeOwned + Send> FromRequestParts<S> for ApiPath<T> {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        Path::<T>::from_request_parts(parts, state)
+            .await
+            .map(|Path(value)| Self(value))
+            .map_err(|rejection| ApiError::new(rejection.status(), rejection.body_text()))
+    }
 }
 
 /// The reader of a request: the token in `Authorization: Bearer` or `X-Api-Key` when one is
@@ -136,7 +177,8 @@ pub(crate) fn token_secret(headers: &HeaderMap) -> Option<&str> {
 
 /// A JSON response with a weak `ETag` of its body, or `304` when `If-None-Match` matches it.
 /// Computed from the body, it changes whenever the data does, at the cost of building the
-/// response every time.
+/// response every time. `If-None-Match` uses the weak comparison (RFC 9110, 13.1.2), which
+/// ignores the `W/` prefix on either side: proxies and clients may drop it.
 fn respond(headers: &HeaderMap, value: &impl Serialize) -> Response {
     let body = match serde_json::to_vec(value) {
         Ok(body) => body,
@@ -156,9 +198,10 @@ fn respond(headers: &HeaderMap, value: &impl Serialize) -> Response {
         .get(header::IF_NONE_MATCH)
         .and_then(|value| value.to_str().ok())
         .is_some_and(|value| {
-            value
-                .split(',')
-                .any(|candidate| matches!(candidate.trim(), "*") || candidate.trim() == etag)
+            value.split(',').any(|candidate| {
+                let candidate = candidate.trim();
+                candidate == "*" || opaque_tag(candidate) == opaque_tag(&etag)
+            })
         });
     let etag_value = HeaderValue::from_str(&etag).expect("hexadecimal digits");
     if matches {
@@ -177,6 +220,11 @@ fn respond(headers: &HeaderMap, value: &impl Serialize) -> Response {
         .into_response()
 }
 
+/// An entity tag without its weak prefix.
+fn opaque_tag(tag: &str) -> &str {
+    tag.strip_prefix("W/").unwrap_or(tag)
+}
+
 fn invalid(message: impl Into<String>) -> ApiError {
     ApiError::new(StatusCode::UNPROCESSABLE_ENTITY, message)
 }
@@ -190,6 +238,13 @@ fn query_error(rejection: QueryRejection) -> ApiError {
 #[derive(Serialize)]
 struct Items<T> {
     items: Vec<T>,
+}
+
+/// A search: the matches, and whether more were found than returned.
+#[derive(Serialize)]
+struct Matches<T> {
+    items: Vec<T>,
+    truncated: bool,
 }
 
 /// One page of a list.
@@ -319,7 +374,7 @@ struct ProjectBody {
 /// by severity, by slug.
 async fn list_projects(
     State(state): State<AppState>,
-    Path(organization): Path<String>,
+    ApiPath(organization): ApiPath<String>,
     headers: HeaderMap,
     session: AuthenticationSession,
 ) -> Result<Response, ApiError> {
@@ -538,7 +593,7 @@ async fn project(
 /// findings, filtered, in the project page's order.
 async fn list_findings(
     State(state): State<AppState>,
-    Path((organization, project_slug)): Path<(String, String)>,
+    ApiPath((organization, project_slug)): ApiPath<(String, String)>,
     parameters: Result<Query<FindingParameters>, QueryRejection>,
     headers: HeaderMap,
     session: AuthenticationSession,
@@ -685,7 +740,7 @@ fn finding_detail_body(state: &AppState, detail: FindingDetail) -> FindingDetail
 /// paths.
 async fn finding(
     State(state): State<AppState>,
-    Path(finding): Path<String>,
+    ApiPath(finding): ApiPath<String>,
     headers: HeaderMap,
     session: AuthenticationSession,
 ) -> Result<Response, ApiError> {
@@ -702,7 +757,7 @@ async fn finding(
 /// current components, by package URL.
 async fn list_components(
     State(state): State<AppState>,
-    Path((organization, project_slug)): Path<(String, String)>,
+    ApiPath((organization, project_slug)): ApiPath<(String, String)>,
     pagination: Result<Query<Pagination>, QueryRejection>,
     headers: HeaderMap,
     session: AuthenticationSession,
@@ -748,8 +803,9 @@ async fn search_components(
         .filter(|query| !query.is_empty())
         .ok_or_else(|| invalid("q, the name to search for, is required"))?;
     let reader = reader(&state, &headers, &session).await?;
-    let items = inventory::search(&state.database, reader, query)
-        .await?
+    let found = inventory::search_results(&state.database, reader, query).await?;
+    let items = found
+        .matches
         .into_iter()
         .map(|component| ComponentMatchBody {
             organization: component.organization_slug,
@@ -760,7 +816,13 @@ async fn search_components(
             ecosystem: component.ecosystem,
         })
         .collect();
-    Ok(respond(&headers, &Items { items }))
+    Ok(respond(
+        &headers,
+        &Matches {
+            items,
+            truncated: found.truncated,
+        },
+    ))
 }
 
 #[derive(Serialize)]
@@ -772,8 +834,9 @@ struct RunBody {
     started_at: DateTime<FixedOffset>,
     finished_at: Option<DateTime<FixedOffset>>,
     error: Option<String>,
-    new_findings: i64,
-    fixed_findings: i64,
+    /// `null` for a whole-instance run, unless the caller is an instance administrator.
+    new_findings: Option<i64>,
+    fixed_findings: Option<i64>,
 }
 
 impl From<RunSummary> for RunBody {
@@ -796,12 +859,19 @@ impl From<RunSummary> for RunBody {
 /// organization, newest first.
 async fn list_runs(
     State(state): State<AppState>,
-    Path(organization): Path<String>,
+    ApiPath(organization): ApiPath<String>,
     parameters: Result<Query<Pagination>, QueryRejection>,
     headers: HeaderMap,
     session: AuthenticationSession,
 ) -> Result<Response, ApiError> {
     let Query(parameters) = parameters.map_err(query_error)?;
+    // The list is short and has no total: refusing is better than ignoring a parameter that
+    // would make a client loop forever on the same page.
+    if parameters.offset.is_some() {
+        return Err(invalid(
+            "offset is not supported on runs: use limit, up to 100",
+        ));
+    }
     let limit = match parameters.limit.as_deref().map(str::trim) {
         None => DEFAULT_RUNS,
         Some(value) => value

@@ -15,7 +15,8 @@ owners everywhere.
 
 Shared data is limited to what is not organization-specific: cached OSV records and exploitation
 data per CVE. The error message of a failed instance-wide run can name packages of any
-organization, so it is shown to instance administrators only, and the failure webhook should
+organization, and its counts of new and fixed findings span all of them, so both are shown to
+instance administrators only, and the failure webhook should
 reach operators rather than an organization's channel.
 
 ## API tokens
@@ -33,13 +34,16 @@ reach operators rather than an organization's channel.
   it belongs to. A `read` token cannot change anything: every write path refuses it, in the
   server and again in the domain layer. Give tools that only read a read token
   ([Tokens and scopes](tokens.md)).
-- Shown once; revocable; their last use is recorded.
+- Shown once; revocable; their last use is recorded, to the minute: a token used again within
+  a minute does not write to the database, so reads stay reads.
 
 The upload API is not exposed to cross-site request forgery: it is authenticated by the
 `Authorization` header (`X-Api-Key` for the Dependency-Track API), which browsers never add on
 their own. The read API also accepts the session cookie, so the interface's pages can use it;
 it only answers `GET` requests and changes nothing, and since it sends no CORS headers, a page
-of another site cannot read its answers.
+of another site cannot read its answers. Its responses are `Cache-Control: private, no-cache`
+and vary on the cookie and token headers, so a shared proxy cannot serve what one caller
+obtained to another.
 
 ## Sessions and cookies
 

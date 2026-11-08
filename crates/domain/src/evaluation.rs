@@ -912,14 +912,17 @@ pub struct RunSummary {
     pub started_at: DateTime<FixedOffset>,
     pub finished_at: Option<DateTime<FixedOffset>>,
     pub error: Option<String>,
-    pub new_findings: i64,
-    pub fixed_findings: i64,
+    /// `None` for a whole-instance run, unless the reader is an instance administrator: the
+    /// counts span every organization.
+    pub new_findings: Option<i64>,
+    /// Like [`RunSummary::new_findings`].
+    pub fixed_findings: Option<i64>,
 }
 
 /// The latest runs that covered an organization: whole-instance runs, and runs of the
-/// organization or one of its projects, newest first. Requires [`Permission::View`]. Errors of
-/// whole-instance runs are replaced by a generic message unless the reader is an instance
-/// administrator.
+/// organization or one of its projects, newest first. Requires [`Permission::View`]. Errors and
+/// finding counts of whole-instance runs, which span every organization, are replaced by a
+/// generic message and `None` unless the reader is an instance administrator.
 ///
 /// A project token sees whole-instance runs and runs of its project only: the counts of an
 /// organization run cover the other projects too.
@@ -954,8 +957,7 @@ pub async fn recent_runs(
     Ok(models
         .into_iter()
         .map(|run| {
-            let error_visible =
-                reader.is_instance_administrator() || run.scope != Scope::All.as_str();
+            let visible = reader.is_instance_administrator() || run.scope != Scope::All.as_str();
             RunSummary {
                 id: run.id,
                 trigger: run.trigger,
@@ -965,13 +967,13 @@ pub async fn recent_runs(
                 finished_at: run.finished_at,
                 // Instance-wide errors may mention other organizations' packages; they are shown
                 // to instance administrators only.
-                error: if error_visible {
+                error: if visible {
                     run.error
                 } else {
                     run.error.map(|_| "the run could not complete".to_owned())
                 },
-                new_findings: run.new_findings,
-                fixed_findings: run.fixed_findings,
+                new_findings: visible.then_some(run.new_findings),
+                fixed_findings: visible.then_some(run.fixed_findings),
             }
         })
         .collect())

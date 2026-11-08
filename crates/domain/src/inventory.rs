@@ -832,16 +832,35 @@ pub struct ComponentMatch {
 /// At most this many components are returned by a search.
 pub const MAXIMUM_SEARCH_RESULTS: usize = 200;
 
+/// The outcome of [`search_results`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchResults {
+    /// At most [`MAXIMUM_SEARCH_RESULTS`] components.
+    pub matches: Vec<ComponentMatch>,
+    /// More components matched than `matches` holds.
+    pub truncated: bool,
+}
+
 /// Finds components by name across the projects the reader can see: `openssl` matches
 /// names containing it, `openssl 3.` (or `openssl@3.`) also requires the version to start with
 /// `3.`. Names and versions match case-insensitively; `%` and `_` are taken literally.
 /// Results are sorted by name then version and capped at [`MAXIMUM_SEARCH_RESULTS`]; an empty
-/// name returns nothing rather than every component.
+/// name returns nothing rather than every component. [`search_results`] also says whether the
+/// cap cut the list.
 pub async fn search(
     database: &impl ConnectionTrait,
     reader: impl Into<Reader>,
     query: &str,
 ) -> Result<Vec<ComponentMatch>> {
+    Ok(search_results(database, reader, query).await?.matches)
+}
+
+/// [`search`], and whether more components matched than were returned.
+pub async fn search_results(
+    database: &impl ConnectionTrait,
+    reader: impl Into<Reader>,
+    query: &str,
+) -> Result<SearchResults> {
     let reader = reader.into();
     let query = query.trim();
     let (name, version) = match query.split_once(['@', ' ']) {
@@ -849,7 +868,10 @@ pub async fn search(
         None => (query, None),
     };
     if name.is_empty() {
-        return Ok(Vec::new());
+        return Ok(SearchResults {
+            matches: Vec::new(),
+            truncated: false,
+        });
     }
     let organizations: std::collections::HashMap<i64, String> =
         crate::organizations::list(database, reader)
@@ -890,11 +912,14 @@ pub async fn search(
         .order_by_asc(components::Column::Version)
         // The identifier breaks ties, or which rows the limit keeps would be arbitrary.
         .order_by_asc(components::Column::Id)
-        .limit(MAXIMUM_SEARCH_RESULTS as u64)
+        // One more than returned, to know whether the cap cut the list.
+        .limit(MAXIMUM_SEARCH_RESULTS as u64 + 1)
         .all(database)
         .await?;
-    Ok(models
+    let truncated = models.len() > MAXIMUM_SEARCH_RESULTS;
+    let matches = models
         .into_iter()
+        .take(MAXIMUM_SEARCH_RESULTS)
         .map(|component| {
             let (organization_slug, project_slug) = projects[&component.project_id].clone();
             ComponentMatch {
@@ -906,7 +931,8 @@ pub async fn search(
                 version: component.version,
             }
         })
-        .collect())
+        .collect();
+    Ok(SearchResults { matches, truncated })
 }
 
 /// Escapes the wildcards of a `LIKE` pattern, so `_` in a package name matches itself.

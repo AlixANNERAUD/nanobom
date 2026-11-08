@@ -1,5 +1,6 @@
 //! Token scopes, and what tokens read through [`Reader`].
 
+use chrono::{Duration, Utc};
 use nanobom_domain::{
     Error, Problem,
     access::{Actor, Permission, Reader, Role},
@@ -11,7 +12,9 @@ use nanobom_domain::{
     vex,
 };
 use nanobom_entity::upload_tokens;
-use sea_orm::{DatabaseConnection, EntityTrait, PaginatorTrait};
+use sea_orm::{
+    ActiveModelTrait, ActiveValue::Set, DatabaseConnection, EntityTrait, PaginatorTrait,
+};
 
 async fn owner(database: &DatabaseConnection) -> Actor {
     let user = users::create(
@@ -74,6 +77,43 @@ async fn tokens_are_created_with_a_scope() {
     let listed = tokens::list(&database, &owner, acme.id).await.unwrap();
     let scopes: Vec<Scope> = listed.iter().map(|token| token.scope).collect();
     assert!(scopes.contains(&Scope::Upload) && scopes.contains(&Scope::Read));
+}
+
+/// Authenticating is a read: `last_used_at` is written only when it is a minute old, so a
+/// script polling the read API does not contend for the writer lock on every request.
+#[tokio::test]
+async fn use_is_recorded_at_most_once_a_minute() {
+    let database = testing::database().await;
+    let owner = owner(&database).await;
+    let acme = organizations::create(&database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let created = tokens::create(&database, &owner, acme.id, None, "CI")
+        .await
+        .unwrap();
+
+    let first = authenticated(&database, &created.secret).await;
+    let first_use = first.last_used_at.expect("the first use is recorded");
+
+    // Within the minute: the stored value stays, and so does the one returned.
+    let second = authenticated(&database, &created.secret).await;
+    assert_eq!(second.last_used_at, Some(first_use));
+    let stored = upload_tokens::Entity::find_by_id(first.id)
+        .one(&database)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(stored.last_used_at, Some(first_use));
+
+    // Older than a minute: written again.
+    let old = (Utc::now() - Duration::minutes(2)).fixed_offset();
+    let mut active: upload_tokens::ActiveModel = stored.into();
+    active.last_used_at = Set(Some(old));
+    active.update(&database).await.unwrap();
+    let third = authenticated(&database, &created.secret).await;
+    assert!(third.last_used_at.unwrap() > old + Duration::minutes(1));
+    let listed = tokens::list(&database, &owner, acme.id).await.unwrap();
+    assert_eq!(listed[0].last_used_at, third.last_used_at);
 }
 
 /// The domain refuses read tokens on every write path, whatever the server checks first.

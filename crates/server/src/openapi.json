@@ -74,6 +74,9 @@
             "headers": {
               "ETag": {
                 "$ref": "#/components/headers/ETag"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
               }
             },
             "content": {
@@ -118,6 +121,9 @@
             "headers": {
               "ETag": {
                 "$ref": "#/components/headers/ETag"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
               }
             },
             "content": {
@@ -130,6 +136,9 @@
           },
           "304": {
             "$ref": "#/components/responses/NotModified"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -209,6 +218,9 @@
             "headers": {
               "ETag": {
                 "$ref": "#/components/headers/ETag"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
               }
             },
             "content": {
@@ -221,6 +233,9 @@
           },
           "304": {
             "$ref": "#/components/responses/NotModified"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -265,6 +280,9 @@
             "headers": {
               "ETag": {
                 "$ref": "#/components/headers/ETag"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
               }
             },
             "content": {
@@ -277,6 +295,9 @@
           },
           "304": {
             "$ref": "#/components/responses/NotModified"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -294,7 +315,7 @@
       "get": {
         "operationId": "listRuns",
         "summary": "Recent runs",
-        "description": "The latest runs that covered the organization (whole-instance runs, and runs of the organization or one of its projects), newest first. A project token sees whole-instance runs and runs of its project. Errors of whole-instance runs are shown to instance administrators only.",
+        "description": "The latest runs that covered the organization (whole-instance runs, and runs of the organization or one of its projects), newest first. A project token sees whole-instance runs and runs of its project. Errors of whole-instance runs are shown to instance administrators only. Finding counts of whole-instance runs, which span every organization, are null for callers that are not instance administrators. There is no pagination: `offset` is refused with 422, and `limit` caps the list.",
         "tags": [
           "read"
         ],
@@ -323,6 +344,9 @@
             "headers": {
               "ETag": {
                 "$ref": "#/components/headers/ETag"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
               }
             },
             "content": {
@@ -335,6 +359,9 @@
           },
           "304": {
             "$ref": "#/components/responses/NotModified"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -376,6 +403,9 @@
             "headers": {
               "ETag": {
                 "$ref": "#/components/headers/ETag"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
               }
             },
             "content": {
@@ -388,6 +418,9 @@
           },
           "304": {
             "$ref": "#/components/responses/NotModified"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
           },
           "401": {
             "$ref": "#/components/responses/Unauthorized"
@@ -402,7 +435,7 @@
       "get": {
         "operationId": "searchComponents",
         "summary": "Search components",
-        "description": "Components whose name contains `q`, across the projects the caller sees, by name then version, at most 200.",
+        "description": "Components whose name contains `q`, across the projects the caller sees, by name then version, at most 200. `truncated` says when more matched.",
         "tags": [
           "read"
         ],
@@ -427,6 +460,9 @@
             "headers": {
               "ETag": {
                 "$ref": "#/components/headers/ETag"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
               }
             },
             "content": {
@@ -528,9 +564,25 @@
         "schema": {
           "type": "string"
         }
+      },
+      "CacheControl": {
+        "description": "`private, no-cache`: shared caches must not store the response, and clients revalidate it with `If-None-Match`.",
+        "schema": {
+          "type": "string"
+        }
       }
     },
     "responses": {
+      "BadRequest": {
+        "description": "A path segment that is not valid percent-encoded UTF-8.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
       "NotModified": {
         "description": "The data still matches `If-None-Match`."
       },
@@ -1191,12 +1243,20 @@
             ]
           },
           "new_findings": {
-            "type": "integer",
-            "minimum": 0
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "Null for a whole-instance run, unless the caller is an instance administrator: the counts span every organization."
           },
           "fixed_findings": {
-            "type": "integer",
-            "minimum": 0
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "Null for a whole-instance run, unless the caller is an instance administrator."
           }
         },
         "required": [
@@ -1521,10 +1581,15 @@
             "items": {
               "$ref": "#/components/schemas/ComponentMatch"
             }
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "More components matched than the 200 returned: narrow the search (add a version prefix, or a longer name)."
           }
         },
         "required": [
-          "items"
+          "items",
+          "truncated"
         ]
       },
       "RunList": {

@@ -25,7 +25,9 @@ Slugs are case-insensitive. The body of a `PUT` may be at most `NANOBOM_MAXIMUM_
 ## Export
 
 The response is `200` with `Content-Type: application/vnd.cyclonedx+json` and
-`Content-Disposition: attachment; filename="{organization}-{project}.vex.cdx.json"`.
+`Content-Disposition: attachment; filename="{organization}-{project}.vex.cdx.json"`. Like
+every [read API](read-api.md#caching) response, it is `Cache-Control: private, no-cache` and
+varies on `Cookie`, `Authorization` and `X-Api-Key`.
 
 | Part of the document | Content |
 | --- | --- |

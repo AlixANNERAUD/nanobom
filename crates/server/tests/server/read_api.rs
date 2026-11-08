@@ -9,14 +9,17 @@ use axum::{
     http::{Request, Response, StatusCode, header},
 };
 use base64::Engine;
+use chrono::Utc;
 use nanobom::read_api::{OPENAPI, PATHS};
 use nanobom_domain::{
     access::Actor,
     findings::{self, Justification},
-    organizations,
+    inventory::{self, UploadSource},
+    organizations, passwords,
     tokens::{self, Scope},
+    users::{self, NewUser},
 };
-use nanobom_entity::{exploitation, projects};
+use nanobom_entity::{exploitation, projects, runs};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, PaginatorTrait};
 use serde_json::{Value, json};
 
@@ -522,6 +525,7 @@ async fn every_endpoint_answers_as_described() {
             .iter()
             .all(|(organization, _)| *organization == "acme")
     );
+    assert_eq!(matches["truncated"], false);
 
     let runs = read(server, "/api/organizations/acme/runs", token).await;
     assert_documented("/api/organizations/{organization}/runs", &runs);
@@ -1007,6 +1011,23 @@ async fn unchanged_responses_are_not_sent_again() {
     assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
     assert_eq!(response.headers()[header::ETAG], etag.as_str());
 
+    // Weak comparison (RFC 9110): the `W/` prefix counts on neither side, and a list matches
+    // when any of its tags does. Proxies and clients that strip the prefix still get `304`.
+    let strong = etag.trim_start_matches("W/").to_owned();
+    for matching in [
+        strong.clone(),
+        format!("\"other\", {etag}"),
+        format!("W/\"other\",{strong}"),
+        "*".to_owned(),
+    ] {
+        let response = server.send(conditional(matching.clone())).await;
+        assert_eq!(response.status(), StatusCode::NOT_MODIFIED, "{matching}");
+    }
+    for other in ["\"other\"", "W/\"other\"", ""] {
+        let response = server.send(conditional(other.to_owned())).await;
+        assert_eq!(response.status(), StatusCode::OK, "{other:?}");
+    }
+
     findings::ignore(
         &server.database,
         &setup.alice,
@@ -1020,4 +1041,323 @@ async fn unchanged_responses_are_not_sent_again() {
     let response = server.send(conditional(etag.clone())).await;
     assert_eq!(response.status(), StatusCode::OK);
     assert_ne!(response.headers()[header::ETAG], etag.as_str());
+}
+
+/// Every response of the read API, errors and `304` included, and the VEX export are private to
+/// their caller: a shared cache must not serve what a cookie or token obtained to someone else.
+#[tokio::test]
+async fn responses_are_private_to_the_caller() {
+    let setup = setup().await;
+    let server = &setup.server;
+    let token = Caller::Bearer(&setup.acme_read);
+    let session = Caller::Session(&setup.cookie);
+    let vex = "/api/organizations/acme/projects/web/vex";
+    let cases = [
+        ("/api/organizations", token, StatusCode::OK),
+        ("/api/organizations", session, StatusCode::OK),
+        ("/api/organizations/acme/projects", session, StatusCode::OK),
+        ("/api/organizations/acme/runs", token, StatusCode::OK),
+        (
+            "/api/organizations/acme/projects/web/components",
+            token,
+            StatusCode::OK,
+        ),
+        ("/api/components?q=lodash", session, StatusCode::OK),
+        (
+            "/api/organizations/acme/projects",
+            Caller::Anonymous,
+            StatusCode::UNAUTHORIZED,
+        ),
+        (
+            "/api/organizations/globex/projects",
+            token,
+            StatusCode::NOT_FOUND,
+        ),
+        ("/api/components", token, StatusCode::UNPROCESSABLE_ENTITY),
+        ("/api/openapi.json", Caller::Anonymous, StatusCode::OK),
+        (vex, token, StatusCode::OK),
+        (vex, session, StatusCode::OK),
+        (vex, Caller::Anonymous, StatusCode::UNAUTHORIZED),
+        (
+            "/api/organizations/globex/projects/web/vex",
+            token,
+            StatusCode::NOT_FOUND,
+        ),
+    ];
+    for (path, caller, status) in cases {
+        let response = get(server, path, caller).await;
+        assert_eq!(response.status(), status, "GET {path}");
+        assert_private(&response, path);
+    }
+
+    // Also a `304`, which the cache would otherwise refresh with.
+    let first = get(server, "/api/organizations/acme/runs", token).await;
+    let response = server
+        .send(
+            Request::get("/api/organizations/acme/runs")
+                .header(header::AUTHORIZATION, format!("Bearer {}", setup.acme_read))
+                .header(header::IF_NONE_MATCH, first.headers()[header::ETAG].clone())
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
+    assert_private(&response, "a 304");
+}
+
+fn assert_private(response: &Response<Body>, what: &str) {
+    assert_eq!(
+        response.headers()[header::CACHE_CONTROL],
+        "private, no-cache",
+        "{what}"
+    );
+    let vary = response.headers()[header::VARY]
+        .to_str()
+        .unwrap()
+        .to_ascii_lowercase();
+    for name in ["cookie", "authorization", "x-api-key"] {
+        assert!(vary.contains(name), "{what}: Vary is {vary}");
+    }
+}
+
+/// Runs of the whole instance span every organization: their error and their counts are for
+/// instance administrators only, whoever asks and however.
+#[tokio::test]
+async fn whole_instance_run_counts_are_for_instance_administrators() {
+    let setup = setup().await;
+    let server = &setup.server;
+    let now = Utc::now().fixed_offset();
+    runs::ActiveModel {
+        trigger: Set("scheduled".to_owned()),
+        scope: Set("all".to_owned()),
+        organization_id: Set(None),
+        project_id: Set(None),
+        triggered_by_user_id: Set(None),
+        started_at: Set(now + chrono::Duration::hours(1)),
+        finished_at: Set(Some(now + chrono::Duration::hours(1))),
+        status: Set("failed".to_owned()),
+        error: Set(Some("cannot reach pkg:npm/globex-secret".to_owned())),
+        component_count: Set(10),
+        vulnerability_count: Set(4),
+        new_findings: Set(7),
+        fixed_findings: Set(3),
+        ..Default::default()
+    }
+    .insert(&server.database)
+    .await
+    .unwrap();
+    let path = "/api/organizations/acme/runs";
+
+    // The newest run is the instance-wide one.
+    for caller in [
+        Caller::Bearer(&setup.acme_read),
+        Caller::Bearer(&setup.acme_upload),
+        Caller::Bearer(&setup.acme_web_read),
+        Caller::Session(&setup.cookie),
+    ] {
+        let page = read(server, path, caller).await;
+        let run = &page["items"][0];
+        assert_eq!(run["scope"], "all", "{page}");
+        assert_eq!(run["new_findings"], Value::Null, "{run}");
+        assert_eq!(run["fixed_findings"], Value::Null, "{run}");
+        assert_eq!(run["error"], "the run could not complete", "{run}");
+        assert_documented("/api/organizations/{organization}/runs", &page);
+        // Runs of the organization keep theirs.
+        let own = page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|run| run["scope"] == "project")
+            .expect("a project run");
+        assert!(own["new_findings"].is_u64(), "{own}");
+    }
+
+    let root = users::create(
+        &server.database,
+        NewUser {
+            username: "root".to_owned(),
+            password_hash: Some(passwords::hash(PASSWORD.to_owned()).await),
+            is_instance_administrator: true,
+            ..NewUser::default()
+        },
+        false,
+    )
+    .await
+    .unwrap();
+    assert!(root.is_instance_administrator);
+    let cookie = sign_in(server, "root").await;
+    let page = read(server, path, Caller::Session(&cookie)).await;
+    assert_documented("/api/organizations/{organization}/runs", &page);
+    let run = &page["items"][0];
+    assert_eq!(run["new_findings"], 7);
+    assert_eq!(run["fixed_findings"], 3);
+    assert_eq!(run["error"], "cannot reach pkg:npm/globex-secret");
+}
+
+#[tokio::test]
+async fn runs_refuse_an_offset_and_bad_paths_are_json() {
+    let setup = setup().await;
+    let server = &setup.server;
+    let token = Caller::Bearer(&setup.acme_read);
+    // No pagination: an offset would be ignored and clients would loop on the first page.
+    refused(
+        server,
+        "/api/organizations/acme/runs?offset=1",
+        token,
+        StatusCode::UNPROCESSABLE_ENTITY,
+    )
+    .await;
+    refused(
+        server,
+        "/api/organizations/acme/runs?offset=0&limit=5",
+        token,
+        StatusCode::UNPROCESSABLE_ENTITY,
+    )
+    .await;
+
+    // A segment that is not UTF-8 once decoded: JSON, like every other error.
+    for path in [
+        "/api/organizations/%FF/projects",
+        "/api/organizations/acme/projects/%FF/findings",
+        "/api/findings/%FF",
+        "/api/organizations/%FF/projects/web/vex",
+    ] {
+        refused(server, path, token, StatusCode::BAD_REQUEST).await;
+    }
+}
+
+/// A search that matched more than it returns says so.
+#[tokio::test]
+async fn searches_say_when_they_were_cut() {
+    let setup = setup().await;
+    let server = &setup.server;
+    let components: Vec<Value> = (0..=inventory::MAXIMUM_SEARCH_RESULTS)
+        .map(|index| {
+            json!({
+                "type": "library",
+                "name": format!("widget-{index:03}"),
+                "version": "1.0.0",
+                "purl": format!("pkg:npm/widget-{index:03}@1.0.0"),
+            })
+        })
+        .collect();
+    let document = json!({
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.5",
+        "version": 1,
+        "components": components,
+    })
+    .to_string();
+    let token = tokens::authenticate(&server.database, &setup.acme_upload)
+        .await
+        .unwrap()
+        .unwrap();
+    inventory::ingest(
+        &server.database,
+        &token,
+        "acme",
+        "web",
+        inventory::parse(document.as_bytes()).unwrap(),
+        UploadSource::default(),
+    )
+    .await
+    .unwrap();
+    let found = read(
+        server,
+        "/api/components?q=widget",
+        Caller::Bearer(&setup.acme_read),
+    )
+    .await;
+    assert_documented("/api/components", &found);
+    assert_eq!(
+        found["items"].as_array().unwrap().len(),
+        inventory::MAXIMUM_SEARCH_RESULTS
+    );
+    assert_eq!(found["truncated"], true);
+    let narrower = read(
+        server,
+        "/api/components?q=widget-000",
+        Caller::Bearer(&setup.acme_read),
+    )
+    .await;
+    assert_eq!(narrower["truncated"], false);
+}
+
+/// The interface's server functions are served at `/api/{name}`: none may share a path with a
+/// route of the read API, or the router would panic at start-up or answer the wrong handler.
+#[test]
+fn server_functions_never_collide_with_the_read_api() {
+    let functions: Vec<&str> = leptos::server_fn::axum::server_fn_paths()
+        .map(|(path, _)| path)
+        .collect();
+    assert!(
+        functions.contains(&"/api/load_organizations"),
+        "the server functions are registered: {functions:?}"
+    );
+    // Two paths collide when they have as many segments and each matches, a `{parameter}`
+    // matching anything.
+    let collides = |function: &str, route: &str| {
+        let function: Vec<&str> = function.split('/').collect();
+        let route: Vec<&str> = route.split('/').collect();
+        function.len() == route.len()
+            && function
+                .iter()
+                .zip(&route)
+                .all(|(function, route)| function == route || route.starts_with('{'))
+    };
+    for function in &functions {
+        for route in PATHS {
+            assert!(
+                !collides(function, route),
+                "the server function {function} collides with {route}"
+            );
+        }
+    }
+}
+
+/// Read tokens are refused on the Dependency-Track multipart upload before the form is read.
+#[tokio::test]
+async fn read_tokens_are_refused_on_the_multipart_upload() {
+    let setup = setup().await;
+    let server = &setup.server;
+    let projects_before = project_count(server).await;
+    const BOUNDARY: &str = "----formdata-test";
+    let bom = String::from_utf8(sbom_document("cyclonedx-npm.json")).unwrap();
+    let form = format!(
+        "--{BOUNDARY}\r\nContent-Disposition: form-data; name=\"projectName\"\r\n\r\ncreated\r\n\
+         --{BOUNDARY}\r\nContent-Disposition: form-data; name=\"autoCreate\"\r\n\r\ntrue\r\n\
+         --{BOUNDARY}\r\nContent-Disposition: form-data; name=\"bom\"; filename=\"bom\"\r\n\
+         Content-Type: application/octet-stream\r\n\r\n{bom}\r\n--{BOUNDARY}--\r\n"
+    );
+    for token in [&setup.acme_read, &setup.acme_web_read] {
+        let response = server
+            .send(
+                Request::post("/api/v1/bom")
+                    .header(
+                        header::CONTENT_TYPE,
+                        format!("multipart/form-data; boundary={BOUNDARY}"),
+                    )
+                    .header("X-Api-Key", token.as_str())
+                    .body(Body::from(form.clone()))
+                    .unwrap(),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    }
+    assert_eq!(project_count(server).await, projects_before);
+
+    // The same form with an upload token goes through.
+    let response = server
+        .send(
+            Request::post("/api/v1/bom")
+                .header(
+                    header::CONTENT_TYPE,
+                    format!("multipart/form-data; boundary={BOUNDARY}"),
+                )
+                .header("X-Api-Key", &setup.acme_upload)
+                .body(Body::from(form))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
 }

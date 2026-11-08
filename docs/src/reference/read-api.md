@@ -65,7 +65,11 @@ computed at each request: a run between two requests can move findings from one 
 next.
 
 Lists that are not paginated are `{"items": […]}`. `/runs` takes a `limit` from 1 to 100,
-20 by default. `/api/components` returns at most 200 components.
+20 by default, and has no `offset`: it is refused with `422` rather than ignored.
+
+`/api/components` returns at most 200 components, by name then version, and adds
+`"truncated": true` when more matched: make the search narrower (a longer name, or a version
+prefix such as `lodash@4.17`).
 
 ## Findings
 
@@ -171,16 +175,24 @@ space or `@` and a version prefix (`openssl 3.`, `lodash@4.17`), both ignoring c
 
 A run is `id`, `trigger` (`scheduled`, `manual`, `upload`), `scope` (`all`, `organization`,
 `project`), `status` (`running`, `succeeded`, `failed`), `started_at`, `finished_at`, `error`,
-`new_findings` and `fixed_findings`. The error of a whole-instance run is shown to instance
-administrators only; others read `the run could not complete`.
+`new_findings` and `fixed_findings`. A whole-instance run covers every organization, so its
+`error` and its counts are shown to instance administrators only: others read
+`the run could not complete`, and `null` counts.
 
 An organization is `slug`, `name` and `role`: the caller's role, `viewer` for tokens.
 
 ## Caching
 
 Every `200` carries a weak `ETag`. Send it back in `If-None-Match` and the answer is
-`304 Not Modified`, without a body, while the data is unchanged. The response is still computed:
-this saves bandwidth, not server work.
+`304 Not Modified`, without a body, while the data is unchanged. The comparison is the weak one
+of [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110#section-13.1.2): the `W/` prefix is
+ignored on either side, and a list of tags matches when one of them does. The response is still
+computed: this saves bandwidth, not server work.
+
+The same URL answers differently for each caller, so every response of the read API (errors and
+`304` included, and the [VEX export](vex-api.md)) carries `Cache-Control: private, no-cache`
+and `Vary: Cookie, Authorization, X-Api-Key`. Shared caches and proxies must not store it;
+the caller's own cache may, after revalidating.
 
 ## Status codes and errors
 
@@ -190,8 +202,9 @@ Errors are English JSON, `{"error": "…"}`, as on the upload API.
 | --- | --- | --- |
 | `304` | `If-None-Match` matches | |
 | `401` | No token and no session, or a token that is unknown or revoked. The response has a `WWW-Authenticate: Bearer` header | `sign in, or send a token in the Authorization header (Bearer) or in X-Api-Key` |
+| `400` | A path segment that is not valid percent-encoded UTF-8 | A description of the problem |
 | `404` | Missing, or out of the caller's reach | `not found` |
-| `422` | An invalid query parameter | For example `limit must be a number from 1 to 500`, `severity must be a comma-separated list of critical, high, medium, low and unknown`, `q, the name to search for, is required` |
+| `422` | An invalid query parameter | For example `limit must be a number from 1 to 500`, `severity must be a comma-separated list of critical, high, medium, low and unknown`, `q, the name to search for, is required`, `offset is not supported on runs: use limit, up to 100` |
 | `500` | A database error | `internal error` |
 
 ## Stability

@@ -329,12 +329,23 @@ async fn mark_revoked(database: &impl ConnectionTrait, token: upload_tokens::Mod
     Ok(())
 }
 
-/// Finds the active token matching a secret and records its use in `last_used_at`.
+/// How stale `last_used_at` may get before [`authenticate`] writes it again.
+///
+/// The read API authenticates every request: writing each time would turn reads into writes,
+/// which contend for SQLite's single writer lock. The settings page shows the value to the
+/// minute at best, so a minute of imprecision costs nothing.
+const LAST_USED_RESOLUTION: chrono::Duration = chrono::Duration::minutes(1);
+
+/// Finds the active token matching a secret and records its use in `last_used_at`, when the
+/// stored value is a minute old or more (or unset).
 ///
 /// Returns `None` for anything that is not an active token, without saying why, so callers
 /// answer every failure the same way. The lookup is by digest, so it does not compare secrets
 /// in a timing-sensitive way. The token only authenticates the caller: what it may upload to is
 /// checked by [`crate::inventory::ingest`], what it may read by [`crate::access::Reader`].
+///
+/// Failing to record the use does not fail the request: it is bookkeeping, and a busy database
+/// should not turn a valid token away.
 pub async fn authenticate(
     database: &impl ConnectionTrait,
     secret: &str,
@@ -350,7 +361,20 @@ pub async fn authenticate(
     else {
         return Ok(None);
     };
+    let now = Utc::now();
+    let recent = token
+        .last_used_at
+        .is_some_and(|used| now.signed_duration_since(used) < LAST_USED_RESOLUTION);
+    if recent {
+        return Ok(Some(token));
+    }
     let mut active: upload_tokens::ActiveModel = token.clone().into();
-    active.last_used_at = Set(Some(Utc::now().fixed_offset()));
-    Ok(Some(active.update(database).await?))
+    active.last_used_at = Set(Some(now.fixed_offset()));
+    match active.update(database).await {
+        Ok(updated) => Ok(Some(updated)),
+        Err(error) => {
+            tracing::warn!(%error, token = token.id, "cannot record the use of a token");
+            Ok(Some(token))
+        }
+    }
 }
