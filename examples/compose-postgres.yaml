@@ -6,6 +6,9 @@
 # Set NANOBOM_POSTGRES_PASSWORD (in the environment or a `.env` file next to this one) before
 # exposing the instance; it is part of a URL, so keep it to letters, digits and `-._~` or
 # percent-encode it. Back the database up with pg_dump: `nanobom backup` copies SQLite only.
+#
+# The published image is used; without it, or with `--build`, the image is built from this
+# checkout.
 services:
   postgres:
     image: postgres:17-alpine
@@ -24,6 +27,7 @@ services:
 
   nanobom:
     image: ${NANOBOM_IMAGE:-ghcr.io/alixanneraud/nanobom:latest}
+    build: ..
     restart: unless-stopped
     # nanobom migrates the database at startup, so it waits until PostgreSQL accepts connections.
     depends_on:

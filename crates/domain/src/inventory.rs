@@ -381,7 +381,7 @@ pub const MAXIMUM_SEARCH_RESULTS: usize = 200;
 
 /// Finds components by name across the organizations the actor can see: `openssl` matches
 /// names containing it, `openssl 3.` (or `openssl@3.`) also requires the version to start with
-/// `3.`. Names match case-insensitively; `%` and `_` are taken literally.
+/// `3.`. Names and versions match case-insensitively; `%` and `_` are taken literally.
 /// Results are sorted by name then version and capped at [`MAXIMUM_SEARCH_RESULTS`]; an empty
 /// name returns nothing rather than every component.
 pub async fn search(
@@ -413,8 +413,9 @@ pub async fn search(
             (project.id, (organization, project.slug))
         })
         .collect();
-    // Names keep their case in package URLs (Maven, Go), and `LIKE` is case-sensitive on
-    // PostgreSQL, so both sides are compared in lower case.
+    // Names and versions keep their case in package URLs (Maven, Go, `1.0-RC1`), and `LIKE` is
+    // case-sensitive on PostgreSQL (and on SQLite for non-ASCII letters), so both sides are
+    // compared in lower case.
     let mut select = components::Entity::find()
         .filter(components::Column::ProjectId.is_in(projects.keys().copied()))
         .filter(
@@ -424,13 +425,16 @@ pub async fn search(
         );
     if let Some(version) = version.filter(|version| !version.is_empty()) {
         select = select.filter(
-            Expr::col(components::Column::Version)
-                .like(LikeExpr::new(format!("{}%", escape_like(version))).escape('\\')),
+            Expr::expr(Func::lower(Expr::col(components::Column::Version))).like(
+                LikeExpr::new(format!("{}%", escape_like(&version.to_lowercase()))).escape('\\'),
+            ),
         );
     }
     let models = select
         .order_by_asc(components::Column::Name)
         .order_by_asc(components::Column::Version)
+        // The identifier breaks ties, or which rows the limit keeps would be arbitrary.
+        .order_by_asc(components::Column::Id)
         .limit(MAXIMUM_SEARCH_RESULTS as u64)
         .all(database)
         .await?;
