@@ -32,16 +32,31 @@ pub fn start(
         let mut ticks = 0_u32;
         loop {
             ticker.tick().await;
-            if ticks.is_multiple_of(TICKS_PER_PRUNING) {
-                prune(&database).await;
-            }
+            let pruning = ticks.is_multiple_of(TICKS_PER_PRUNING);
             ticks = ticks.wrapping_add(1);
-            match notifier.retry_due(&database, RETRIES_PER_TICK).await {
-                Ok(outcomes) => metrics::record_deliveries(&outcomes),
-                Err(error) => tracing::error!(%error, "retrying webhook deliveries failed"),
+            // In a task of its own, so that a panic ends this tick only and the loop goes on.
+            let (database, notifier) = (database.clone(), notifier.clone());
+            let pass = tokio::spawn(async move { tick(&database, &notifier, pruning).await });
+            match pass.await {
+                Ok(()) => {}
+                Err(error) if error.is_panic() => {
+                    tracing::error!(%error, "retrying webhook deliveries panicked; the loop continues");
+                }
+                Err(error) => tracing::warn!(%error, "retrying webhook deliveries was cancelled"),
             }
         }
     })
+}
+
+/// One pass of the loop: prunes when asked, then attempts the due deliveries.
+async fn tick(database: &DatabaseConnection, notifier: &Notifier, pruning: bool) {
+    if pruning {
+        prune(database).await;
+    }
+    match notifier.retry_due(database, RETRIES_PER_TICK).await {
+        Ok(outcomes) => metrics::record_deliveries(&outcomes),
+        Err(error) => tracing::error!(%error, "retrying webhook deliveries failed"),
+    }
 }
 
 async fn prune(database: &DatabaseConnection) {
