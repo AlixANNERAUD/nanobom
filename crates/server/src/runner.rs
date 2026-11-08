@@ -118,10 +118,7 @@ impl Runner {
     /// Queues a run. A request for a scope that is already waiting is merged with it.
     pub fn request(&self, request: RunRequest) -> bool {
         let mut queue = self.shared.queue.lock().expect("not poisoned");
-        if queue
-            .iter()
-            .any(|queued| queued.request.scope == request.scope)
-        {
+        if merge(&mut queue, request).is_some() {
             return false;
         }
         queue.push_back(Queued {
@@ -147,10 +144,7 @@ impl Runner {
         let (sender, receiver) = oneshot::channel();
         let queued_anew = {
             let mut queue = self.shared.queue.lock().expect("not poisoned");
-            match queue
-                .iter_mut()
-                .find(|queued| queued.request.scope == request.scope)
-            {
+            match merge(&mut queue, request) {
                 Some(queued) => {
                     queued.waiters.push(sender);
                     false
@@ -181,6 +175,20 @@ impl Runner {
             idle.await;
         }
     }
+}
+
+/// Merges a request into a waiting request of the same scope, returned, if there is one. A
+/// scheduled request makes the waiting one scheduled, so that the notifications only scheduled
+/// runs send (stale projects) are not lost to a manual request queued just before.
+fn merge(queue: &mut VecDeque<Queued>, request: RunRequest) -> Option<&mut Queued> {
+    let queued = queue
+        .iter_mut()
+        .find(|queued| queued.request.scope == request.scope)?;
+    if request.trigger == Trigger::Scheduled {
+        queued.request.trigger = Trigger::Scheduled;
+        queued.request.triggered_by = None;
+    }
+    Some(queued)
 }
 
 /// What a waiting upload needs after a run: the run's metric and, when the run succeeded, the

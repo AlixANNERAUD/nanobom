@@ -249,6 +249,85 @@ async fn scheduled_runs_notify_stale_projects_once() {
 }
 
 #[tokio::test]
+async fn a_scheduled_request_merged_into_a_manual_one_still_notifies_stale_projects() {
+    let receiver = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/stale"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&receiver)
+        .await;
+    let server = server(&["--stale-after-days", "30", "--run-after-upload", "false"]).await;
+    let owner = user(&server.database, "owner").await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    notifications::set(
+        &server.database,
+        &owner,
+        organization.id,
+        &format!("{}/stale", receiver.uri()),
+        Severity::Critical,
+        true,
+        true,
+    )
+    .await
+    .unwrap();
+    let stale = projects::create(&server.database, &owner, organization.id, "old", "Old")
+        .await
+        .unwrap();
+    let mut active: nanobom_entity::projects::ActiveModel = stale.into();
+    active.last_upload_at = Set(Some(
+        (Utc::now() - chrono::Duration::days(40)).fixed_offset(),
+    ));
+    active.update(&server.database).await.unwrap();
+    // A project with components, whose run the paused source holds in progress.
+    let token = tokens::create(&server.database, &owner, organization.id, None, "CI")
+        .await
+        .unwrap()
+        .secret;
+    let response = server
+        .send(
+            Request::put("/api/organizations/acme/projects/web/sbom")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::from(sbom_document("cyclonedx-npm.json")))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let web = projects::find(&server.database, &owner, organization.id, "web")
+        .await
+        .unwrap();
+    server.source.pause();
+    server.runner.request(RunRequest {
+        trigger: Trigger::Manual,
+        scope: Scope::Project(web.id),
+        triggered_by: None,
+    });
+    server.source.query_started().await;
+
+    let scheduled = RunRequest {
+        trigger: Trigger::Scheduled,
+        scope: Scope::All,
+        triggered_by: None,
+    };
+    assert!(server.runner.request(RunRequest {
+        trigger: Trigger::Manual,
+        ..scheduled
+    }));
+    assert!(
+        !server.runner.request(scheduled),
+        "merged with the manual request"
+    );
+    server.source.resume();
+    server.runner.wait_until_idle().await;
+    let requests = receiver.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1, "the merged run counts as scheduled");
+    let payload: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(payload["event"], "projects.stale");
+    assert_eq!(payload["projects"][0]["project"], "old");
+}
+
+#[tokio::test]
 async fn duplicate_requests_for_a_waiting_scope_are_merged() {
     let server = server(&[]).await;
     let request = RunRequest {
