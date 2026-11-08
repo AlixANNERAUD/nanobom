@@ -1,11 +1,11 @@
 # Back up, restore and upgrade
 
-Everything lives in the SQLite database (`/data/nanobom.db` in the image): users and password
-hashes, organizations, upload token digests, inventories, findings and their history, sessions,
-and the cached OSV and exploitation data. Back up that file and nothing else; treat the backups
-as sensitive.
+Everything lives in the database, the SQLite file (`/data/nanobom.db` in the image) or the
+PostgreSQL database: users and password hashes, organizations, upload token digests,
+inventories, findings and their history, sessions, and the cached OSV and exploitation data.
+Back up the database and nothing else; treat the backups as sensitive.
 
-## Take a backup
+## Take a backup of SQLite
 
 Do not copy the database file of a running instance with `cp`: nanobom uses SQLite's
 write-ahead log, so recent changes may still be in `nanobom.db-wal` and the copy can be
@@ -39,7 +39,7 @@ nanobom backup "/var/backups/nanobom/nanobom-$(date +%F).db"
 A backup is an ordinary SQLite database, so it can be checked with
 `sqlite3 nanobom-2026-11-08.db 'PRAGMA integrity_check'`.
 
-## Restore a backup
+## Restore a SQLite backup
 
 1. Stop nanobom.
 2. Replace the database with the backup, and delete the `-wal` and `-shm` files next to it, which
@@ -62,10 +62,42 @@ Sessions are in the database too, so users signed in after the backup was taken 
 again; uploads and runs since then are lost and come back with the next uploads and the next
 nightly run.
 
+## Back up and restore PostgreSQL
+
+`nanobom backup` copies SQLite databases only; on PostgreSQL it stops with a message pointing to
+`pg_dump`. `pg_dump` writes a consistent snapshot of the live database without stopping nanobom;
+the custom format (`--format=custom`) is compressed and restored with `pg_restore`. Use a
+`pg_dump` at least as recent as the server. With
+[`examples/compose-postgres.yaml`](postgresql.md#with-docker-compose), from cron on the host:
+
+```sh
+docker compose -f examples/compose-postgres.yaml exec -T postgres \
+  pg_dump --username nanobom --format=custom nanobom > "backups/nanobom-$(date +%F).dump"
+```
+
+Against another server, `pg_dump --format=custom --file nanobom.dump "$NANOBOM_DATABASE_URL"`
+does the same (`pg_dump` reads the URL, `sslmode` included). A managed database's own snapshots
+work too.
+
+To restore:
+
+1. Stop nanobom.
+2. Restore the dump over the database, replacing its objects:
+
+   ```sh
+   docker compose -f examples/compose-postgres.yaml exec -T postgres \
+     pg_restore --username nanobom --dbname nanobom --clean --if-exists --no-owner \
+     < backups/nanobom-2026-11-08.dump
+   ```
+
+3. Start nanobom. If the dump comes from an older version, its migrations run at startup.
+
+As with SQLite, sessions, uploads and runs since the dump are lost.
+
 ## Upgrade
 
-Take a backup first: migrations only go forward, so going back to an older version means
-restoring it. Then:
+Take a backup first (`nanobom backup` or `pg_dump`): migrations only go forward, so going back
+to an older version means restoring it. Then:
 
 ```sh
 docker compose pull && docker compose up -d --wait

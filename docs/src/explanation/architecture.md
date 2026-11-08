@@ -1,8 +1,8 @@
 # Architecture
 
-nanobom is one process and one SQLite file. There is no worker to scale, no cache to warm and no
-queue to drain: running it well comes down to a reverse proxy in front, a backup of the file,
-and a few alerts.
+nanobom is one process and one database, a SQLite file by default or PostgreSQL. There is no
+worker to scale, no cache to warm and no queue to drain: running it well comes down to a reverse
+proxy in front, a backup of the database, and a few alerts.
 
 It is a Rust workspace. The web interface is written with [Leptos](https://leptos.dev), rendered
 on the server, and works without JavaScript; a small WebAssembly bundle adds interactivity where
@@ -33,7 +33,7 @@ the browser runs it.
   Prometheus ──────►│ /metrics, /healthz                                                 │
                     └─────────────────────────────────────┬─────────────────────────────┘
                                                           │
-                                           SQLite (SeaORM entities, migrations)
+                                SQLite or PostgreSQL (SeaORM entities, migrations)
 ```
 
 ## The run pipeline
@@ -73,6 +73,37 @@ database would each run the schedule and send every webhook twice: one instance 
 process. The startup also assumes it: it closes every run still `running` in the database as
 interrupted, so a rolling deploy that starts a new instance while the old one is still running a
 check would record the old instance's live run as failed.
+
+## SQLite or PostgreSQL
+
+Both hold the same schema and run the same code, and the test suite runs on both. The choice is
+about operations, not features.
+
+SQLite is the default because it needs nothing: the database is a file next to the process, it
+is created on the first start, and `nanobom backup` copies it while nanobom runs. One nanobom
+process is the only writer anyway, and its load (bursts after uploads and at night) is far from
+what a single SQLite file handles. Pick it unless something below applies.
+
+PostgreSQL fits when the database should live outside the nanobom host:
+
+- **You already run PostgreSQL**, with its monitoring, its backups (`pg_dump`, continuous
+  archiving, point-in-time recovery) and the people who look after them, and want nanobom's data
+  covered by the same routine instead of a file with its own backup job.
+- **A managed database** (from a cloud provider or a platform team) takes backups, replication
+  and upgrades off your hands, and lets the nanobom container stay stateless, which suits
+  platforms where containers have no durable volume.
+- **A shared database server** gathers the data of several services in one place, with access
+  control, encryption in transit and auditing set once.
+
+PostgreSQL does not make nanobom scale out: there is still
+[one process per database](#one-process-per-database). It adds a server to run (or pay for), a
+network hop, and a password to keep. nanobom has no tool to move data between the two, so choose
+at installation; see [Run on PostgreSQL](../how-to/postgresql.md).
+
+On SQLite, timestamps are stored as text and compared as text, which is correct because nanobom
+writes every timestamp in UTC; PostgreSQL stores them as `timestamp with time zone`. Queries
+whose result order matters state it (`ORDER BY`), since PostgreSQL, unlike SQLite, returns rows
+in no particular order otherwise.
 
 ## Resources
 

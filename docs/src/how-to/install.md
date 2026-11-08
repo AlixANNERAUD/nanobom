@@ -2,7 +2,8 @@
 
 nanobom listens on port 8080 and keeps everything in one SQLite file. Install it with Docker
 Compose, `docker run`, or from a release archive, then create the first administrator. Every
-setting is listed in the [configuration reference](../reference/configuration.md).
+setting is listed in the [configuration reference](../reference/configuration.md). To keep the
+data in PostgreSQL instead, see [Run on PostgreSQL](postgresql.md).
 
 ## With Docker Compose
 

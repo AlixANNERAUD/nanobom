@@ -5,7 +5,8 @@ uploads a [CycloneDX](https://cyclonedx.org) SBOM (software bill of materials) o
 nanobom checks every component against [OSV](https://osv.dev) right after the upload and again
 every night, keeps the history of what it found, and tells you when something new appears.
 
-It is one binary and one SQLite file: no queue, no cache server, no scanner to keep up to date.
+It is one binary and one SQLite file (or a PostgreSQL database): no queue, no cache server, no
+scanner to keep up to date.
 The container image is about 20 MB.
 
 ## What it does

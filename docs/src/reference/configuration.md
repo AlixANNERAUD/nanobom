@@ -14,9 +14,26 @@ invalid one, which stops nanobom at startup.
 
 | Variable | Flag | Default | |
 | --- | --- | --- | --- |
-| `NANOBOM_DATABASE_URL` | `--database-url` | `sqlite:///data/nanobom.db` | The SQLite database, created if missing. `sqlite:///absolute/path.db` (three slashes before an absolute path) or `sqlite://relative/path.db`. |
+| `NANOBOM_DATABASE_URL` | `--database-url` | `sqlite:///data/nanobom.db` | The database. SQLite: `sqlite:///absolute/path.db` (three slashes before an absolute path) or `sqlite://relative/path.db`, created if missing. PostgreSQL: `postgres://user:password@host:port/database`, an existing database (see below). |
 | `NANOBOM_LOG_FORMAT` | `--log-format` | `json` | `json` (one object per line, for collectors) or `text`. |
 | `NANOBOM_LOG_LEVEL` | `--log-level` | `info` | A [`tracing` filter](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html), such as `info,nanobom=debug`. |
+
+### PostgreSQL URLs
+
+`postgres://user:password@host:port/database?parameter=value&…` (`postgresql://` works too). The
+port defaults to 5432. Characters of the user or password outside letters, digits and `-._~` are
+percent-encoded (`@` is `%40`). The database must exist; nanobom creates its tables at startup,
+so the role needs to own the database or to be allowed to create tables in its `public` schema.
+nanobom opens at most 8 connections.
+
+| Parameter | |
+| --- | --- |
+| `sslmode` | `disable`, `prefer` (the default: TLS when the server offers it, without checking the certificate), `require` (TLS, certificate not checked), `verify-ca` (certificate checked against the trusted authorities) or `verify-full` (also checks that it names the host). Without `sslrootcert`, the trusted authorities are the public ones of [webpki-roots](https://github.com/rustls/webpki-roots). |
+| `sslrootcert` | A PEM file of the authorities to trust instead, such as a managed database's CA bundle. |
+| `sslcert`, `sslkey` | A client certificate and its key, for servers that require one. |
+| `application_name` | The name shown in `pg_stat_activity`. |
+
+See [Run on PostgreSQL](../how-to/postgresql.md).
 
 ## Addresses and files
 
