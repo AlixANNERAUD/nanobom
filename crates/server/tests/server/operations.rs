@@ -5,13 +5,14 @@ use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
-use nanobom::runner::RunRequest;
+use nanobom::{healthcheck, runner::RunRequest};
 use nanobom_domain::{
     evaluation::{Scope, Trigger},
     findings::{self, Filter},
     organizations, projects, tokens,
 };
 use serde_json::json;
+use std::time::Duration;
 use wiremock::{
     Mock, MockServer, ResponseTemplate,
     matchers::{method, path},
@@ -135,4 +136,71 @@ async fn health_and_metrics_are_served() {
     ] {
         assert!(text.contains(name), "{name} is missing from:\n{text}");
     }
+}
+
+#[tokio::test]
+async fn the_healthcheck_command_asks_a_running_server() {
+    let server = server(&[]).await;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let router = server.router.clone();
+    tokio::spawn(async move {
+        axum::serve(
+            listener,
+            router.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+        )
+        .await
+    });
+    let url = healthcheck::local_url(address).unwrap();
+    healthcheck::check(&url, Duration::from_secs(5))
+        .await
+        .expect("the server is healthy");
+
+    let unhealthy = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/healthz"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&unhealthy)
+        .await;
+    let url = format!("{}/healthz", unhealthy.uri()).parse().unwrap();
+    assert!(
+        healthcheck::check(&url, Duration::from_secs(5))
+            .await
+            .is_err()
+    );
+}
+
+#[test]
+fn the_healthcheck_reaches_servers_listening_everywhere_over_loopback() {
+    let url = |address: &str| {
+        healthcheck::local_url(address.parse().unwrap())
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(url("0.0.0.0:8080"), "http://127.0.0.1:8080/healthz");
+    assert_eq!(url("[::]:9000"), "http://[::1]:9000/healthz");
+    assert_eq!(url("192.0.2.7:8080"), "http://192.0.2.7:8080/healthz");
+}
+
+#[tokio::test]
+async fn responses_carry_security_headers_and_are_compressed() {
+    let server = server(&[]).await;
+    let response = server
+        .send(
+            Request::get("/login")
+                .header(header::ACCEPT_ENCODING, "gzip")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let headers = response.headers();
+    assert_eq!(headers[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
+    assert_eq!(headers[header::X_FRAME_OPTIONS], "DENY");
+    assert_eq!(headers[header::REFERRER_POLICY], "same-origin");
+    assert_eq!(
+        headers[header::CONTENT_SECURITY_POLICY],
+        "frame-ancestors 'none'"
+    );
+    assert_eq!(headers[header::CONTENT_ENCODING], "gzip");
 }

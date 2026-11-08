@@ -62,6 +62,25 @@ pub enum Command {
     /// Manage upload tokens.
     #[command(subcommand)]
     Token(TokenCommand),
+    /// Exit successfully when the running server reports itself healthy; for container health
+    /// checks. Does not open the database.
+    Healthcheck(HealthcheckOptions),
+}
+
+#[derive(Debug, Args)]
+pub struct HealthcheckOptions {
+    /// The server's listen address; its health endpoint is reached over loopback when it
+    /// listens on every interface.
+    #[arg(long, env = "NANOBOM_LISTEN_ADDRESS", default_value = "0.0.0.0:8080")]
+    pub listen_address: SocketAddr,
+
+    /// Health endpoint to check instead of the one derived from the listen address.
+    #[arg(long, env = "NANOBOM_HEALTHCHECK_URL")]
+    pub url: Option<reqwest::Url>,
+
+    /// Seconds to wait for an answer.
+    #[arg(long, default_value_t = 5)]
+    pub timeout_seconds: u64,
 }
 
 #[derive(Debug, Clone, Args)]

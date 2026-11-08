@@ -18,7 +18,7 @@ use sea_orm::DatabaseConnection;
 use crate::{
     api, authentication,
     command_line::ServeOptions,
-    metrics, operations,
+    http, metrics, operations,
     runner::{self, NotificationSettings, RunRequest, Runner},
     state::AppState,
 };
@@ -77,11 +77,13 @@ pub fn router(state: AppState) -> Router {
             move || provide_context(fallback_context.clone()), shell
         ));
     let interface = authentication::layer(interface, &state);
-    Router::new()
-        .merge(api::router(&state))
-        .merge(operations::router())
-        .merge(interface)
-        .with_state(state)
+    http::layers(
+        Router::new()
+            .merge(api::router(&state))
+            .merge(operations::router())
+            .merge(interface)
+            .with_state(state),
+    )
 }
 
 pub async fn run(
