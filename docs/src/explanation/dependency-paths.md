@@ -73,9 +73,10 @@ in it is in the SBOM: nanobom shows no path rather than a guess.
   rather than bridged, so a path never skips a component: a component reached only through one
   is not linked to the project. When the graph enters and leaves such a component, the finding's
   page adds that some links could not be followed, and other paths may exist.
-- **References shared by several packages.** A `bom-ref` is meant to be unique. When two
-  components with different package URLs carry the same one, nanobom cannot tell which one an
-  edge means, so it drops every edge that names it, and says so like above.
+- **References shared by several packages.** A `bom-ref` (an `SPDXID` in SPDX) is meant to be
+  unique. When two components with different package URLs carry the same one, nanobom cannot
+  tell which one an edge means, so it drops every edge that names it, and says so like above.
+  The note is the same for both formats and is stored with each upload.
 - **Copies of a package.** Paths are between packages, identified by package URL, not between
   installed copies of them. Components with the same package URL are stored once, with the
   edges of all their copies: if two nested copies of `foo 1.0.0` in an npm tree resolve `dep` to

@@ -15,7 +15,7 @@ use nanobom_domain::{
     tokens,
     users::{self, NewUser},
 };
-use nanobom_entity::component_dependencies;
+use nanobom_entity::{component_dependencies, projects};
 use nanobom_osv::Severity;
 use sea_orm::{DatabaseConnection, EntityTrait, PaginatorTrait};
 use serde_json::json;
@@ -492,6 +492,16 @@ impl Fixture {
             .unwrap()
     }
 
+    /// The flag stored on the project by its latest upload.
+    async fn partial(&self, project: i64) -> bool {
+        projects::Entity::find_by_id(project)
+            .one(&self.database)
+            .await
+            .unwrap()
+            .unwrap()
+            .dependencies_partial
+    }
+
     async fn edge_count(&self) -> u64 {
         component_dependencies::Entity::find()
             .count(&self.database)
@@ -584,6 +594,59 @@ async fn spdx_uploads_store_the_graph_and_their_version() {
     assert_eq!(uploads[0].specification_version, "SPDX-2.3");
     assert_eq!(uploads[0].component_count, 4);
     assert_eq!(uploads[0].components_without_purl, 1);
+}
+
+#[tokio::test]
+async fn spdx_uploads_store_whether_links_were_lost() {
+    let fixture = Fixture::new().await;
+
+    // The graph goes through `vendored`, which has no package URL.
+    let project = fixture.upload(parse(&shop_spdx())).await;
+    assert!(fixture.partial(project).await);
+    assert!(
+        fixture.paths(project, LODASH).await.unwrap().partial,
+        "the paths carry the stored flag"
+    );
+
+    // Syft: every package has a package URL, nothing is lost. The flag is replaced, not kept.
+    let sbom = inventory::parse(&sbom_document("syft-cargo-spdx-2.2.json")).unwrap();
+    fixture.upload(sbom).await;
+    assert!(!fixture.partial(project).await);
+
+    // Trivy: the lock file's entry has no package URL and the graph goes through it.
+    let sbom = inventory::parse(&sbom_document("trivy-npm-spdx.json")).unwrap();
+    fixture.upload(sbom).await;
+    assert!(fixture.partial(project).await);
+
+    // An identifier given to two packages: no edge goes through it.
+    let package = |id: &str, purl: &str| {
+        json!({"SPDXID": id, "name": id, "versionInfo": "1.0.0",
+            "externalRefs": [{"referenceCategory": "PACKAGE-MANAGER",
+                "referenceType": "purl", "referenceLocator": purl}]})
+    };
+    let depends = |from: &str, to: &str| json!({"spdxElementId": from, "relationshipType": "DEPENDS_ON", "relatedSpdxElement": to});
+    let document = json!({
+        "spdxVersion": "SPDX-2.3",
+        "SPDXID": "SPDXRef-DOCUMENT",
+        "packages": [
+            package("SPDXRef-framework", FRAMEWORK),
+            package("SPDXRef-same", ENGINE),
+            package("SPDXRef-same", LEFT_PAD),
+            package("SPDXRef-lodash", LODASH),
+        ],
+        "relationships": [
+            depends("SPDXRef-framework", "SPDXRef-same"),
+            depends("SPDXRef-same", "SPDXRef-lodash"),
+        ]
+    });
+    fixture.upload(parse(&document)).await;
+    assert!(fixture.partial(project).await);
+
+    // Once the identifiers are distinct, the flag goes.
+    let mut document = document;
+    document["packages"][2]["SPDXID"] = json!("SPDXRef-other");
+    fixture.upload(parse(&document)).await;
+    assert!(!fixture.partial(project).await);
 }
 
 #[tokio::test]
