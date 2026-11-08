@@ -1,0 +1,47 @@
+# Weekly dependency updates. Titles follow Conventional Commits (`build(deps): …`,
+# `ci(deps): …`) so they pass the pull request title check and land in the changelog's
+# Miscellaneous section. Tools pinned in mise.toml (Rust, cargo-leptos, wasm-bindgen, …) are
+# not covered: Dependabot does not read mise configuration.
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      # Leptos crates must move together (and with cargo-leptos and wasm-bindgen in mise.toml).
+      leptos:
+        patterns: ["leptos*", "server_fn*"]
+      sea-orm:
+        patterns: ["sea-orm*", "sea-query*"]
+      minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # wasm-bindgen must match the CLI pinned in mise.toml; update both by hand.
+      - dependency-name: wasm-bindgen
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: build
+      include: scope
