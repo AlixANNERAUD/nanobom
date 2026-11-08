@@ -46,9 +46,9 @@ jobs:
     name: Format, clippy and tests
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: actions/checkout@v7.0.1
+      - uses: jdx/mise-action@v5.2.7
+      - uses: Swatinem/rust-cache@v2.9.3
       - run: mise run lint
       - run: mise run test
 
@@ -56,13 +56,10 @@ jobs:
     if: github.event.action != 'edited'
     name: Coverage
     runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      id-token: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: actions/checkout@v7.0.1
+      - uses: jdx/mise-action@v5.2.7
+      - uses: Swatinem/rust-cache@v2.9.3
         with:
           key: coverage
       - run: mise run coverage
@@ -74,10 +71,10 @@ jobs:
             mise exec -- cargo llvm-cov report --summary-only $NANOBOM_SERVER_PACKAGES | tail -1
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-      # Authenticated with GitHub's OIDC token: no Codecov secret to store.
-      - uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+      # Pull requests from forks get no secrets; Codecov accepts their uploads without a token.
+      - uses: codecov/codecov-action@v7.1.1
         with:
-          use_oidc: true
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: lcov.info
           disable_search: true
           fail_ci_if_error: true
@@ -87,8 +84,8 @@ jobs:
     name: Advisories and licences
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+      - uses: actions/checkout@v7.0.1
+      - uses: jdx/mise-action@v5.2.7
       - run: mise run deny
 
   release-build:
@@ -96,9 +93,9 @@ jobs:
     name: Release build
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
-      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+      - uses: actions/checkout@v7.0.1
+      - uses: jdx/mise-action@v5.2.7
+      - uses: Swatinem/rust-cache@v2.9.3
         with:
           key: release
       - run: mise run build
@@ -119,9 +116,9 @@ jobs:
           - architecture: arm64
             runner: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      - uses: actions/checkout@v7.0.1
+      - uses: docker/setup-buildx-action@v4.4.1
+      - uses: docker/build-push-action@v7.4.0
         with:
           context: .
           load: true
