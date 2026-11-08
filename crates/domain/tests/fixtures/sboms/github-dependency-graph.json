@@ -1,0 +1,1565 @@
+{
+  "spdxVersion": "SPDX-2.3",
+  "dataLicense": "CC0-1.0",
+  "SPDXID": "SPDXRef-DOCUMENT",
+  "name": "com.github.sharkdp/hexyl",
+  "documentNamespace": "https://spdx.org/spdxdocs/protobom/af65c7ca-e4f5-42b3-88e7-ecad7e428cf4",
+  "creationInfo": {
+    "creators": [
+      "Tool: protobom-v0.0.0-20261106155048-7c0962b61355+dirty",
+      "Tool: GitHub.com-Dependency-Graph"
+    ],
+    "created": "2026-11-08T19:56:17Z"
+  },
+  "packages": [
+    {
+      "name": "windows_aarch64_gnullvm",
+      "SPDXID": "SPDXRef-cargo-windowsaarch64gnullvm-0.52.6-67059c",
+      "versionInfo": "0.52.6",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) Microsoft Corporation",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/windows_aarch64_gnullvm@0.52.6"
+        }
+      ]
+    },
+    {
+      "name": "windows_x86_64_gnu",
+      "SPDXID": "SPDXRef-cargo-windowsx8664gnu-0.52.6-b24009",
+      "versionInfo": "0.52.6",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) Microsoft Corporation",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/windows_x86_64_gnu@0.52.6"
+        }
+      ]
+    },
+    {
+      "name": "windows-sys",
+      "SPDXID": "SPDXRef-cargo-windows-sys-0.59.0-5cac0c",
+      "versionInfo": "0.59.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) Microsoft Corporation",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/windows-sys@0.59.0"
+        }
+      ]
+    },
+    {
+      "name": "const_format_proc_macros",
+      "SPDXID": "SPDXRef-cargo-constformatprocmacros-0.2.33-08b2cc",
+      "versionInfo": "0.2.33",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Zlib",
+      "copyrightText": "Copyright (c) 2020 Matias Rodriguez",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/const_format_proc_macros@0.2.33"
+        }
+      ]
+    },
+    {
+      "name": "clap_derive",
+      "SPDXID": "SPDXRef-cargo-clapderive-4.5.18-8eba6a",
+      "versionInfo": "4.5.18",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) 2015-2022 Kevin B. Knapp and Clap Contributors, Copyright 2018 Guillaume Pinot, Copyright 2018 Guillaume Pinot (@TeXitoi) <texitoi@texitoi.eu> , Kevin Knapp",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/clap_derive@4.5.18"
+        }
+      ]
+    },
+    {
+      "name": "colorchoice",
+      "SPDXID": "SPDXRef-cargo-colorchoice-1.0.3-002c81",
+      "versionInfo": "1.0.3",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) Individual contributors",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/colorchoice@1.0.3"
+        }
+      ]
+    },
+    {
+      "name": "windows-sys",
+      "SPDXID": "SPDXRef-cargo-windows-sys-0.52.0-964530",
+      "versionInfo": "0.52.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) Microsoft Corporation",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/windows-sys@0.52.0"
+        }
+      ]
+    },
+    {
+      "name": "pretty_assertions",
+      "SPDXID": "SPDXRef-cargo-prettyassertions-1.4.1-00dfa0",
+      "versionInfo": "1.4.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) 2016 rust-derive-builder contributors",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/pretty_assertions@1.4.1"
+        }
+      ]
+    },
+    {
+      "name": "assert_cmd",
+      "SPDXID": "SPDXRef-cargo-assertcmd-2.1.2-52337d",
+      "versionInfo": "2.1.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/assert_cmd@2.1.2"
+        }
+      ]
+    },
+    {
+      "name": "predicates-tree",
+      "SPDXID": "SPDXRef-cargo-predicates-tree-1.0.11-b3d1a6",
+      "versionInfo": "1.0.11",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) 2018 The predicates-rs Project, Copyright (c) Individual contributors",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/predicates-tree@1.0.11"
+        }
+      ]
+    },
+    {
+      "name": "quote",
+      "SPDXID": "SPDXRef-cargo-quote-1.0.37-10b0f6",
+      "versionInfo": "1.0.37",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/quote@1.0.37"
+        }
+      ]
+    },
+    {
+      "name": "unicode-xid",
+      "SPDXID": "SPDXRef-cargo-unicode-xid-0.2.6-683b2e",
+      "versionInfo": "0.2.6",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) 2015 The Rust Project, Copyright (c) 2015 The Rust Project Developers, Copyright 2012-2024 The Rust Project, Copyright 2012-2024 The Rust Project Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/unicode-xid@0.2.6"
+        }
+      ]
+    },
+    {
+      "name": "windows_aarch64_msvc",
+      "SPDXID": "SPDXRef-cargo-windowsaarch64msvc-0.52.6-3ce1d3",
+      "versionInfo": "0.52.6",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) Microsoft Corporation",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/windows_aarch64_msvc@0.52.6"
+        }
+      ]
+    },
+    {
+      "name": "windows_i686_gnu",
+      "SPDXID": "SPDXRef-cargo-windowsi686gnu-0.52.6-60ea4d",
+      "versionInfo": "0.52.6",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) Microsoft Corporation",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/windows_i686_gnu@0.52.6"
+        }
+      ]
+    },
+    {
+      "name": "windows_i686_msvc",
+      "SPDXID": "SPDXRef-cargo-windowsi686msvc-0.52.6-3ef083",
+      "versionInfo": "0.52.6",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) Microsoft Corporation",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/windows_i686_msvc@0.52.6"
+        }
+      ]
+    },
+    {
+      "name": "normalize-line-endings",
+      "SPDXID": "SPDXRef-cargo-normalize-line-endings-0.3.0-c5bbfb",
+      "versionInfo": "0.3.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/normalize-line-endings@0.3.0"
+        }
+      ]
+    },
+    {
+      "name": "windows_i686_gnullvm",
+      "SPDXID": "SPDXRef-cargo-windowsi686gnullvm-0.52.6-20817d",
+      "versionInfo": "0.52.6",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) Microsoft Corporation",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/windows_i686_gnullvm@0.52.6"
+        }
+      ]
+    },
+    {
+      "name": "regex-syntax",
+      "SPDXID": "SPDXRef-cargo-regex-syntax-0.8.5-f83308",
+      "versionInfo": "0.8.5",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "(c) 83, (c) 83, // a, Copyright (c) 1991-2018 Unicode, Inc., Copyright (c) 2014 The Rust Project, Copyright (c) 2014 The Rust Project Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/regex-syntax@0.8.5"
+        }
+      ]
+    },
+    {
+      "name": "errno",
+      "SPDXID": "SPDXRef-cargo-errno-0.3.9-438eee",
+      "versionInfo": "0.3.9",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) 2014 Chris Wong, Copyright 2014 The Rust Project, Copyright 2014 The Rust Project Developers, Copyright 2015 The Rust Project, Copyright 2015 The Rust Project Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/errno@0.3.9"
+        }
+      ]
+    },
+    {
+      "name": "bstr",
+      "SPDXID": "SPDXRef-cargo-bstr-1.10.0-51f41a",
+      "versionInfo": "1.10.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "(c) 2021 Unicode(r), Inc., Copyright (c) 1991-2019 Unicode, Inc., Copyright (c) 2018-2019 Andrew Gallant",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/bstr@1.10.0"
+        }
+      ]
+    },
+    {
+      "name": "anyhow",
+      "SPDXID": "SPDXRef-cargo-anyhow-1.0.91-ee1c57",
+      "versionInfo": "1.0.91",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/anyhow@1.0.91"
+        }
+      ]
+    },
+    {
+      "name": "anstyle",
+      "SPDXID": "SPDXRef-cargo-anstyle-1.0.9-1f6988",
+      "versionInfo": "1.0.9",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) 2022 The rust-cli, Copyright (c) 2022 The rust-cli Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/anstyle@1.0.9"
+        }
+      ]
+    },
+    {
+      "name": "strsim",
+      "SPDXID": "SPDXRef-cargo-strsim-0.11.1-0ef770",
+      "versionInfo": "0.11.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "copyrightText": "Copyright (c) 2015 Danny Guo, Copyright (c) 2016 Titus Wormer <tituswormer@gmail.com>, Copyright (c) 2018 Akash Kurdekar",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/strsim@0.11.1"
+        }
+      ]
+    },
+    {
+      "name": "owo-colors",
+      "SPDXID": "SPDXRef-cargo-owo-colors-4.1.0-4fc013",
+      "versionInfo": "4.1.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "copyrightText": "Copyright (c) 2020 - present The owo-colors",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/owo-colors@4.1.0"
+        }
+      ]
+    },
+    {
+      "name": "terminal_size",
+      "SPDXID": "SPDXRef-cargo-terminalsize-0.4.0-b9b08a",
+      "versionInfo": "0.4.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) 2015 The terminal-size, Copyright (c) 2015 The terminal-size Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/terminal_size@0.4.0"
+        }
+      ]
+    },
+    {
+      "name": "serde_derive",
+      "SPDXID": "SPDXRef-cargo-serdederive-1.0.214-876124",
+      "versionInfo": "1.0.214",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/serde_derive@1.0.214"
+        }
+      ]
+    },
+    {
+      "name": "clap_complete",
+      "SPDXID": "SPDXRef-cargo-clapcomplete-4.5.55-a544f4",
+      "versionInfo": "4.5.55",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) Individual contributors, Copyright 2015-2018 Kevin B. Knapp",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/clap_complete@4.5.55"
+        }
+      ]
+    },
+    {
+      "name": "syn",
+      "SPDXID": "SPDXRef-cargo-syn-2.0.85-2ae613",
+      "versionInfo": "2.0.85",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/syn@2.0.85"
+        }
+      ]
+    },
+    {
+      "name": "num-traits",
+      "SPDXID": "SPDXRef-cargo-num-traits-0.2.19-ac3a43",
+      "versionInfo": "0.2.19",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) 2014 The Rust Project, Copyright (c) 2014 The Rust Project Developers, Copyright 2013-2014 The Rust Project, Copyright 2013-2014 The Rust Project Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/num-traits@0.2.19"
+        }
+      ]
+    },
+    {
+      "name": "unicode-ident",
+      "SPDXID": "SPDXRef-cargo-unicode-ident-1.0.13-20d38a",
+      "versionInfo": "1.0.13",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "(MIT OR Apache-2.0) AND Unicode-DFS-2016",
+      "copyrightText": "Copyright (c) 1991-2022 Unicode, Inc.",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/unicode-ident@1.0.13"
+        }
+      ]
+    },
+    {
+      "name": "predicates-core",
+      "SPDXID": "SPDXRef-cargo-predicates-core-1.0.8-a24f1f",
+      "versionInfo": "1.0.8",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) 2018 The predicates-rs Project, Copyright (c) Individual contributors",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/predicates-core@1.0.8"
+        }
+      ]
+    },
+    {
+      "name": "clap_builder",
+      "SPDXID": "SPDXRef-cargo-clapbuilder-4.5.20-e85aa0",
+      "versionInfo": "4.5.20",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "(c) me@mail.com, Copyright (c) 2015 The Rust Project, Copyright (c) 2015 The Rust Project Developers, Copyright (c) 2015-2022 Kevin B. Knapp and Clap Contributors, Copyright 2015-2016 Kevin B. Knapp and clap-rs contributors (https://github.com/clap-rs/clap/graphs/contributors)",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/clap_builder@4.5.20"
+        }
+      ]
+    },
+    {
+      "name": "anstyle-wincon",
+      "SPDXID": "SPDXRef-cargo-anstyle-wincon-3.0.6-5e5016",
+      "versionInfo": "3.0.6",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) 2015 Josh Triplett, 2022, Copyright (c) 2015 Josh Triplett, 2022 The rust-cli Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/anstyle-wincon@3.0.6"
+        }
+      ]
+    },
+    {
+      "name": "serde",
+      "SPDXID": "SPDXRef-cargo-serde-1.0.214-399c43",
+      "versionInfo": "1.0.214",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "(c), None Ok",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/serde@1.0.214"
+        }
+      ]
+    },
+    {
+      "name": "bitflags",
+      "SPDXID": "SPDXRef-cargo-bitflags-2.6.0-fb47d5",
+      "versionInfo": "2.6.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) 2014 The Rust Project, Copyright (c) 2014 The Rust Project Developers, Copyright 2014 The Rust Project, Copyright 2014 The Rust Project Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/bitflags@2.6.0"
+        }
+      ]
+    },
+    {
+      "name": "is_terminal_polyfill",
+      "SPDXID": "SPDXRef-cargo-isterminalpolyfill-1.70.1-05ad33",
+      "versionInfo": "1.70.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) Individual contributors",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/is_terminal_polyfill@1.70.1"
+        }
+      ]
+    },
+    {
+      "name": "const_format",
+      "SPDXID": "SPDXRef-cargo-constformat-0.2.33-9e5598",
+      "versionInfo": "0.2.33",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Zlib",
+      "copyrightText": "Copyright (c) 2020 Matias Rodriguez",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/const_format@0.2.33"
+        }
+      ]
+    },
+    {
+      "name": "heck",
+      "SPDXID": "SPDXRef-cargo-heck-0.5.0-0ddf38",
+      "versionInfo": "0.5.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) 2015 The Rust Project, Copyright (c) 2015 The Rust Project Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/heck@0.5.0"
+        }
+      ]
+    },
+    {
+      "name": "autocfg",
+      "SPDXID": "SPDXRef-cargo-autocfg-1.4.0-d7c9c8",
+      "versionInfo": "1.4.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "Copyright (c) 2018 Josh Stone",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/autocfg@1.4.0"
+        }
+      ]
+    },
+    {
+      "name": "libc",
+      "SPDXID": "SPDXRef-cargo-libc-0.2.161-6ec427",
+      "versionInfo": "0.2.161",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) 2014-2020 The Rust Project, Copyright (c) 2014-2020 The Rust Project Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/libc@0.2.161"
+        }
+      ]
+    },
+    {
+      "name": "float-cmp",
+      "SPDXID": "SPDXRef-cargo-float-cmp-0.9.0-cf500c",
+      "versionInfo": "0.9.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "copyrightText": "Copyright (c) 2014-2020 Optimal Computing (NZ) Ltd, Copyright 2014-2020 Optimal Computing (NZ) Ltd.",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/float-cmp@0.9.0"
+        }
+      ]
+    },
+    {
+      "name": "is_ci",
+      "SPDXID": "SPDXRef-cargo-isci-1.2.0-6821f1",
+      "versionInfo": "1.2.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "ISC",
+      "copyrightText": "Copyright (c) Kat Marchan and other contributors",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/is_ci@1.2.0"
+        }
+      ]
+    },
+    {
+      "name": "utf8parse",
+      "SPDXID": "SPDXRef-cargo-utf8parse-0.2.2-cb86e6",
+      "versionInfo": "0.2.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 OR MIT",
+      "copyrightText": "Copyright (c) 2016 Joe Wilm",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/utf8parse@0.2.2"
+        }
+      ]
+    },
+    {
+      "name": "clap",
+      "SPDXID": "SPDXRef-cargo-clap-4.5.20-db995e",
+      "versionInfo": "4.5.20",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) Individual contributors, Copyright 2015-2016 Kevin B. Knapp and clap-rs contributors (https://github.com/clap-rs/clap/graphs/contributors)",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/clap@4.5.20"
+        }
+      ]
+    },
+    {
+      "name": "wait-timeout",
+      "SPDXID": "SPDXRef-cargo-wait-timeout-0.2.0-cdecc8",
+      "versionInfo": "0.2.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) 2014 Alex Crichton",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/wait-timeout@0.2.0"
+        }
+      ]
+    },
+    {
+      "name": "regex-automata",
+      "SPDXID": "SPDXRef-cargo-regex-automata-0.4.8-d1beb2",
+      "versionInfo": "0.4.8",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) 2014 The Rust Project, Copyright (c) 2014 The Rust Project Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/regex-automata@0.4.8"
+        }
+      ]
+    },
+    {
+      "name": "proc-macro2",
+      "SPDXID": "SPDXRef-cargo-proc-macro2-1.0.89-26a4f8",
+      "versionInfo": "1.0.89",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/proc-macro2@1.0.89"
+        }
+      ]
+    },
+    {
+      "name": "anstyle-query",
+      "SPDXID": "SPDXRef-cargo-anstyle-query-1.1.2-e50272",
+      "versionInfo": "1.1.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) Individual contributors",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/anstyle-query@1.1.2"
+        }
+      ]
+    },
+    {
+      "name": "rustix",
+      "SPDXID": "SPDXRef-cargo-rustix-0.38.38-6ea83d",
+      "versionInfo": "0.38.38",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/rustix@0.38.38"
+        }
+      ]
+    },
+    {
+      "name": "clap_lex",
+      "SPDXID": "SPDXRef-cargo-claplex-0.7.2-4d3eda",
+      "versionInfo": "0.7.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) 2015-2022 Kevin B. Knapp and Clap Contributors",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/clap_lex@0.7.2"
+        }
+      ]
+    },
+    {
+      "name": "thiserror-impl",
+      "SPDXID": "SPDXRef-cargo-thiserror-impl-1.0.65-54773f",
+      "versionInfo": "1.0.65",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/thiserror-impl@1.0.65"
+        }
+      ]
+    },
+    {
+      "name": "aho-corasick",
+      "SPDXID": "SPDXRef-cargo-aho-corasick-1.1.3-cbcc04",
+      "versionInfo": "1.1.3",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Unlicense OR MIT",
+      "copyrightText": "(c) 83, (c) 83, // a, Copyright (c) 2015 Andrew Gallant",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/aho-corasick@1.1.3"
+        }
+      ]
+    },
+    {
+      "name": "predicates",
+      "SPDXID": "SPDXRef-cargo-predicates-3.1.2-a00275",
+      "versionInfo": "3.1.2",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) 2018 The predicates-rs Project, Copyright (c) 2018, 2022 The predicates-rs Project, Copyright (c) Individual contributors",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/predicates@3.1.2"
+        }
+      ]
+    },
+    {
+      "name": "thiserror",
+      "SPDXID": "SPDXRef-cargo-thiserror-1.0.65-d1b1b4",
+      "versionInfo": "1.0.65",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/thiserror@1.0.65"
+        }
+      ]
+    },
+    {
+      "name": "regex",
+      "SPDXID": "SPDXRef-cargo-regex-1.11.1-5d17e8",
+      "versionInfo": "1.11.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) 2014 The Rust Project, Copyright (c) 2014 The Rust Project Developers",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/regex@1.11.1"
+        }
+      ]
+    },
+    {
+      "name": "anstream",
+      "SPDXID": "SPDXRef-cargo-anstream-0.6.17-b2766f",
+      "versionInfo": "0.6.17",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) Individual contributors",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/anstream@0.6.17"
+        }
+      ]
+    },
+    {
+      "name": "anstyle-parse",
+      "SPDXID": "SPDXRef-cargo-anstyle-parse-0.2.6-fa9516",
+      "versionInfo": "0.2.6",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) 2016 Joe Wilm and individual contributors",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/anstyle-parse@0.2.6"
+        }
+      ]
+    },
+    {
+      "name": "difflib",
+      "SPDXID": "SPDXRef-cargo-difflib-0.4.0-6f389d",
+      "versionInfo": "0.4.0",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/difflib@0.4.0"
+        }
+      ]
+    },
+    {
+      "name": "windows_x86_64_msvc",
+      "SPDXID": "SPDXRef-cargo-windowsx8664msvc-0.52.6-542dce",
+      "versionInfo": "0.52.6",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) Microsoft Corporation",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/windows_x86_64_msvc@0.52.6"
+        }
+      ]
+    },
+    {
+      "name": "supports-color",
+      "SPDXID": "SPDXRef-cargo-supports-color-3.0.1-8a9d57",
+      "versionInfo": "3.0.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/supports-color@3.0.1"
+        }
+      ]
+    },
+    {
+      "name": "memchr",
+      "SPDXID": "SPDXRef-cargo-memchr-2.7.4-5b503d",
+      "versionInfo": "2.7.4",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Unlicense OR MIT",
+      "copyrightText": "(c) 83, (c) 83, // a, Copyright (c) 2015 Andrew Gallant",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/memchr@2.7.4"
+        }
+      ]
+    },
+    {
+      "name": "windows_x86_64_gnullvm",
+      "SPDXID": "SPDXRef-cargo-windowsx8664gnullvm-0.52.6-180197",
+      "versionInfo": "0.52.6",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) Microsoft Corporation",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/windows_x86_64_gnullvm@0.52.6"
+        }
+      ]
+    },
+    {
+      "name": "termtree",
+      "SPDXID": "SPDXRef-cargo-termtree-0.4.1-f3d468",
+      "versionInfo": "0.4.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT",
+      "copyrightText": "Copyright (c) 2017 Doug Tangren",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/termtree@0.4.1"
+        }
+      ]
+    },
+    {
+      "name": "diff",
+      "SPDXID": "SPDXRef-cargo-diff-0.1.13-f4bffe",
+      "versionInfo": "0.1.13",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) 2015 Utkarsh Kukreti",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/diff@0.1.13"
+        }
+      ]
+    },
+    {
+      "name": "yansi",
+      "SPDXID": "SPDXRef-cargo-yansi-1.0.1-e98d1a",
+      "versionInfo": "1.0.1",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) 2017 Sergio Benitez, Copyright 2017 Sergio Benitez",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/yansi@1.0.1"
+        }
+      ]
+    },
+    {
+      "name": "linux-raw-sys",
+      "SPDXID": "SPDXRef-cargo-linux-raw-sys-0.4.14-d44f3d",
+      "versionInfo": "0.4.14",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/linux-raw-sys@0.4.14"
+        }
+      ]
+    },
+    {
+      "name": "windows-targets",
+      "SPDXID": "SPDXRef-cargo-windows-targets-0.52.6-316134",
+      "versionInfo": "0.52.6",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "licenseConcluded": "MIT OR Apache-2.0",
+      "copyrightText": "Copyright (c) Microsoft Corporation",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:cargo/windows-targets@0.52.6"
+        }
+      ]
+    },
+    {
+      "name": "r-lib/actions/setup-pandoc",
+      "SPDXID": "SPDXRef-githubactions-r-libactions-setup-pandoc-2..-c36929",
+      "versionInfo": "2.*.*",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:githubactions/r-lib/actions/setup-pandoc@2.%2A.%2A"
+        }
+      ]
+    },
+    {
+      "name": "taiki-e/install-action",
+      "SPDXID": "SPDXRef-githubactions-taiki-e-install-action-2..-a7ba05",
+      "versionInfo": "2.*.*",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:githubactions/taiki-e/install-action@2.%2A.%2A"
+        }
+      ]
+    },
+    {
+      "name": "dtolnay/rust-toolchain",
+      "SPDXID": "SPDXRef-githubactions-dtolnay-rust-toolchain-stable-b5fab3",
+      "versionInfo": "stable",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:githubactions/dtolnay/rust-toolchain@stable"
+        }
+      ]
+    },
+    {
+      "name": "actions/upload-artifact",
+      "SPDXID": "SPDXRef-githubactions-actions-upload-artifact-main-2296ed",
+      "versionInfo": "main",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:githubactions/actions/upload-artifact@main"
+        }
+      ]
+    },
+    {
+      "name": "dtolnay/rust-toolchain",
+      "SPDXID": "SPDXRef-githubactions-dtolnay-rust-toolchain-master-074721",
+      "versionInfo": "master",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:githubactions/dtolnay/rust-toolchain@master"
+        }
+      ]
+    },
+    {
+      "name": "actions/checkout",
+      "SPDXID": "SPDXRef-githubactions-actions-checkout-3..-10c23e",
+      "versionInfo": "3.*.*",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:githubactions/actions/checkout@3.%2A.%2A"
+        }
+      ]
+    },
+    {
+      "name": "softprops/action-gh-release",
+      "SPDXID": "SPDXRef-githubactions-softprops-action-gh-release-1..-288979",
+      "versionInfo": "1.*.*",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:githubactions/softprops/action-gh-release@1.%2A.%2A"
+        }
+      ]
+    },
+    {
+      "name": "com.github.sharkdp/hexyl",
+      "SPDXID": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "versionInfo": "master",
+      "downloadLocation": "git+https://github.com/sharkdp/hexyl",
+      "filesAnalyzed": false,
+      "licenseDeclared": "Apache-2.0",
+      "externalRefs": [
+        {
+          "referenceCategory": "PACKAGE-MANAGER",
+          "referenceType": "purl",
+          "referenceLocator": "pkg:github/sharkdp/hexyl@master"
+        }
+      ]
+    }
+  ],
+  "relationships": [
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-assertcmd-2.1.2-52337d",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-predicates-tree-1.0.11-b3d1a6",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-normalize-line-endings-0.3.0-c5bbfb",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-clapbuilder-4.5.20-e85aa0",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-windowsaarch64gnullvm-0.52.6-67059c",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-errno-0.3.9-438eee",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-strsim-0.11.1-0ef770",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-bitflags-2.6.0-fb47d5",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-wait-timeout-0.2.0-cdecc8",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-githubactions-dtolnay-rust-toolchain-stable-b5fab3",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-unicode-xid-0.2.6-683b2e",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-claplex-0.7.2-4d3eda",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-diff-0.1.13-f4bffe",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-quote-1.0.37-10b0f6",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-clap-4.5.20-db995e",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-difflib-0.4.0-6f389d",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-githubactions-actions-upload-artifact-main-2296ed",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-githubactions-dtolnay-rust-toolchain-master-074721",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-githubactions-actions-checkout-3..-10c23e",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-anyhow-1.0.91-ee1c57",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-predicates-3.1.2-a00275",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-termtree-0.4.1-f3d468",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-windowsx8664gnu-0.52.6-b24009",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-anstyle-1.0.9-1f6988",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-terminalsize-0.4.0-b9b08a",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-autocfg-1.4.0-d7c9c8",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-thiserror-impl-1.0.65-54773f",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-yansi-1.0.1-e98d1a",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-githubactions-softprops-action-gh-release-1..-288979",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-clapderive-4.5.18-8eba6a",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-owo-colors-4.1.0-4fc013",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-serdederive-1.0.214-876124",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-anstyle-wincon-3.0.6-5e5016",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-serde-1.0.214-399c43",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-isterminalpolyfill-1.70.1-05ad33",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-constformat-0.2.33-9e5598",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-windows-sys-0.59.0-5cac0c",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-windowsi686msvc-0.52.6-3ef083",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-regex-syntax-0.8.5-f83308",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-anstyle-query-1.1.2-e50272",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-thiserror-1.0.65-d1b1b4",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-regex-1.11.1-5d17e8",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-clapcomplete-4.5.55-a544f4",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-float-cmp-0.9.0-cf500c",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-supports-color-3.0.1-8a9d57",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-constformatprocmacros-0.2.33-08b2cc",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-prettyassertions-1.4.1-00dfa0",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-unicode-ident-1.0.13-20d38a",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-predicates-core-1.0.8-a24f1f",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-githubactions-r-libactions-setup-pandoc-2..-c36929",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-windowsaarch64msvc-0.52.6-3ce1d3",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-syn-2.0.85-2ae613",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-utf8parse-0.2.2-cb86e6",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-bstr-1.10.0-51f41a",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-libc-0.2.161-6ec427",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-windowsx8664gnullvm-0.52.6-180197",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-linux-raw-sys-0.4.14-d44f3d",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-heck-0.5.0-0ddf38",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-windows-targets-0.52.6-316134",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-isci-1.2.0-6821f1",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-aho-corasick-1.1.3-cbcc04",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-anstream-0.6.17-b2766f",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-memchr-2.7.4-5b503d",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-rustix-0.38.38-6ea83d",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-colorchoice-1.0.3-002c81",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-windows-sys-0.52.0-964530",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-windowsi686gnu-0.52.6-60ea4d",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-windowsi686gnullvm-0.52.6-20817d",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-anstyle-parse-0.2.6-fa9516",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-windowsx8664msvc-0.52.6-542dce",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-githubactions-taiki-e-install-action-2..-a7ba05",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-num-traits-0.2.19-ac3a43",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-regex-automata-0.4.8-d1beb2",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relatedSpdxElement": "SPDXRef-cargo-proc-macro2-1.0.89-26a4f8",
+      "relationshipType": "DEPENDS_ON"
+    },
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relatedSpdxElement": "SPDXRef-github-sharkdp-hexyl-master-d890d2",
+      "relationshipType": "DESCRIBES"
+    }
+  ]
+}

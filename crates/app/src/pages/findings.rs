@@ -333,8 +333,8 @@ pub fn ProjectPage() -> impl IntoView {
                                 <li class="flex flex-wrap gap-x-2">
                                     <span class="font-medium">{format_time(upload.uploaded_at)}</span>
                                     <span class="text-muted-foreground">
-                                        {tp!("project.components", upload.component_count)} " · CycloneDX "
-                                        {upload.specification_version}
+                                        {tp!("project.components", upload.component_count)} " · "
+                                        {sbom_format(&upload.specification_version)}
                                         {upload.source_commit.map(|commit| format!(" · {}", tf!("project.commit", commit = commit)))}
                                         {upload.image_tag.map(|tag| format!(" · {}", tf!("project.image", tag = tag)))}
                                     </span>
@@ -907,6 +907,15 @@ pub fn SearchPage() -> impl IntoView {
                 }}
             />
         </Page>
+    }
+}
+
+/// An upload's format and version: SPDX versions are stored as SPDX documents spell them
+/// (`SPDX-2.3`), CycloneDX versions bare (`1.6`).
+fn sbom_format(specification_version: &str) -> String {
+    match specification_version.strip_prefix("SPDX-") {
+        Some(version) => format!("SPDX {version}"),
+        None => format!("CycloneDX {specification_version}"),
     }
 }
 

@@ -25,8 +25,8 @@
 //!
 //! - An **organization** ([`organizations`]) owns **projects** ([`projects`]); users belong to
 //!   organizations through **memberships** ([`memberships`]) that carry a role.
-//! - CI uploads a CycloneDX SBOM with an **upload token** ([`tokens`]); the upload replaces the
-//!   project's **components** ([`inventory`]) and their **dependency graph**
+//! - CI uploads a CycloneDX or SPDX SBOM with an **upload token** ([`tokens`]); the upload
+//!   replaces the project's **components** ([`inventory`]) and their **dependency graph**
 //!   ([`dependencies`]), which tells which direct dependency of the project pulls in a
 //!   vulnerable component.
 //! - A **run** ([`evaluation`]) matches components against a

@@ -187,6 +187,37 @@ async fn base64_json_uploads_are_accepted() {
 }
 
 #[tokio::test]
+async fn spdx_documents_are_accepted() {
+    let Setup {
+        server,
+        owner,
+        organization_id,
+        token,
+    } = setup(&[]).await;
+    let body = gh_upload_sbom_form(
+        &sbom_document("syft-spdx.json"),
+        &[("projectName", "image"), ("autoCreate", "true")],
+    );
+    let response = server.send(post_form(Some(&token), body)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let request = json!({"projectName": "crate", "autoCreate": true,
+        "bom": encoded(&sbom_document("syft-cargo-spdx-2.2.json"))});
+    let response = server.send(put_json(Some(&token), &request)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    for (slug, version, components) in [("image", "SPDX-2.3", 15), ("crate", "SPDX-2.2", 6)] {
+        let project = projects::find(&server.database, &owner, organization_id, slug)
+            .await
+            .unwrap();
+        let uploads = inventory::uploads(&server.database, &owner, project.id)
+            .await
+            .unwrap();
+        assert_eq!(uploads[0].specification_version, version);
+        assert_eq!(uploads[0].component_count, components);
+    }
+}
+
+#[tokio::test]
 async fn uploads_without_a_valid_key_are_refused() {
     let Setup { server, .. } = setup(&[]).await;
     let request = json!({"projectName": "web", "autoCreate": true,
@@ -386,7 +417,22 @@ async fn invalid_sboms_are_problems() {
     let problem = body_json(response).await;
     assert_eq!(problem["status"], 400);
     assert_eq!(problem["title"], "The uploaded BOM is invalid");
-    assert!(problem["detail"].as_str().unwrap().contains("JSON only"));
+    assert_eq!(
+        problem["detail"],
+        "XML SBOMs are not supported: generate the SBOM as CycloneDX JSON or SPDX JSON"
+    );
+
+    let tag_value = b"SPDXVersion: SPDX-2.3\nDataLicense: CC0-1.0\n";
+    let request = json!({"projectName": "web", "autoCreate": true, "bom": encoded(tag_value)});
+    let response = server.send(put_json(Some(&token), &request)).await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let problem = body_json(response).await;
+    assert!(
+        problem["detail"]
+            .as_str()
+            .unwrap()
+            .starts_with("SPDX tag-value documents are not supported")
+    );
 
     let request = json!({"projectName": "web", "autoCreate": true,
         "bom": encoded(br#"{"bomFormat": "SPDX"}"#)});

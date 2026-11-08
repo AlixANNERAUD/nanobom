@@ -61,9 +61,14 @@ pub enum Problem {
     PasswordTooShort { minimum: usize },
     PasswordTooLong { maximum: usize },
     SbomNotJson { detail: String },
-    SbomNotCycloneDx,
+    SbomXml,
+    SpdxTagValue,
+    SpdxRdf,
+    UnknownSbomFormat,
     UnsupportedSpecificationVersion { version: String },
+    UnsupportedSpdxVersion { version: String },
     InvalidCycloneDx { detail: String },
+    InvalidSpdx { detail: String },
     UsernameTaken { username: String },
     EmailTaken { email: String },
     OwnAccountStatus,
@@ -131,8 +136,13 @@ impl Problem {
                 "problems.sbom_not_json",
                 detail = detail
             ),
-            P::SbomNotCycloneDx => {
-                output.write_str(translate!(locale = locale, "problems.sbom_not_cyclonedx"))
+            P::SbomXml => output.write_str(translate!(locale = locale, "problems.sbom_xml")),
+            P::SpdxTagValue => {
+                output.write_str(translate!(locale = locale, "problems.spdx_tag_value"))
+            }
+            P::SpdxRdf => output.write_str(translate!(locale = locale, "problems.spdx_rdf")),
+            P::UnknownSbomFormat => {
+                output.write_str(translate!(locale = locale, "problems.unknown_sbom_format"))
             }
             P::UnsupportedSpecificationVersion { version } => translate_write!(
                 output,
@@ -141,10 +151,23 @@ impl Problem {
                 version = version,
                 supported = crate::inventory::SUPPORTED_SPECIFICATION_VERSIONS.join(", ")
             ),
+            P::UnsupportedSpdxVersion { version } => translate_write!(
+                output,
+                locale = locale,
+                "problems.unsupported_spdx_version",
+                version = version,
+                supported = crate::inventory::SUPPORTED_SPDX_VERSIONS.join(", ")
+            ),
             P::InvalidCycloneDx { detail } => translate_write!(
                 output,
                 locale = locale,
                 "problems.invalid_cyclonedx",
+                detail = detail
+            ),
+            P::InvalidSpdx { detail } => translate_write!(
+                output,
+                locale = locale,
+                "problems.invalid_spdx",
                 detail = detail
             ),
             P::UsernameTaken { username } => translate_write!(
