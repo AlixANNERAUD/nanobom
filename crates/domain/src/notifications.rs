@@ -683,16 +683,23 @@ impl Notifier {
     }
 
     /// Claims a delivery, posts it and records the result; `None` when another attempt holds
-    /// it or it is not due.
+    /// it, it is not due, or it was cancelled during the attempt.
     async fn attempt(&self, database: &impl ConnectionTrait, id: i64) -> Result<Option<Outcome>> {
         let Some(row) = deliveries::claim(database, id, Utc::now().fixed_offset()).await? else {
             return Ok(None);
         };
         let attempt = self.post(&row.url, row.payload.clone()).await;
         log(&row, &attempt);
+        let delivery = row.id;
         let outcome =
             deliveries::record(database, row, &attempt, Utc::now().fixed_offset()).await?;
-        Ok(Some(outcome))
+        if outcome.is_none() {
+            tracing::info!(
+                delivery,
+                "webhook delivery cancelled or taken over during its attempt; result not recorded"
+            );
+        }
+        Ok(outcome)
     }
 }
 

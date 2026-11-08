@@ -14,7 +14,10 @@
 //!
 //! An attempt first claims its row by moving `next_attempt_at` [`ATTEMPT_LEASE`] ahead, so the
 //! attempt made right after a run and the retry loop never post the same row at once, and a
-//! row whose attempt was cut short (a restart) is retried once the lease expires.
+//! row whose attempt was cut short (a restart) is retried once the lease expires. Its result is
+//! recorded only if the row still holds that lease: a delivery cancelled meanwhile (its webhook
+//! removed, disabled or moved) stays cancelled, and an attempt whose lease expired does not
+//! overwrite the one that took over.
 
 use chrono::{DateTime, FixedOffset, TimeDelta};
 use nanobom_entity::webhook_deliveries;
@@ -193,13 +196,18 @@ pub async fn claim(
         .await?)
 }
 
-/// Records the result of an attempt on a claimed delivery and schedules the next one.
+/// Records the result of an attempt on a delivery returned by [`claim`] and schedules the next
+/// one. `None` when the row no longer holds that claim: the delivery was cancelled during the
+/// attempt, or the lease expired and another attempt took over; the row is then left as is.
 pub async fn record(
     database: &impl ConnectionTrait,
     delivery: webhook_deliveries::Model,
     attempt: &Attempt,
     now: DateTime<FixedOffset>,
-) -> Result<Outcome> {
+) -> Result<Option<Outcome>> {
+    let Some(lease) = delivery.next_attempt_at else {
+        return Ok(None);
+    };
     let attempts = delivery.attempts + 1;
     let (outcome, next, delivered) = if attempt.succeeded() {
         (Outcome::Delivered, None, Some(now))
@@ -211,18 +219,33 @@ pub async fn record(
             None => (Outcome::Abandoned, None, None),
         }
     };
-    let mut active: webhook_deliveries::ActiveModel = delivery.into();
-    active.attempts = Set(attempts);
-    active.last_attempt_at = Set(Some(now));
-    active.last_status = Set(Some(attempt.description().to_owned()));
-    active.next_attempt_at = Set(next);
-    active.delivered_at = Set(delivered);
-    active.update(database).await?;
-    Ok(outcome)
+    // The lease read back by `claim` is compared with itself as stored, so the equality holds
+    // whatever precision the database keeps.
+    let recorded = webhook_deliveries::Entity::update_many()
+        .col_expr(webhook_deliveries::Column::Attempts, Expr::value(attempts))
+        .col_expr(
+            webhook_deliveries::Column::LastAttemptAt,
+            Expr::value(Some(now)),
+        )
+        .col_expr(
+            webhook_deliveries::Column::LastStatus,
+            Expr::value(Some(attempt.description().to_owned())),
+        )
+        .col_expr(webhook_deliveries::Column::NextAttemptAt, Expr::value(next))
+        .col_expr(
+            webhook_deliveries::Column::DeliveredAt,
+            Expr::value(delivered),
+        )
+        .filter(webhook_deliveries::Column::Id.eq(delivery.id))
+        .filter(webhook_deliveries::Column::Attempts.eq(delivery.attempts))
+        .filter(webhook_deliveries::Column::NextAttemptAt.eq(lease))
+        .exec(database)
+        .await?;
+    Ok((recorded.rows_affected > 0).then_some(outcome))
 }
 
-/// Abandons the pending deliveries to an organization's webhook, when it is removed: they would
-/// otherwise go on posting to a URL its admins took away.
+/// Abandons the pending deliveries to an organization's webhook, when it is removed, disabled or
+/// moved to another URL: they would otherwise go on posting to a URL its admins took away.
 pub async fn cancel_pending(database: &impl ConnectionTrait, organization_id: i64) -> Result<()> {
     webhook_deliveries::Entity::update_many()
         .col_expr(

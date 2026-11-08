@@ -85,6 +85,7 @@ async fn attempt(
     deliveries::record(database, claimed, result, now)
         .await
         .unwrap()
+        .expect("the claim still holds")
 }
 
 async fn row(database: &DatabaseConnection, id: i64) -> webhook_deliveries::Model {
@@ -428,4 +429,63 @@ async fn the_notifier_retries_a_delivery_once_its_backoff_expires() {
         requests[1].headers.get("content-type").unwrap(),
         "application/json"
     );
+}
+
+#[tokio::test]
+async fn an_attempt_does_not_overwrite_a_cancellation_or_a_newer_claim() {
+    let database = testing::database().await;
+    let owner = actor(&database, "owner").await;
+    let acme = organizations::create(&database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let now = now();
+    let url = "https://example.org/hook";
+
+    // The webhook is removed while an attempt is in progress.
+    let cancelled = deliveries::enqueue(&database, Some(acme.id), url, "ping", &ping(), now)
+        .await
+        .unwrap();
+    let claimed = deliveries::claim(&database, cancelled.id, now)
+        .await
+        .unwrap()
+        .unwrap();
+    deliveries::cancel_pending(&database, acme.id)
+        .await
+        .unwrap();
+    assert_eq!(
+        deliveries::record(&database, claimed, &answered(503), now)
+            .await
+            .unwrap(),
+        None
+    );
+    let cancelled = row(&database, cancelled.id).await;
+    assert_eq!(cancelled.next_attempt_at, None, "no retry is scheduled");
+    assert_eq!(cancelled.attempts, 0);
+
+    // An attempt outlives its lease and another one takes over.
+    let id = enqueue(&database, now).await;
+    let late = deliveries::claim(&database, id, now)
+        .await
+        .unwrap()
+        .unwrap();
+    let later = now + ATTEMPT_LEASE;
+    let current = deliveries::claim(&database, id, later)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        deliveries::record(&database, late, &answered(503), later)
+            .await
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        deliveries::record(&database, current, &answered(200), later)
+            .await
+            .unwrap(),
+        Some(Outcome::Delivered)
+    );
+    let delivered = row(&database, id).await;
+    assert_eq!(delivered.attempts, 1);
+    assert_eq!(delivered.delivered_at, Some(later));
 }
