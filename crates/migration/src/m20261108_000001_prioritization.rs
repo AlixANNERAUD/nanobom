@@ -1,4 +1,8 @@
 //! Exploitation data (CISA KEV, FIRST EPSS), exploited-only webhooks and stale project alerts.
+//!
+//! The `exploitation` table is keyed by CVE identifier, without a foreign key: CVEs come from
+//! the aliases of cached vulnerability records, and one CVE can back several records. The
+//! `*_notified_at` columns remember what webhooks already announced, so each event is sent once.
 
 use sea_orm_migration::{prelude::*, schema::*};
 
