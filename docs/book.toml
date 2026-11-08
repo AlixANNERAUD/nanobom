@@ -1,0 +1,17 @@
+[book]
+title = "nanobom"
+description = "User and operator guide of nanobom, a self-hosted SBOM vulnerability tracker."
+authors = ["Alix ANNERAUD"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+# A page listed in SUMMARY.md but missing is an error, not a new empty page.
+create-missing = false
+
+[output.html]
+# Published at https://alixanneraud.github.io/nanobom/ by .github/workflows/docs.yml.
+site-url = "/nanobom/"
+git-repository-url = "https://github.com/AlixANNERAUD/nanobom"
+edit-url-template = "https://github.com/AlixANNERAUD/nanobom/edit/main/docs/{path}"
