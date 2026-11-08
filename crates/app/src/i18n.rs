@@ -3,8 +3,16 @@
 //! user chose with the language switch (a cookie), else the browser's preferences
 //! (`Accept-Language`), else English.
 //!
-//! [`t!`](crate::t) translates a message into the request's language and [`tf!`](crate::tf)
-//! formats one into a `String`.
+//! [`t!`](crate::t) translates a message into the request's language, [`tf!`](crate::tf)
+//! formats one with arguments into a `String`, and [`tp!`](crate::tp) picks the plural form for
+//! a count. Keys live in `crates/app/locales/*.json`; a key missing from any locale fails the
+//! build.
+//!
+//! ```ignore
+//! let label = t!("settings.save");
+//! let notice = tf!("notices.user_created", username = user.username);
+//! let new_findings = tp!("organization.run_new", run.new_findings);
+//! ```
 
 use leptos::prelude::*;
 
