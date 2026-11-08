@@ -47,6 +47,17 @@ pub struct NotificationSettings {
     pub exploitation_refresh_timeout: Duration,
 }
 
+/// What waiting for a run ended with.
+#[derive(Debug, Clone)]
+pub enum Waited {
+    /// The run finished, successfully or not.
+    Finished(RunOutcome),
+    /// The run could not be recorded (a database error) or panicked.
+    NotCompleted,
+    /// The wait ran out of time; the run still happens.
+    TimedOut,
+}
+
 /// A request waiting in the queue, with whoever waits for its outcome.
 struct Queued {
     request: RunRequest,
@@ -121,13 +132,8 @@ impl Runner {
     /// Queues a run and waits for the outcome of a run of its scope that starts after this
     /// call: the request merges with a waiting request of the same scope, while a run of that
     /// scope already in progress does not count (it is not in the queue), so the request is
-    /// queued anew behind it. Returns `None` when `timeout` elapses first, or when the run could
-    /// not be recorded; the run itself still happens.
-    pub async fn request_and_wait(
-        &self,
-        request: RunRequest,
-        timeout: Duration,
-    ) -> Option<RunOutcome> {
+    /// queued anew behind it. When `timeout` elapses first, the run itself still happens.
+    pub async fn request_and_wait(&self, request: RunRequest, timeout: Duration) -> Waited {
         let (sender, receiver) = oneshot::channel();
         let queued_anew = {
             let mut queue = self.shared.queue.lock().expect("not poisoned");
@@ -149,7 +155,12 @@ impl Runner {
         if queued_anew {
             self.shared.wake.notify_one();
         }
-        tokio::time::timeout(timeout, receiver).await.ok()?.ok()
+        match tokio::time::timeout(timeout, receiver).await {
+            Ok(Ok(outcome)) => Waited::Finished(outcome),
+            // The worker dropped the sender without an outcome.
+            Ok(Err(_)) => Waited::NotCompleted,
+            Err(_) => Waited::TimedOut,
+        }
     }
 
     /// Waits until every queued run has finished.

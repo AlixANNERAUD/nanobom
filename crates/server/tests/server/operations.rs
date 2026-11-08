@@ -8,7 +8,10 @@ use axum::{
     http::{Request, StatusCode, header},
 };
 use chrono::Utc;
-use nanobom::{healthcheck, runner::RunRequest};
+use nanobom::{
+    healthcheck,
+    runner::{RunRequest, Waited},
+};
 use nanobom_domain::{
     evaluation::{Scope, Trigger},
     findings::{self, Filter},
@@ -327,6 +330,14 @@ async fn a_scheduled_request_merged_into_a_manual_one_still_notifies_stale_proje
     assert_eq!(payload["projects"][0]["project"], "old");
 }
 
+/// The outcome of a run that was waited for and finished.
+fn finished(waited: Waited) -> nanobom_domain::evaluation::RunOutcome {
+    match waited {
+        Waited::Finished(outcome) => outcome,
+        other => panic!("the run did not finish: {other:?}"),
+    }
+}
+
 #[tokio::test]
 async fn duplicate_requests_for_a_waiting_scope_are_merged() {
     let server = server(&[]).await;
@@ -396,9 +407,9 @@ async fn waiting_requests_wait_for_a_run_that_starts_after_them() {
     );
 
     server.source.resume();
-    let in_progress = in_progress.await.unwrap().expect("the first run finishes");
-    let first = first.await.expect("the queued run finishes");
-    let second = second.await.expect("the queued run finishes");
+    let in_progress = finished(in_progress.await.unwrap());
+    let first = finished(first.await);
+    let second = finished(second.await);
     assert_ne!(
         first.run_id, in_progress.run_id,
         "a run started after the request"
@@ -454,21 +465,12 @@ async fn a_panic_in_a_run_does_not_stop_the_worker() {
     // The waiter is released without an outcome, well before the timeout.
     server.source.panic_once();
     let started = std::time::Instant::now();
-    assert!(
-        server
-            .runner
-            .request_and_wait(request, timeout)
-            .await
-            .is_none()
-    );
+    let waited = server.runner.request_and_wait(request, timeout).await;
+    assert!(matches!(waited, Waited::NotCompleted), "{waited:?}");
     assert!(started.elapsed() < timeout);
     server.runner.wait_until_idle().await;
 
-    let outcome = server
-        .runner
-        .request_and_wait(request, timeout)
-        .await
-        .expect("a later run finishes");
+    let outcome = finished(server.runner.request_and_wait(request, timeout).await);
     assert!(outcome.succeeded());
     assert_eq!(outcome.new_findings.len(), 1);
     server.runner.wait_until_idle().await;

@@ -9,7 +9,7 @@ use axum::{
     routing::put,
 };
 use nanobom_domain::{
-    evaluation::{RunOutcome, Scope, Trigger},
+    evaluation::{Scope, Trigger},
     findings::{self, Finding},
     inventory::{self, UploadOutcome, UploadSource},
     notifications, tokens,
@@ -19,7 +19,10 @@ use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-use crate::{runner::RunRequest, state::AppState};
+use crate::{
+    runner::{RunRequest, Waited},
+    state::AppState,
+};
 
 /// An API error, returned as `{"error": "message"}`.
 #[derive(Debug)]
@@ -152,17 +155,28 @@ impl Threshold {
         }
     }
 
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Severity(severity) => severity.as_str(),
-            Self::Exploited => "exploited",
-        }
-    }
-
     fn reached_by(self, finding: &Finding) -> bool {
         match self {
             Self::Severity(minimum) => finding.severity >= minimum,
             Self::Exploited => finding.exploitation.known_exploited,
+        }
+    }
+
+    /// Why an upload fails when `reached` (at least one) open findings reach the threshold.
+    fn failure(self, reached: usize) -> String {
+        let findings = if reached == 1 {
+            "open finding"
+        } else {
+            "open findings"
+        };
+        match self {
+            Self::Severity(minimum) => {
+                format!("{reached} {findings} at or above {}", minimum.as_str())
+            }
+            Self::Exploited => {
+                let verb = if reached == 1 { "is" } else { "are" };
+                format!("{reached} {findings} {verb} known exploited")
+            }
         }
     }
 }
@@ -219,9 +233,8 @@ struct EvaluationFinding {
     url: String,
 }
 
-/// The evaluation of a run (`None` when it did not finish in time) and the project's open
-/// findings, most severe first.
-fn evaluation(run: Option<&RunOutcome>, findings: &[Finding], public_url: &Url) -> Evaluation {
+/// The evaluation of a run and the project's open findings, most severe first.
+fn evaluation(run: &Waited, findings: &[Finding], public_url: &Url) -> Evaluation {
     let mut open = OpenCounts::default();
     for finding in findings {
         *match finding.severity {
@@ -234,11 +247,14 @@ fn evaluation(run: Option<&RunOutcome>, findings: &[Finding], public_url: &Url) 
     }
     Evaluation {
         status: match run {
-            None => EvaluationStatus::TimedOut,
-            Some(run) if run.succeeded() => EvaluationStatus::Succeeded,
-            Some(_) => EvaluationStatus::Failed,
+            Waited::Finished(run) if run.succeeded() => EvaluationStatus::Succeeded,
+            Waited::Finished(_) | Waited::NotCompleted => EvaluationStatus::Failed,
+            Waited::TimedOut => EvaluationStatus::TimedOut,
         },
-        run_id: run.map(|run| run.run_id),
+        run_id: match run {
+            Waited::Finished(run) => Some(run.run_id),
+            Waited::NotCompleted | Waited::TimedOut => None,
+        },
         open,
         known_exploited: findings
             .iter()
@@ -332,7 +348,7 @@ async fn upload_sbom(
                 .await?;
         if let Some(threshold) = threshold {
             // Without a finished run the findings are not up to date: that fails first.
-            if !run.as_ref().is_some_and(RunOutcome::succeeded) {
+            if !matches!(&run, Waited::Finished(outcome) if outcome.succeeded()) {
                 status = StatusCode::SERVICE_UNAVAILABLE;
                 response.error = Some("the evaluation did not complete".to_owned());
             } else {
@@ -342,20 +358,33 @@ async fn upload_sbom(
                     .count();
                 if reached > 0 {
                     status = StatusCode::CONFLICT;
-                    response.error = Some(format!(
-                        "{reached} open findings at or above {}",
-                        threshold.as_str()
-                    ));
+                    response.error = Some(threshold.failure(reached));
                 }
             }
         }
-        response.evaluation = Some(evaluation(
-            run.as_ref(),
-            &findings,
-            &state.options.public_url,
-        ));
+        response.evaluation = Some(evaluation(&run, &findings, &state.options.public_url));
     } else if state.options.run_after_upload {
         state.runner.request(request);
     }
     Ok((status, Json(response)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gate_failures_are_counted_in_words() {
+        let high = Threshold::Severity(Severity::High);
+        assert_eq!(high.failure(1), "1 open finding at or above high");
+        assert_eq!(high.failure(2), "2 open findings at or above high");
+        assert_eq!(
+            Threshold::Exploited.failure(1),
+            "1 open finding is known exploited"
+        );
+        assert_eq!(
+            Threshold::Exploited.failure(3),
+            "3 open findings are known exploited"
+        );
+    }
 }
