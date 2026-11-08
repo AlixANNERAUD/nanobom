@@ -41,7 +41,8 @@ the shortest path from it to the component. They are shown shortest first:
   lodash 4.17.20`. A component that is itself a direct dependency is a path of its own, marked
   *direct dependency*. At most 5 paths are shown; the others are counted.
 - on the project page, in the **Introduced via** column: the direct dependencies, the first two
-  by name and how many more, or *direct*;
+  by name (with their versions only when several versions of one lead to the component) and how
+  many more, or *direct* when the component is one itself;
 - in [webhooks](../reference/webhooks.md#findingsnew) and in the
   [evaluation returned to CI](../reference/upload-api.md#the-evaluation-object), as
   `introduced_via`: the names of the direct dependencies.
@@ -55,7 +56,8 @@ them all: they may keep requiring the vulnerable version after you upgrade your 
 
 ## Limits
 
-A path may be missing, but is never made up. nanobom shows no path rather than a guess:
+A path may be missing, and with several copies of a package it may combine them, but every link
+in it is in the SBOM: nanobom shows no path rather than a guess.
 
 - **No graph, or no project in it.** Without any dependency of the project itself, nothing is
   derived, and the finding's page says the SBOM does not tell which components the project
@@ -65,10 +67,19 @@ A path may be missing, but is never made up. nanobom shows no path rather than a
 - **Components that are not stored.** The graph is kept between the components nanobom stores,
   those with a package URL. An edge to or from a component without one, or a file, is dropped
   rather than bridged, so a path never skips a component: a component reached only through one
-  is not linked to the project.
-- **Merged components.** Components with the same package URL are stored once, and so are their
-  edges: nested copies of the same version in an npm tree share their paths.
-- **Gone components.** A finding whose component is no longer in the latest SBOM has no path.
+  is not linked to the project. When the graph enters and leaves such a component, the finding's
+  page adds that some links could not be followed, and other paths may exist.
+- **References shared by several packages.** A `bom-ref` is meant to be unique. When two
+  components with different package URLs carry the same one, nanobom cannot tell which one an
+  edge means, so it drops every edge that names it, and says so like above.
+- **Copies of a package.** Paths are between packages, identified by package URL, not between
+  installed copies of them. Components with the same package URL are stored once, with the
+  edges of all their copies: if two nested copies of `foo 1.0.0` in an npm tree resolve `dep` to
+  different versions, `foo 1.0.0` leads to both, and a path through `foo 1.0.0` may combine the
+  link of one copy with a link into the other. Each link exists in the SBOM, but the whole path
+  may not match one installation.
+- **Gone components.** A finding whose component is no longer in the latest SBOM has no path,
+  and its page does not show the card.
 
 Generators fill the graph unevenly. With the versions nanobom is tested with:
 

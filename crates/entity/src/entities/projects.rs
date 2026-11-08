@@ -16,6 +16,7 @@ pub struct Model {
     pub created_at: DateTimeWithTimeZone,
     pub last_upload_at: Option<DateTimeWithTimeZone>,
     pub stale_notified_at: Option<DateTimeWithTimeZone>,
+    pub dependencies_partial: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

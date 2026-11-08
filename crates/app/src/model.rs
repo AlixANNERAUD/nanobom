@@ -284,6 +284,8 @@ pub struct DependencyPaths {
     pub paths: Vec<Vec<DependencyComponent>>,
     /// Direct dependencies leading to the component beyond those of `paths`.
     pub more: usize,
+    /// Whether links of the graph could not be followed, so other paths may exist.
+    pub partial: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

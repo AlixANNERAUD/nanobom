@@ -1,5 +1,7 @@
 //! A project's findings, a finding's details and the component search.
 
+use std::collections::{HashMap, HashSet};
+
 use leptos::prelude::*;
 use leptos_meta::Title;
 use leptos_router::hooks::{use_params_map, use_query_map};
@@ -27,26 +29,54 @@ fn percent(fraction: f64) -> String {
     tf!("finding.percent", value = value)
 }
 
+/// The direct dependencies that lead to a finding's component, for the project's table, by
+/// name. A name appears once; its versions are added only when several versions of it lead to
+/// the component, to tell them apart.
+fn introduced_via_labels(via: &[DependencyComponent]) -> Vec<String> {
+    let mut versions_of: HashMap<&str, HashSet<Option<&str>>> = HashMap::new();
+    for component in via {
+        versions_of
+            .entry(component.name.as_str())
+            .or_default()
+            .insert(component.version.as_deref());
+    }
+    let mut labels: Vec<String> = Vec::new();
+    for component in via {
+        let label = match &component.version {
+            Some(version) if versions_of[component.name.as_str()].len() > 1 => {
+                format!("{} {version}", component.name)
+            }
+            _ => component.name.clone(),
+        };
+        if !labels.contains(&label) {
+            labels.push(label);
+        }
+    }
+    labels
+}
+
 /// The direct dependencies that lead to a finding's component, for the project's table: the
-/// first two by name, then how many more; all of them in the tooltip.
+/// first two, then how many more; all of them in the tooltip.
 fn introduced_via(finding: &FindingRow) -> impl IntoView + use<> {
     let via = &finding.introduced_via;
     if via.len() == 1 && via[0].purl == finding.purl {
         return view! { <span class="text-muted-foreground">{t!("project.direct")}</span> }
             .into_any();
     }
-    let names: Vec<&str> = via
+    let labels = introduced_via_labels(via);
+    let mut shown = labels
         .iter()
-        .map(|component| component.name.as_str())
-        .collect();
-    let mut shown = names.iter().take(2).copied().collect::<Vec<_>>().join(", ");
-    if names.len() > 2 {
+        .take(2)
+        .cloned()
+        .collect::<Vec<_>>()
+        .join(", ");
+    if labels.len() > 2 {
         shown = format!(
             "{shown} {}",
-            tf!("project.via_more", count = names.len() - 2)
+            tf!("project.via_more", count = labels.len() - 2)
         );
     }
-    let title = (!names.is_empty()).then(|| tf!("project.via_title", names = names.join(", ")));
+    let title = (!labels.is_empty()).then(|| tf!("project.via_title", names = labels.join(", ")));
     view! { <span title=title>{shown}</span> }.into_any()
 }
 
@@ -408,9 +438,15 @@ fn dependency_paths(paths: Option<DependencyPaths>) -> impl IntoView {
         return view! { <p class="text-muted-foreground text-sm">{t!("finding.no_dependency_graph")}</p> }
             .into_any();
     };
+    let partial = paths.partial.then(|| {
+        view! { <p class="text-muted-foreground mt-2 text-sm">{t!("finding.partial_graph")}</p> }
+    });
     if paths.paths.is_empty() {
-        return view! { <p class="text-muted-foreground text-sm">{t!("finding.not_linked")}</p> }
-            .into_any();
+        return view! {
+            <p class="text-muted-foreground text-sm">{t!("finding.not_linked")}</p>
+            {partial}
+        }
+        .into_any();
     }
     let more = (paths.more > 0).then(|| {
         view! { <p class="text-muted-foreground mt-2 text-sm">{tp!("finding.more_paths", paths.more)}</p> }
@@ -436,6 +472,7 @@ fn dependency_paths(paths: Option<DependencyPaths>) -> impl IntoView {
     view! {
         <ul class="grid gap-2 text-sm">{items}</ul>
         {more}
+        {partial}
     }
     .into_any()
 }
@@ -694,13 +731,15 @@ pub fn FindingPage() -> impl IntoView {
                                         </dl>
                                     </CardContent>
                                 </Card>
-                                <Card>
-                                    <CardHeader>
-                                        <CardTitle>{t!("finding.introduced_via")}</CardTitle>
-                                        <CardDescription>{t!("finding.introduced_via_description")}</CardDescription>
-                                    </CardHeader>
-                                    <CardContent>{dependency_paths(page.dependency_paths.clone())}</CardContent>
-                                </Card>
+                                {(finding.status != Status::Fixed).then(|| view! {
+                                    <Card>
+                                        <CardHeader>
+                                            <CardTitle>{t!("finding.introduced_via")}</CardTitle>
+                                            <CardDescription>{t!("finding.introduced_via_description")}</CardDescription>
+                                        </CardHeader>
+                                        <CardContent>{dependency_paths(page.dependency_paths.clone())}</CardContent>
+                                    </Card>
+                                })}
                                 <Card>
                                     <CardHeader>
                                         <CardTitle>{t!("finding.aliases")}</CardTitle>
@@ -868,5 +907,45 @@ pub fn SearchPage() -> impl IntoView {
                 }}
             />
         </Page>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn component(name: &str, version: &str) -> DependencyComponent {
+        DependencyComponent {
+            purl: format!("pkg:npm/{name}@{version}"),
+            name: name.to_owned(),
+            version: Some(version.to_owned()),
+        }
+    }
+
+    #[test]
+    fn labels_are_names_unless_versions_tell_them_apart() {
+        assert_eq!(
+            introduced_via_labels(&[component("bar", "1.0.0"), component("foo", "2.0.0")]),
+            ["bar", "foo"]
+        );
+        assert_eq!(
+            introduced_via_labels(&[
+                component("bar", "1.0.0"),
+                component("foo", "1.0.0"),
+                component("foo", "2.0.0"),
+            ]),
+            ["bar", "foo 1.0.0", "foo 2.0.0"]
+        );
+    }
+
+    #[test]
+    fn a_name_is_listed_once() {
+        // The same package with different qualifiers has the same name and version.
+        let mut qualified = component("foo", "1.0.0");
+        qualified.purl.push_str("?arch=x86_64");
+        assert_eq!(
+            introduced_via_labels(&[component("foo", "1.0.0"), qualified]),
+            ["foo"]
+        );
     }
 }

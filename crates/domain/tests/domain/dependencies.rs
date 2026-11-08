@@ -120,6 +120,71 @@ fn edges_through_components_that_are_not_kept_are_dropped() {
     assert!(parse(&document).dependencies.is_empty());
 }
 
+#[test]
+fn links_lost_through_dropped_components_are_flagged() {
+    assert!(parse(&shop_document()).dependencies_partial);
+
+    // `vendored` has no package URL. A path breaks only if the graph enters and leaves it.
+    let mut document = shop_document();
+    document["dependencies"] = json!([
+        {"ref": "shop", "dependsOn": ["framework"]},
+        {"ref": "framework", "dependsOn": ["engine", "vendored"]},
+        {"ref": "vendored"}
+    ]);
+    assert!(!parse(&document).dependencies_partial, "left by nothing");
+    document["dependencies"] = json!([
+        {"ref": "shop", "dependsOn": ["framework"]},
+        {"ref": "vendored", "dependsOn": ["lodash"]}
+    ]);
+    assert!(!parse(&document).dependencies_partial, "entered by nothing");
+    document.as_object_mut().unwrap().remove("dependencies");
+    assert!(!parse(&document).dependencies_partial);
+}
+
+#[test]
+fn a_reference_shared_by_two_packages_is_dropped() {
+    // `dup` names two packages: `shop -> dup -> lodash` would attach the edges to whichever
+    // came last and make up a path.
+    let document = json!({
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.5",
+        "version": 1,
+        "metadata": {"component": {"type": "application", "name": "shop", "bom-ref": "shop"}},
+        "components": [
+            {"type": "library", "name": "web-framework", "version": "2.1.0", "bom-ref": "dup", "purl": FRAMEWORK},
+            {"type": "library", "name": "template-engine", "version": "0.9.0", "bom-ref": "dup", "purl": ENGINE},
+            {"type": "library", "name": "lodash", "version": "4.17.20", "bom-ref": "lodash", "purl": LODASH},
+            {"type": "library", "name": "left-pad", "version": "1.0.0", "bom-ref": "left-pad", "purl": LEFT_PAD}
+        ],
+        "dependencies": [
+            {"ref": "shop", "dependsOn": ["dup", "left-pad"]},
+            {"ref": "dup", "dependsOn": ["lodash"]}
+        ]
+    });
+    let sbom = parse(&document);
+    assert_eq!(sbom.components.len(), 4, "the components are kept");
+    assert_eq!(sbom.dependencies, [edge(None, LEFT_PAD)]);
+    assert!(sbom.dependencies_partial);
+
+    // The same reference on copies of one package is not ambiguous.
+    let document = json!({
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.5",
+        "version": 1,
+        "metadata": {"component": {"type": "application", "name": "shop", "bom-ref": "shop"}},
+        "components": [
+            {"type": "library", "name": "lodash", "version": "4.17.20", "bom-ref": "lodash", "purl": LODASH,
+                "components": [
+                    {"type": "library", "name": "lodash", "version": "4.17.20", "bom-ref": "lodash", "purl": LODASH}
+                ]}
+        ],
+        "dependencies": [{"ref": "shop", "dependsOn": ["lodash"]}]
+    });
+    let sbom = parse(&document);
+    assert_eq!(sbom.dependencies, [edge(None, LODASH)]);
+    assert!(!sbom.dependencies_partial);
+}
+
 struct Fixture {
     database: DatabaseConnection,
     source: Arc<FakeSource>,
@@ -227,6 +292,8 @@ async fn uploads_replace_the_graph_with_the_components() {
                 component(LODASH, "lodash", "4.17.20"),
             ]],
             more: 0,
+            // `vendored` has no package URL, and the graph goes through it.
+            partial: true,
         })
     );
     assert_eq!(
@@ -242,10 +309,9 @@ async fn uploads_replace_the_graph_with_the_components() {
     ]);
     fixture.upload(parse(&document)).await;
     assert_eq!(fixture.edge_count().await, 3);
-    assert_eq!(
-        fixture.paths(project, LODASH).await.unwrap().paths,
-        [vec![component(LODASH, "lodash", "4.17.20")]]
-    );
+    let paths = fixture.paths(project, LODASH).await.unwrap();
+    assert_eq!(paths.paths, [vec![component(LODASH, "lodash", "4.17.20")]]);
+    assert!(!paths.partial, "the flag is replaced with the graph");
     assert_eq!(
         fixture.paths(project, ENGINE).await,
         Some(DependencyPaths::default()),

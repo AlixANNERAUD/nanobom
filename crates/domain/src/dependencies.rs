@@ -10,21 +10,30 @@
 //!
 //! Generators fill the graph unevenly: some omit it, some omit the project (`cyclonedx-py`
 //! describing an environment, Syft describing an image), and edges may go through components
-//! without a package URL, which nanobom does not store. The rule is that a path may be missing,
-//! never wrong:
+//! without a package URL, which nanobom does not store. A path may be missing, but every link
+//! of a path is in the SBOM:
 //!
 //! - without any edge from the project, nothing is derived (no guessing the roots from the
 //!   components nobody depends on: an environment lists direct dependencies that other
 //!   packages also require);
-//! - an edge to or from a component that is not stored is dropped rather than bridged, so a
-//!   path never skips a component;
+//! - an edge to or from a component that is not stored, or naming a `bom-ref` that several
+//!   packages share, is dropped rather than bridged or guessed, so a path never skips a
+//!   component; the graph is then flagged [`DependencyPaths::partial`];
 //! - paths are capped in number ([`MAXIMUM_PATHS`]) and length ([`MAXIMUM_PATH_LENGTH`]); the
 //!   graph may have cycles, which the breadth-first search visits once.
+//!
+//! Paths are between packages, identified by package URL, not between installed copies of
+//! them: the copies of one package are stored once with the union of their edges, so with
+//! several copies a path may combine links of different ones.
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use nanobom_entity::{component_dependencies, components};
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder};
+use nanobom_entity::{component_dependencies, components, projects};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, EntityTrait, FromQueryResult, JoinType, QueryFilter, QueryOrder,
+    QuerySelect, RelationTrait,
+    sea_query::{Alias, Expr},
+};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -58,6 +67,9 @@ pub struct DependencyPaths {
     pub paths: Vec<Vec<ComponentRef>>,
     /// How many more direct dependencies lead to the component than `paths` shows.
     pub more: usize,
+    /// Whether the SBOM has links the graph could not keep, through components without a
+    /// package URL or `bom-ref`s shared by several packages: other paths may exist.
+    pub partial: bool,
 }
 
 /// A component's place in a search towards a target component.
@@ -77,40 +89,112 @@ pub(crate) struct Graph {
     /// For each component, the components that depend on it, in display order.
     parents: HashMap<i64, Vec<i64>>,
     direct: HashSet<i64>,
+    /// See [`DependencyPaths::partial`].
+    partial: bool,
+}
+
+/// An edge with its two components, as read by [`Graph::load`].
+#[derive(Debug, FromQueryResult)]
+struct EdgeRow {
+    parent_component_id: Option<i64>,
+    child_component_id: i64,
+    parent_purl: Option<String>,
+    parent_name: Option<String>,
+    parent_version: Option<String>,
+    child_purl: String,
+    child_name: String,
+    child_version: Option<String>,
+    dependencies_partial: bool,
 }
 
 impl Graph {
     /// The graph of a project's latest SBOM, without authorization.
+    ///
+    /// Edges, their components and the project's flag come from one statement: two reads could
+    /// straddle an upload (which replaces the components and their identifiers) and pair the
+    /// edges of one SBOM with the components of another, and a transaction would not prevent
+    /// it on PostgreSQL, whose default isolation level takes a snapshot per statement. Only the
+    /// components that appear in an edge are loaded; the others are in no path anyway.
     pub(crate) async fn load(database: &impl ConnectionTrait, project_id: i64) -> Result<Self> {
-        let edges: Vec<(Option<i64>, i64)> = component_dependencies::Entity::find()
+        let parent = Alias::new("parent_component");
+        let child = Alias::new("child_component");
+        let rows = component_dependencies::Entity::find()
+            .select_only()
+            .column(component_dependencies::Column::ParentComponentId)
+            .column(component_dependencies::Column::ChildComponentId)
+            .join_as(
+                JoinType::LeftJoin,
+                component_dependencies::Relation::Components1.def(),
+                parent.clone(),
+            )
+            .join_as(
+                JoinType::InnerJoin,
+                component_dependencies::Relation::Components2.def(),
+                child.clone(),
+            )
+            .join(
+                JoinType::InnerJoin,
+                component_dependencies::Relation::Projects.def(),
+            )
+            .column_as(
+                Expr::col((parent.clone(), components::Column::Purl)),
+                "parent_purl",
+            )
+            .column_as(
+                Expr::col((parent.clone(), components::Column::Name)),
+                "parent_name",
+            )
+            .column_as(
+                Expr::col((parent, components::Column::Version)),
+                "parent_version",
+            )
+            .column_as(
+                Expr::col((child.clone(), components::Column::Purl)),
+                "child_purl",
+            )
+            .column_as(
+                Expr::col((child.clone(), components::Column::Name)),
+                "child_name",
+            )
+            .column_as(
+                Expr::col((child, components::Column::Version)),
+                "child_version",
+            )
+            .column(projects::Column::DependenciesPartial)
             .filter(component_dependencies::Column::ProjectId.eq(project_id))
             .order_by_asc(component_dependencies::Column::Id)
+            .into_model::<EdgeRow>()
             .all(database)
-            .await?
-            .into_iter()
-            .map(|edge| (edge.parent_component_id, edge.child_component_id))
-            .collect();
-        // A project without edges from the project has nothing to show: skip its components.
-        if !edges.iter().any(|(parent, _)| parent.is_none()) {
-            return Ok(Self::default());
-        }
-        let components = components::Entity::find()
-            .filter(components::Column::ProjectId.eq(project_id))
-            .all(database)
-            .await?
-            .into_iter()
-            .map(|component| {
-                (
-                    component.id,
+            .await?;
+        let partial = rows.first().is_some_and(|row| row.dependencies_partial);
+        let mut components = HashMap::new();
+        let mut edges = Vec::with_capacity(rows.len());
+        for row in rows {
+            if let (Some(id), Some(purl), Some(name)) =
+                (row.parent_component_id, row.parent_purl, row.parent_name)
+            {
+                components.insert(
+                    id,
                     ComponentRef {
-                        purl: component.purl,
-                        name: component.name,
-                        version: component.version,
+                        purl,
+                        name,
+                        version: row.parent_version,
                     },
-                )
-            })
-            .collect();
-        Ok(Self::new(components, &edges))
+                );
+            }
+            components.insert(
+                row.child_component_id,
+                ComponentRef {
+                    purl: row.child_purl,
+                    name: row.child_name,
+                    version: row.child_version,
+                },
+            );
+            edges.push((row.parent_component_id, row.child_component_id));
+        }
+        let mut graph = Self::new(components, &edges);
+        graph.partial = partial;
+        Ok(graph)
     }
 
     /// A graph from its components and its edges, a `None` parent being the project. Edges
@@ -157,6 +241,7 @@ impl Graph {
             components,
             parents,
             direct,
+            partial: false,
         }
     }
 
@@ -242,7 +327,10 @@ impl Graph {
             return None;
         }
         let Some(&target) = self.by_purl.get(purl) else {
-            return Some(DependencyPaths::default());
+            return Some(DependencyPaths {
+                partial: self.partial,
+                ..DependencyPaths::default()
+            });
         };
         let steps = self.search(target);
         let leading = self.leading(&steps);
@@ -262,6 +350,7 @@ impl Graph {
         Some(DependencyPaths {
             paths,
             more: leading.len().saturating_sub(MAXIMUM_PATHS),
+            partial: self.partial,
         })
     }
 }
