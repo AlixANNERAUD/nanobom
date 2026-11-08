@@ -83,7 +83,8 @@ upload to nanobom with a new address and key: see [Dependency-Track clients](htt
 **Stop it before it ships**
 - `fail_on` on uploads: fail the build on critical, high, … or known-exploited findings.
 - Webhooks per organization for new and newly exploited vulnerabilities, and for projects whose
-  SBOM stopped coming; a Home Assistant example turns them into phone notifications.
+  SBOM stopped coming, as JSON or as messages posted straight to Slack and Microsoft Teams; a
+  Home Assistant example turns them into phone notifications.
 
 **Fits your stack**
 - One container (about 20 MB compressed, amd64 and arm64) with its database, SQLite in a volume

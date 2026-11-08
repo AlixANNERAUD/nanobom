@@ -26,7 +26,8 @@ The container image is about 20 MB.
 - **Gates CI.** An upload can wait for its evaluation and fail the pipeline when open findings
   reach a severity, or are known exploited.
 - **Notifies you.** Each organization can send new findings and projects whose SBOM stopped
-  coming to a webhook; the instance can report failed runs to another.
+  coming to a webhook (JSON, Slack or Microsoft Teams); the instance can report failed runs to
+  another.
 - **Separates teams.** Organizations are isolated from each other; members have one of four
   roles. Sign-in uses local accounts, OpenID Connect, or both, with roles mapped from your
   identity provider's groups.

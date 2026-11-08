@@ -14,7 +14,8 @@ Error messages of the interface are translated too. Some texts stay in English w
 language:
 
 - the upload API's messages, since they end up in CI logs read by whoever maintains the pipeline;
-- webhook payloads and logs, which are meant for programs;
+- webhook payloads and logs, which are meant for programs, and the Slack and Microsoft Teams
+  messages, since the language of a channel's readers is unknown;
 - vulnerability descriptions, which come from OSV as published;
 - the label of the single sign-on button, which is set by `NANOBOM_OIDC_BUTTON_LABEL`.
 
