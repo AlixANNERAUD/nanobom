@@ -24,6 +24,9 @@ updates:
     ignore:
       # wasm-bindgen must match the CLI pinned in mise.toml; update both by hand.
       - dependency-name: wasm-bindgen
+      # axum-login 0.18 is built on tower-sessions 0.14; move both together when axum-login does.
+      - dependency-name: tower-sessions
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
