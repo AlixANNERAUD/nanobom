@@ -1,0 +1,7 @@
+# Locales of the interface and of the domain's messages, read by embedded-i18n at compile time.
+# Every embedded locale must translate every message (strict); the request picks one at runtime.
+[env]
+EMBEDDED_I18N_LOCALES = "en,fr"
+EMBEDDED_I18N_LOCALE = "en"
+EMBEDDED_I18N_FALLBACK = "en"
+EMBEDDED_I18N_STRICT = "1"

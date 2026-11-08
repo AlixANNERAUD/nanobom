@@ -74,8 +74,9 @@ impl GroupMapping {
                 .rsplit_once(':')
                 .ok_or_else(|| format!("{entry:?} is not group=organization:role"))?;
             let role = Role::parse(role.trim()).map_err(|error| format!("{entry:?}: {error}"))?;
-            let organization = nanobom_domain::names::slug("the organization slug", organization)
-                .map_err(|error| format!("{entry:?}: {error}"))?;
+            let organization =
+                nanobom_domain::names::slug(nanobom_domain::Field::OrganizationSlug, organization)
+                    .map_err(|error| format!("{entry:?}: {error}"))?;
             entries.push((group.trim().to_owned(), organization, role));
         }
         Ok(Self { entries })

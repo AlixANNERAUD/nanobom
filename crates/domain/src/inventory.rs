@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     access::{Actor, Permission},
     error::{Error, Result},
+    problem::{Field, Problem},
 };
 
 /// Specification versions accepted at upload.
@@ -78,24 +79,30 @@ struct Header {
 /// Parses a CycloneDX JSON document. The document is deserialized once, straight into the model
 /// of its specification version, to keep memory use low on large SBOMs.
 pub fn parse(document: &[u8]) -> Result<ParsedSbom> {
-    let header: Header = serde_json::from_slice(document)
-        .map_err(|error| Error::invalid(format!("the SBOM is not valid JSON: {error}")))?;
+    let header: Header = serde_json::from_slice(document).map_err(|error| {
+        Error::invalid(Problem::SbomNotJson {
+            detail: error.to_string(),
+        })
+    })?;
     if header.format.as_deref() != Some("CycloneDX") {
-        return Err(Error::invalid(
-            "the SBOM must be a CycloneDX JSON document (bomFormat \"CycloneDX\")",
-        ));
+        return Err(Error::invalid(Problem::SbomNotCycloneDx));
     }
     let specification_version = header.specification_version.unwrap_or_default();
     if !SUPPORTED_SPECIFICATION_VERSIONS.contains(&specification_version.as_str()) {
-        return Err(Error::invalid(format!(
-            "unsupported CycloneDX version {specification_version:?}; supported versions are {}",
-            SUPPORTED_SPECIFICATION_VERSIONS.join(", ")
-        )));
+        return Err(Error::invalid(Problem::UnsupportedSpecificationVersion {
+            version: specification_version,
+        }));
     }
-    let version = SpecVersion::from_str(&specification_version)
-        .map_err(|error| Error::invalid(error.to_string()))?;
-    let bom = Bom::parse_from_json_with_version(document, version)
-        .map_err(|error| Error::invalid(format!("invalid CycloneDX document: {error}")))?;
+    let version = SpecVersion::from_str(&specification_version).map_err(|_| {
+        Error::invalid(Problem::UnsupportedSpecificationVersion {
+            version: specification_version.clone(),
+        })
+    })?;
+    let bom = Bom::parse_from_json_with_version(document, version).map_err(|error| {
+        Error::invalid(Problem::InvalidCycloneDx {
+            detail: error.to_string(),
+        })
+    })?;
 
     let mut parsed = ParsedSbom {
         specification_version,
@@ -189,13 +196,11 @@ pub struct UploadOutcome {
     pub skipped: Vec<SkippedComponent>,
 }
 
-fn optional_label(kind: &str, value: Option<String>) -> Result<Option<String>> {
+fn optional_label(field: Field, value: Option<String>) -> Result<Option<String>> {
     match value.map(|value| value.trim().to_owned()) {
         Some(value) if value.is_empty() => Ok(None),
         Some(value) if value.chars().count() > 300 || value.chars().any(char::is_control) => {
-            Err(Error::invalid(format!(
-                "the {kind} must be at most 300 printable characters"
-            )))
+            Err(Error::invalid(Problem::InvalidLabel(field)))
         }
         other => Ok(other),
     }
@@ -211,8 +216,8 @@ pub async fn ingest(
     sbom: ParsedSbom,
     source: UploadSource,
 ) -> Result<UploadOutcome> {
-    let source_commit = optional_label("source commit", source.source_commit)?;
-    let image_tag = optional_label("image tag", source.image_tag)?;
+    let source_commit = optional_label(Field::SourceCommit, source.source_commit)?;
+    let image_tag = optional_label(Field::ImageTag, source.image_tag)?;
     let organization = organizations::Entity::find()
         .filter(organizations::Column::Slug.eq(organization_slug.trim().to_ascii_lowercase()))
         .one(database)

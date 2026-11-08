@@ -22,6 +22,7 @@ sea-orm = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 serde.workspace = true
 chrono.workspace = true
+embedded-i18n.workspace = true
 web-sys = { version = "0.3", optional = true, features = ["DomTokenList", "Element", "MediaQueryList", "Storage", "Window"] }
 
 [features]

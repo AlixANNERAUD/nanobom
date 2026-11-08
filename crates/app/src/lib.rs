@@ -4,6 +4,7 @@
 
 pub mod components;
 pub mod functions;
+pub mod i18n;
 pub mod model;
 pub mod pages;
 #[cfg(feature = "ssr")]
@@ -31,9 +32,10 @@ const THEME_SCRIPT: &str = "try{var t=localStorage.getItem('theme');if(t==='dark
 
 /// The HTML document around every page.
 pub fn shell(options: LeptosOptions) -> impl IntoView {
+    let language = i18n::tag(i18n::locale());
     view! {
         <!DOCTYPE html>
-        <html lang="en">
+        <html lang=language>
             <head>
                 <meta charset="utf-8" />
                 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -55,6 +57,7 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
 #[component]
 pub fn App() -> impl IntoView {
     provide_meta_context();
+    i18n::provide_locale();
     view! {
         <Router>
             <Routes fallback=NotFound>
@@ -83,9 +86,9 @@ fn NotFound() -> impl IntoView {
         response.set_status(axum::http::StatusCode::NOT_FOUND);
     }
     view! {
-        <Page title="Not found">
-            <Alert title="Page not found">
-                <a class="underline" href="/organizations">"Back to your organizations"</a>
+        <Page title=t!("not_found.title")>
+            <Alert title=t!("not_found.heading")>
+                <a class="underline" href="/organizations">{t!("not_found.back")}</a>
             </Alert>
         </Page>
     }

@@ -1,6 +1,9 @@
 //! Local account passwords, hashed with Argon2id.
 
-use crate::error::{Error, Result};
+use crate::{
+    error::{Error, Result},
+    problem::Problem,
+};
 
 /// Upper bound on password length, so hashing cannot be used to exhaust the server.
 const MAXIMUM_LENGTH: usize = 1024;
@@ -14,15 +17,14 @@ impl PasswordPolicy {
     pub fn validate(&self, password: &str) -> Result<()> {
         let length = password.chars().count();
         if length < self.minimum_length {
-            return Err(Error::invalid(format!(
-                "the password must be at least {} characters long",
-                self.minimum_length
-            )));
+            return Err(Error::invalid(Problem::PasswordTooShort {
+                minimum: self.minimum_length,
+            }));
         }
         if length > MAXIMUM_LENGTH {
-            return Err(Error::invalid(format!(
-                "the password must be at most {MAXIMUM_LENGTH} characters long"
-            )));
+            return Err(Error::invalid(Problem::PasswordTooLong {
+                maximum: MAXIMUM_LENGTH,
+            }));
         }
         Ok(())
     }

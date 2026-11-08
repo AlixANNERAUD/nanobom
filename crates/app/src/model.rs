@@ -1,8 +1,13 @@
 //! What the pages show. These types travel from server functions to components, so they are
 //! defined here, independent of the server-only domain crate.
 
+/// The error a server function returns while it redirects to the sign-in page; never shown.
+pub const SIGN_IN_REQUIRED: &str = "sign in required";
+
 use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
+
+use crate::t;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -33,13 +38,14 @@ impl Severity {
         }
     }
 
+    /// The name shown in the interface, in the request's language.
     pub fn label(self) -> &'static str {
         match self {
-            Severity::Unknown => "Unknown",
-            Severity::Low => "Low",
-            Severity::Medium => "Medium",
-            Severity::High => "High",
-            Severity::Critical => "Critical",
+            Severity::Unknown => t!("severity.unknown"),
+            Severity::Low => t!("severity.low"),
+            Severity::Medium => t!("severity.medium"),
+            Severity::High => t!("severity.high"),
+            Severity::Critical => t!("severity.critical"),
         }
     }
 
@@ -69,11 +75,12 @@ impl Status {
         }
     }
 
+    /// The name shown in the interface, in the request's language.
     pub fn label(self) -> &'static str {
         match self {
-            Status::Open => "Open",
-            Status::Ignored => "Ignored",
-            Status::Fixed => "Fixed",
+            Status::Open => t!("status.open"),
+            Status::Ignored => t!("status.ignored"),
+            Status::Fixed => t!("status.fixed"),
         }
     }
 
@@ -105,12 +112,13 @@ impl Role {
         }
     }
 
+    /// The name shown in the interface, in the request's language.
     pub fn label(self) -> &'static str {
         match self {
-            Role::Viewer => "Viewer",
-            Role::Member => "Member",
-            Role::Admin => "Admin",
-            Role::Owner => "Owner",
+            Role::Viewer => t!("role.viewer"),
+            Role::Member => t!("role.member"),
+            Role::Admin => t!("role.admin"),
+            Role::Owner => t!("role.owner"),
         }
     }
 

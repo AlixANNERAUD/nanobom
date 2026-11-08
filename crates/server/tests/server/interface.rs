@@ -286,3 +286,55 @@ async fn administration_is_for_instance_administrators() {
     let response = alice.get("/administration").await;
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
 }
+
+#[tokio::test]
+async fn pages_follow_the_chosen_language() {
+    let server = server(&[]).await;
+    local_user(&server.database, "alice", PASSWORD).await;
+    let alice = Browser::sign_in(&server, "alice").await;
+
+    let html = alice.page("/organizations").await;
+    assert!(html.contains("<html lang=\"en\""));
+    assert!(html.contains("The organizations you belong to."));
+
+    let response = server
+        .send(
+            Request::get("/organizations")
+                .header(header::COOKIE, &alice.cookie)
+                .header(header::ACCEPT, "text/html")
+                .header(header::ACCEPT_LANGUAGE, "fr-FR,fr;q=0.9,en;q=0.8")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = body_text(response).await;
+    assert!(html.contains("<html lang=\"fr\""));
+    assert!(html.contains("Les organisations dont vous faites partie."));
+
+    let response = alice
+        .submit("/organizations", "set_language", "locale=fr")
+        .await;
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert_eq!(location(&response), "/organizations");
+    let cookie = response
+        .headers()
+        .get_all(header::SET_COOKIE)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .find(|value| value.starts_with("nanobom_locale="))
+        .expect("a language cookie")
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned();
+    assert_eq!(cookie, "nanobom_locale=fr");
+
+    let french = Browser {
+        server: &server,
+        cookie: format!("{}; {cookie}", alice.cookie),
+    };
+    let html = french.page("/organizations").await;
+    assert!(html.contains("<html lang=\"fr\""));
+    assert!(html.contains("Nouvelle organisation"));
+}

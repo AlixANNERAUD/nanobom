@@ -9,8 +9,10 @@ use leptos_router::hooks::use_query_map;
 use serde::{Serialize, de::DeserializeOwned};
 
 use crate::{
-    functions::load_current_user,
+    functions::{SetLanguage, load_current_user},
+    i18n,
     model::{CurrentUser, Severity, Status},
+    t,
 };
 use ui::*;
 
@@ -87,7 +89,7 @@ where
     V: IntoView + 'static,
 {
     view! {
-        <Suspense fallback=|| view! { <p class="text-muted-foreground">"Loading…"</p> }>
+        <Suspense fallback=|| view! { <p class="text-muted-foreground">{t!("common.loading")}</p> }>
             {move || {
                 let render = render.clone();
                 Suspend::new(async move {
@@ -108,9 +110,9 @@ pub fn ErrorMessage(error: ServerFnError) -> impl IntoView {
         other => other.to_string(),
     };
     // A redirection to the sign-in page is on its way.
-    (message != "sign in required").then(|| {
+    (message != crate::model::SIGN_IN_REQUIRED).then(|| {
         view! {
-            <Alert variant=AlertVariant::Destructive title="Unable to show this page">
+            <Alert variant=AlertVariant::Destructive title=t!("common.page_error")>
                 {message}
             </Alert>
         }
@@ -157,11 +159,41 @@ pub fn ThemeToggle() -> impl IntoView {
             type="button"
             on:click=toggle
             class=button_class(ButtonVariant::Ghost, ButtonSize::Small)
-            aria-label="Switch between the light and dark themes"
-            title="Switch theme"
+            aria-label=t!("theme.label")
+            title=t!("theme.title")
         >
             <span aria-hidden="true">"◐"</span>
         </button>
+    }
+}
+
+/// Chooses the interface's language, remembered in a cookie. A plain form, so it works without
+/// JavaScript.
+#[component]
+pub fn LanguageSwitch() -> impl IntoView {
+    let current = i18n::locale();
+    let target = action::<SetLanguage>();
+    view! {
+        <form method="post" action=target class="flex items-center gap-1">
+            <label for="language" class="sr-only">
+                {t!("language.label")}
+            </label>
+            <select id="language" name="locale" class=format!("{SELECT} h-8 w-auto")>
+                {i18n::languages()
+                    .map(|(index, tag, name)| {
+                        let selected = index == current;
+                        view! {
+                            <option value=tag selected=selected lang=tag>
+                                {name}
+                            </option>
+                        }
+                    })
+                    .collect_view()}
+            </select>
+            <Button variant=ButtonVariant::Ghost size=ButtonSize::Small>
+                {t!("language.apply")}
+            </Button>
+        </form>
     }
 }
 
@@ -179,7 +211,7 @@ fn Header(user: CurrentUser) -> impl IntoView {
                     <summary class=format!(
                         "{} list-none",
                         button_class(ButtonVariant::Outline, ButtonSize::Small),
-                    )>"Organizations ▾"</summary>
+                    )>{t!("header.organizations")}" ▾"</summary>
                     <ul class="bg-popover text-popover-foreground absolute z-20 mt-1 min-w-56 rounded-md border p-1 shadow-md">
                         {organizations
                             .into_iter()
@@ -204,24 +236,24 @@ fn Header(user: CurrentUser) -> impl IntoView {
                                 href="/organizations"
                                 class="hover:bg-accent block rounded-sm px-2 py-1.5 text-sm"
                             >
-                                "All organizations"
+                                {t!("header.all_organizations")}
                             </a>
                         </li>
                     </ul>
                 </details>
                 <form action="/search" method="get" role="search" class="flex min-w-48 flex-1 gap-2">
                     <label for="header-search" class="sr-only">
-                        "Search components"
+                        {t!("header.search_label")}
                     </label>
                     <input
                         id="header-search"
                         name="query"
                         type="search"
-                        placeholder="Search components, e.g. openssl 3."
+                        placeholder=t!("header.search_placeholder")
                         class=INPUT
                     />
                 </form>
-                <nav aria-label="Account" class="flex items-center gap-2">
+                <nav aria-label=t!("header.account") class="flex items-center gap-2">
                     {user
                         .is_instance_administrator
                         .then(|| {
@@ -231,17 +263,18 @@ fn Header(user: CurrentUser) -> impl IntoView {
                                     variant=ButtonVariant::Ghost
                                     size=ButtonSize::Small
                                 >
-                                    "Administration"
+                                    {t!("header.administration")}
                                 </LinkButton>
                             }
                         })}
                     <span class="text-muted-foreground text-sm" title=user.username.clone()>
                         {user.display_name}
                     </span>
+                    <LanguageSwitch />
                     <ThemeToggle />
                     <form method="post" action="/auth/logout">
                         <Button variant=ButtonVariant::Outline size=ButtonSize::Small>
-                            "Sign out"
+                            {t!("header.sign_out")}
                         </Button>
                     </form>
                 </nav>
@@ -260,7 +293,7 @@ pub fn Page(#[prop(into)] title: String, children: ChildrenFn) -> impl IntoView 
             href="#content"
             class="focus:bg-background sr-only focus:not-sr-only focus:absolute focus:p-2"
         >
-            "Skip to content"
+            {t!("common.skip_to_content")}
         </a>
         <Loaded
             resource=user
@@ -280,11 +313,11 @@ pub fn Page(#[prop(into)] title: String, children: ChildrenFn) -> impl IntoView 
                     None => {
                         view! {
                             <main id="content" class="mx-auto max-w-md px-4 py-16">
-                                <Alert title="Signed out">
+                                <Alert title=t!("signed_out.title")>
                                     <a class="underline" href="/login">
-                                        "Sign in"
+                                        {t!("signed_out.sign_in")}
                                     </a>
-                                    " to continue."
+                                    {t!("signed_out.to_continue")}
                                 </Alert>
                             </main>
                         }

@@ -352,6 +352,26 @@ pub async fn load_administration() -> Result<AdministrationData, ServerFnError> 
 
 // ----- Actions -----
 
+/// Remembers the interface's language for a year, then returns to the page.
+#[server(endpoint = "set_language")]
+pub async fn set_language(locale: String) -> Result<(), ServerFnError> {
+    use axum::http::{HeaderValue, header};
+    if let Some(index) = embedded_i18n::match_locale(&locale)
+        && let Some(response) = use_context::<leptos_axum::ResponseOptions>()
+    {
+        let cookie = format!(
+            "{}={}; Path=/; Max-Age=31536000; SameSite=Lax",
+            crate::i18n::COOKIE,
+            crate::i18n::tag(index)
+        );
+        if let Ok(value) = HeaderValue::from_str(&cookie) {
+            response.append_header(header::SET_COOKIE, value);
+        }
+    }
+    crate::server::back_quietly("/");
+    Ok(())
+}
+
 #[server(endpoint = "create_organization")]
 pub async fn create_organization(slug: String, name: String) -> Result<(), ServerFnError> {
     let actor = actor().await?;
@@ -359,7 +379,7 @@ pub async fn create_organization(slug: String, name: String) -> Result<(), Serve
     match nanobom_domain::organizations::create(database, &actor, &slug, &name).await {
         Ok(organization) => redirect_with(
             &format!("/organizations/{}", organization.slug),
-            Ok("Organization created."),
+            Ok(crate::t!("notices.organization_created")),
         ),
         Err(error) => back(Err(crate::server::message(error)), "/organizations"),
     }
@@ -390,7 +410,7 @@ pub async fn trigger_run(
         };
         evaluation::authorize(database, &actor, scope).await?;
         (context.request_run)(Trigger::Manual, scope, Some(actor.user_id));
-        Ok("Run started; refresh the page in a moment to see its results.".to_owned())
+        Ok(crate::t!("notices.run_started").to_owned())
     }
     .await;
     finish(result, &format!("/organizations/{organization}"));
@@ -414,10 +434,7 @@ pub async fn ignore_finding(
         Some(value) => match NaiveDate::parse_from_str(value, "%Y-%m-%d") {
             Ok(date) => Some(date.and_time(NaiveTime::MIN).and_utc().fixed_offset()),
             Err(_) => {
-                back(
-                    Err("The expiry date must be a date (YYYY-MM-DD).".to_owned()),
-                    "/",
-                );
+                back(Err(crate::t!("notices.invalid_expiry").to_owned()), "/");
                 return Ok(());
             }
         },
@@ -425,7 +442,7 @@ pub async fn ignore_finding(
     };
     let result = nanobom_domain::findings::ignore(database, &actor, finding, &reason, expires_at)
         .await
-        .map(|()| "Finding ignored.".to_owned());
+        .map(|()| crate::t!("notices.finding_ignored").to_owned());
     finish(result, &format!("/findings/{finding}"));
     Ok(())
 }
@@ -436,7 +453,7 @@ pub async fn restore_finding(finding: i64) -> Result<(), ServerFnError> {
     let database = &context()?.database;
     let result = nanobom_domain::findings::restore(database, &actor, finding)
         .await
-        .map(|()| "Finding restored.".to_owned());
+        .map(|()| crate::t!("notices.finding_restored").to_owned());
     finish(result, &format!("/findings/{finding}"));
     Ok(())
 }
@@ -470,7 +487,10 @@ pub async fn add_member(
         let member =
             nanobom_domain::memberships::add(database, &actor, id, &login, parse_role(&role)?)
                 .await?;
-        Ok(format!("{} added.", member.username))
+        Ok(crate::tf!(
+            "notices.member_added",
+            username = member.username
+        ))
     }
     .await;
     finish(result, &format!("/organizations/{organization}/settings"));
@@ -490,7 +510,11 @@ pub async fn set_member_role(
         let member =
             nanobom_domain::memberships::set_role(database, &actor, id, user, parse_role(&role)?)
                 .await?;
-        Ok(format!("{} is now {}.", member.username, member.role))
+        Ok(crate::tf!(
+            "notices.member_role",
+            username = member.username,
+            role = crate::server::role(member.role).label().to_lowercase()
+        ))
     }
     .await;
     finish(result, &format!("/organizations/{organization}/settings"));
@@ -504,11 +528,11 @@ pub async fn remove_member(organization: String, user: i64) -> Result<(), Server
     let result = async {
         let id = organization_id(database, &actor, &organization).await?;
         nanobom_domain::memberships::remove(database, &actor, id, user).await?;
-        Ok("Member removed.".to_owned())
+        Ok(crate::t!("notices.member_removed").to_owned())
     }
     .await;
     if result.is_ok() && user == actor.user_id {
-        redirect_with("/organizations", Ok("You left the organization."));
+        redirect_with("/organizations", Ok(crate::t!("notices.left_organization")));
         return Ok(());
     }
     finish(result, &format!("/organizations/{organization}/settings"));
@@ -537,7 +561,7 @@ pub async fn create_token(
                 .await
                 .map_err(|error| ServerFnError::new(error.to_string()))?;
             back(
-                Ok("Token created. Copy it now: it will not be shown again."),
+                Ok(crate::t!("notices.token_created")),
                 &format!("/organizations/{organization}/settings"),
             );
         }
@@ -555,7 +579,7 @@ pub async fn revoke_token(organization: String, token: i64) -> Result<(), Server
     let database = &context()?.database;
     let result = nanobom_domain::tokens::revoke(database, &actor, token)
         .await
-        .map(|()| "Token revoked.".to_owned());
+        .map(|()| crate::t!("notices.token_revoked").to_owned());
     finish(result, &format!("/organizations/{organization}/settings"));
     Ok(())
 }
@@ -571,8 +595,9 @@ pub async fn save_webhook(
     let database = &context()?.database;
     let result = async {
         let id = organization_id(database, &actor, &organization).await?;
-        let severity = Severity::parse(&minimum_severity)
-            .ok_or_else(|| nanobom_domain::Error::invalid("unknown severity"))?;
+        let severity = Severity::parse(&minimum_severity).ok_or(nanobom_domain::Error::invalid(
+            nanobom_domain::Problem::UnknownSeverity,
+        ))?;
         nanobom_domain::notifications::set(
             database,
             &actor,
@@ -582,7 +607,7 @@ pub async fn save_webhook(
             enabled.is_some(),
         )
         .await?;
-        Ok("Webhook saved.".to_owned())
+        Ok(crate::t!("notices.webhook_saved").to_owned())
     }
     .await;
     finish(result, &format!("/organizations/{organization}/settings"));
@@ -596,7 +621,7 @@ pub async fn delete_webhook(organization: String) -> Result<(), ServerFnError> {
     let result = async {
         let id = organization_id(database, &actor, &organization).await?;
         nanobom_domain::notifications::delete(database, &actor, id).await?;
-        Ok("Webhook removed.".to_owned())
+        Ok(crate::t!("notices.webhook_removed").to_owned())
     }
     .await;
     finish(result, &format!("/organizations/{organization}/settings"));
@@ -610,7 +635,7 @@ pub async fn rename_organization(organization: String, name: String) -> Result<(
     let result = async {
         let id = organization_id(database, &actor, &organization).await?;
         nanobom_domain::organizations::rename(database, &actor, id, &name).await?;
-        Ok("Organization renamed.".to_owned())
+        Ok(crate::t!("notices.organization_renamed").to_owned())
     }
     .await;
     finish(result, &format!("/organizations/{organization}/settings"));
@@ -626,7 +651,7 @@ pub async fn delete_organization(
     let database = &context()?.database;
     if confirmation.trim() != organization {
         back(
-            Err("Type the organization's slug to confirm its deletion.".to_owned()),
+            Err(crate::t!("notices.confirm_organization").to_owned()),
             "/organizations",
         );
         return Ok(());
@@ -637,7 +662,10 @@ pub async fn delete_organization(
     }
     .await;
     match result {
-        Ok(()) => redirect_with("/organizations", Ok("Organization deleted.")),
+        Ok(()) => redirect_with(
+            "/organizations",
+            Ok(crate::t!("notices.organization_deleted")),
+        ),
         Err(error) => back(Err(crate::server::message(error)), "/organizations"),
     }
     Ok(())
@@ -653,7 +681,7 @@ pub async fn delete_project(
     let database = &context()?.database;
     if confirmation.trim() != project {
         back(
-            Err("Type the project's slug to confirm its deletion.".to_owned()),
+            Err(crate::t!("notices.confirm_project").to_owned()),
             "/organizations",
         );
         return Ok(());
@@ -667,7 +695,7 @@ pub async fn delete_project(
     match result {
         Ok(()) => redirect_with(
             &format!("/organizations/{organization}"),
-            Ok("Project deleted."),
+            Ok(crate::t!("notices.project_deleted")),
         ),
         Err(error) => back(Err(crate::server::message(error)), "/organizations"),
     }
@@ -705,7 +733,7 @@ pub async fn create_user(
             context.settings.personal_organizations,
         )
         .await?;
-        Ok(format!("{} created.", user.username))
+        Ok(crate::tf!("notices.user_created", username = user.username))
     }
     .await;
     finish(result, "/administration");
@@ -720,9 +748,9 @@ pub async fn set_user_disabled(user: i64, disabled: bool) -> Result<(), ServerFn
         .await
         .map(|()| {
             if disabled {
-                "User disabled.".to_owned()
+                crate::t!("notices.user_disabled").to_owned()
             } else {
-                "User enabled.".to_owned()
+                crate::t!("notices.user_enabled").to_owned()
             }
         });
     finish(result, "/administration");
@@ -736,7 +764,7 @@ pub async fn set_user_administrator(user: i64, administrator: bool) -> Result<()
     let result =
         nanobom_domain::users::set_instance_administrator(database, &actor, user, administrator)
             .await
-            .map(|()| "Administration rights updated.".to_owned());
+            .map(|()| crate::t!("notices.administrator_updated").to_owned());
     finish(result, "/administration");
     Ok(())
 }
@@ -758,7 +786,7 @@ pub async fn reset_password(user: i64, password: String) -> Result<(), ServerFnE
             passwords::hash(password).await,
         )
         .await?;
-        Ok("Password changed.".to_owned())
+        Ok(crate::t!("notices.password_changed").to_owned())
     }
     .await;
     finish(result, "/administration");

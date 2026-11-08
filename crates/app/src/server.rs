@@ -13,7 +13,7 @@ use nanobom_domain::{
 };
 use sea_orm::DatabaseConnection;
 
-use crate::model;
+use crate::{model, t};
 
 /// What the server provides to the interface.
 #[derive(Clone)]
@@ -72,7 +72,7 @@ pub async fn actor() -> Result<Actor, ServerFnError> {
     };
     let location = with_query("/login", &[("next", &next)]);
     leptos_axum::redirect(&location);
-    Err(ServerFnError::new("sign in required"))
+    Err(ServerFnError::new(model::SIGN_IN_REQUIRED))
 }
 
 /// Builds `path?key=value…` with percent-encoded values.
@@ -101,18 +101,34 @@ fn encode(value: &str) -> String {
     encoded
 }
 
-/// The message shown for a domain error after a form's redirection.
+/// The message shown for a domain error, in the request's language.
 pub fn message(error: nanobom_domain::Error) -> String {
     use nanobom_domain::Error;
     match error {
-        Error::NotFound => "Not found.".to_owned(),
-        Error::Forbidden => "You do not have permission to do this.".to_owned(),
-        Error::Invalid(message) | Error::Conflict(message) => message,
+        Error::NotFound => t!("errors.not_found").to_owned(),
+        Error::Forbidden => t!("errors.forbidden").to_owned(),
+        Error::Invalid(problem) | Error::Conflict(problem) => {
+            sentence(&problem.message(crate::i18n::locale()))
+        }
         Error::Database(database) => {
             tracing::error!(%database, "database error");
-            "Something went wrong; please try again.".to_owned()
+            t!("errors.unexpected").to_owned()
         }
     }
+}
+
+/// Problems are written as clauses (`the name is taken`); shown alone, they start with a
+/// capital letter and end with a period.
+fn sentence(clause: &str) -> String {
+    let mut characters = clause.chars();
+    let Some(first) = characters.next() else {
+        return String::new();
+    };
+    let mut sentence: String = first.to_uppercase().chain(characters).collect();
+    if !sentence.ends_with(['.', '!', '?']) {
+        sentence.push('.');
+    }
+    sentence
 }
 
 /// Turns a domain error into a server function error, setting the response status.
@@ -130,12 +146,7 @@ pub fn failure(error: nanobom_domain::Error) -> ServerFnError {
     if let Some(response) = use_context::<ResponseOptions>() {
         response.set_status(status);
     }
-    match error {
-        Error::NotFound => ServerFnError::new("Not found."),
-        Error::Forbidden => ServerFnError::new("You do not have permission to do this."),
-        Error::Invalid(message) | Error::Conflict(message) => ServerFnError::new(message),
-        Error::Database(_) => ServerFnError::new("Something went wrong; please try again."),
-    }
+    ServerFnError::new(message(error))
 }
 
 /// The path of the page the form was sent from, if it is on this site.
@@ -159,8 +170,18 @@ pub fn back(outcome: Result<&str, String>, fallback: &str) {
     redirect_with(&target, outcome);
 }
 
+/// Sends the browser back to the page the form came from, dropping any earlier message.
+pub fn back_quietly(fallback: &str) {
+    let target = referer_path().unwrap_or_else(|| fallback.to_owned());
+    redirect_to(&target, None);
+}
+
 /// Redirects to `target` with a notice or an error message.
 pub fn redirect_with(target: &str, outcome: Result<&str, String>) {
+    redirect_to(target, Some(outcome));
+}
+
+fn redirect_to(target: &str, outcome: Option<Result<&str, String>>) {
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
     let mut pairs: Vec<(String, String)> = query
         .split('&')
@@ -172,14 +193,19 @@ pub fn redirect_with(target: &str, outcome: Result<&str, String>) {
         })
         .collect();
     match outcome {
-        Ok(notice) => pairs.push(("notice".to_owned(), encode(notice))),
-        Err(error) => pairs.push(("error".to_owned(), encode(&error))),
+        Some(Ok(notice)) => pairs.push(("notice".to_owned(), encode(notice))),
+        Some(Err(error)) => pairs.push(("error".to_owned(), encode(&error))),
+        None => {}
     }
     let query: Vec<String> = pairs
         .into_iter()
         .map(|(key, value)| format!("{key}={value}"))
         .collect();
-    leptos_axum::redirect(&format!("{path}?{}", query.join("&")));
+    if query.is_empty() {
+        leptos_axum::redirect(path);
+    } else {
+        leptos_axum::redirect(&format!("{path}?{}", query.join("&")));
+    }
 }
 
 /// Runs a mutation and redirects back with its outcome.

@@ -20,6 +20,7 @@ use crate::{
     access::{Actor, Permission},
     error::{Error, Result},
     evaluation::{NewFinding, RunOutcome},
+    problem::Problem,
 };
 
 /// An organization's webhook settings.
@@ -47,11 +48,9 @@ pub fn validate_url(value: &str) -> Result<Url> {
     let url: Url = value
         .trim()
         .parse()
-        .map_err(|_| Error::invalid("the webhook URL is not a valid URL"))?;
+        .map_err(|_| Error::invalid(Problem::InvalidWebhookUrl))?;
     if !matches!(url.scheme(), "http" | "https") || url.host().is_none() {
-        return Err(Error::invalid(
-            "the webhook URL must be an http or https URL",
-        ));
+        return Err(Error::invalid(Problem::WebhookScheme));
     }
     Ok(url)
 }

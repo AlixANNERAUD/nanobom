@@ -1556,6 +1556,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "embedded-i18n"
+version = "0.1.3"
+source = "git+https://github.com/AlixANNERAUD/embedded_i18n?rev=1d12572fbd1e56dc507b85d7ee66e80108b67b5b#1d12572fbd1e56dc507b85d7ee66e80108b67b5b"
+dependencies = [
+ "embedded-i18n-macros",
+]
+
+[[package]]
+name = "embedded-i18n-macros"
+version = "0.1.3"
+source = "git+https://github.com/AlixANNERAUD/embedded_i18n?rev=1d12572fbd1e56dc507b85d7ee66e80108b67b5b#1d12572fbd1e56dc507b85d7ee66e80108b67b5b"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde_json",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "encoding_rs"
 version = "0.8.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3103,6 +3122,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "chrono",
+ "embedded-i18n",
  "leptos",
  "leptos_axum",
  "leptos_meta",
@@ -3145,6 +3165,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "cyclonedx-bom",
+ "embedded-i18n",
  "getrandom 0.4.3",
  "nanobom-domain",
  "nanobom-entity",

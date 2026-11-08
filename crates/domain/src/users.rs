@@ -13,6 +13,7 @@ use crate::{
     error::{Error, Result},
     memberships::Source,
     names,
+    problem::{Field, Problem},
 };
 
 /// A user to create.
@@ -31,25 +32,23 @@ pub async fn create(
     user: NewUser,
     personal_organization: bool,
 ) -> Result<users::Model> {
-    let username = names::slug("the username", &user.username)?;
+    let username = names::slug(Field::Username, &user.username)?;
     let email = user.email.as_deref().map(names::email).transpose()?;
     let display_name = match user.display_name.as_deref() {
-        Some(name) if !name.trim().is_empty() => names::display_name("the display name", name)?,
+        Some(name) if !name.trim().is_empty() => names::display_name(Field::DisplayName, name)?,
         _ => username.clone(),
     };
 
     let transaction = database.begin().await?;
     if find_by_username(&transaction, &username).await?.is_some() {
-        return Err(Error::conflict(format!(
-            "the username {username:?} is taken"
-        )));
+        return Err(Error::conflict(Problem::UsernameTaken { username }));
     }
     if let Some(email) = &email
         && find_by_email(&transaction, email).await?.is_some()
     {
-        return Err(Error::conflict(format!(
-            "the email address {email:?} is already used"
-        )));
+        return Err(Error::conflict(Problem::EmailTaken {
+            email: email.clone(),
+        }));
     }
     let now = Utc::now().fixed_offset();
     let created = users::ActiveModel {
@@ -193,9 +192,7 @@ async fn administered_user(
 ) -> Result<users::Model> {
     actor.require_instance_administrator()?;
     if actor.user_id == user_id {
-        return Err(Error::invalid(
-            "instance administrators cannot change their own account status",
-        ));
+        return Err(Error::invalid(Problem::OwnAccountStatus));
     }
     find_by_id(database, user_id).await?.ok_or(Error::NotFound)
 }
@@ -281,7 +278,7 @@ fn sanitize_username(value: &str) -> Option<String> {
     let trimmed = name.trim_start_matches(|character: char| !character.is_ascii_alphanumeric());
     name = trimmed.to_owned();
     name.truncate(names::MAXIMUM_LENGTH - 4);
-    names::slug("the username", &name).ok()
+    names::slug(Field::Username, &name).ok()
 }
 
 /// The first free username derived from the candidates, in order, falling back to `user`.

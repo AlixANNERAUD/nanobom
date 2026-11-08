@@ -54,6 +54,8 @@ croner = "4.0.3"
 wiremock = "0.6.5"
 wasm-bindgen = "0.2"
 console_error_panic_hook = "0.1"
+# Per-request locales (`locale = …`) are not released yet; pinned to the commit adding them.
+embedded-i18n = { git = "https://github.com/AlixANNERAUD/embedded_i18n", rev = "1d12572fbd1e56dc507b85d7ee66e80108b67b5b" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

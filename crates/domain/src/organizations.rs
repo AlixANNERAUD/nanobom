@@ -16,6 +16,7 @@ use crate::{
     error::{Error, Result},
     memberships::Source,
     names,
+    problem::{Field, Problem},
 };
 
 /// An organization together with the actor's role in it.
@@ -47,13 +48,11 @@ pub async fn create(
     slug: &str,
     name: &str,
 ) -> Result<Organization> {
-    let slug = names::slug("the organization slug", slug)?;
-    let name = names::display_name("the organization name", name)?;
+    let slug = names::slug(Field::OrganizationSlug, slug)?;
+    let name = names::display_name(Field::OrganizationName, name)?;
     let transaction = database.begin().await?;
     if find_model_by_slug(&transaction, &slug).await?.is_some() {
-        return Err(Error::conflict(format!(
-            "the organization {slug:?} already exists"
-        )));
+        return Err(Error::conflict(Problem::OrganizationExists { slug }));
     }
     let now = Utc::now().fixed_offset();
     let organization = organizations::ActiveModel {
@@ -147,7 +146,7 @@ pub async fn rename(
     actor
         .authorize(database, organization_id, Permission::ManageOrganization)
         .await?;
-    let name = names::display_name("the organization name", name)?;
+    let name = names::display_name(Field::OrganizationName, name)?;
     let model = organizations::Entity::find_by_id(organization_id)
         .one(database)
         .await?

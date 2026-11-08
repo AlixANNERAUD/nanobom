@@ -17,6 +17,7 @@ use crate::{
     access::{Actor, Permission},
     error::{Error, Result},
     evaluation::record_event,
+    problem::Problem,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -443,18 +444,18 @@ pub async fn ignore(
 ) -> Result<()> {
     let reason = reason.trim();
     if reason.is_empty() {
-        return Err(Error::invalid("a reason is required to ignore a finding"));
+        return Err(Error::invalid(Problem::ReasonRequired));
     }
     if reason.chars().count() > 2000 {
-        return Err(Error::invalid("the reason must be at most 2000 characters"));
+        return Err(Error::invalid(Problem::ReasonTooLong { maximum: 2000 }));
     }
     if expires_at.is_some_and(|expiry| expiry <= Utc::now()) {
-        return Err(Error::invalid("the expiry date must be in the future"));
+        return Err(Error::invalid(Problem::ExpiryNotInFuture));
     }
     let transaction = database.begin().await?;
     let finding = triaged_finding(&transaction, actor, finding_id).await?;
     if Status::parse(&finding.status) != Status::Open {
-        return Err(Error::conflict("only open findings can be ignored"));
+        return Err(Error::conflict(Problem::OnlyOpenCanBeIgnored));
     }
     let mut active: findings::ActiveModel = finding.into();
     active.status = Set(Status::Ignored.as_str().to_owned());
@@ -485,7 +486,7 @@ pub async fn restore(
     let transaction = database.begin().await?;
     let finding = triaged_finding(&transaction, actor, finding_id).await?;
     if Status::parse(&finding.status) != Status::Ignored {
-        return Err(Error::conflict("only ignored findings can be restored"));
+        return Err(Error::conflict(Problem::OnlyIgnoredCanBeRestored));
     }
     let mut active: findings::ActiveModel = finding.into();
     active.status = Set(Status::Open.as_str().to_owned());

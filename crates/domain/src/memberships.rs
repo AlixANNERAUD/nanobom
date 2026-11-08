@@ -18,7 +18,9 @@ use serde::{Deserialize, Serialize};
 use crate::{
     access::{Actor, Permission, Role},
     error::{Error, Result},
-    names, users as user_accounts,
+    names,
+    problem::{Field, Problem},
+    users as user_accounts,
 };
 
 /// Where a membership comes from.
@@ -135,7 +137,7 @@ async fn ensure_an_owner_remains(
         .one(database)
         .await?;
     if owners.is_none() {
-        return Err(Error::conflict("an organization needs at least one owner"));
+        return Err(Error::conflict(Problem::LastOwner));
     }
     Ok(())
 }
@@ -151,15 +153,18 @@ pub async fn add(
     authorize_role_change(database, actor, organization_id, &[Some(role)]).await?;
     let user = user_accounts::find_by_login(database, login)
         .await?
-        .ok_or_else(|| Error::invalid(format!("no user matches {:?}", login.trim())))?;
+        .ok_or_else(|| {
+            Error::invalid(Problem::UnknownUser {
+                login: login.trim().to_owned(),
+            })
+        })?;
     if manual_membership(database, organization_id, user.id)
         .await?
         .is_some()
     {
-        return Err(Error::conflict(format!(
-            "{} is already a member",
-            user.username
-        )));
+        return Err(Error::conflict(Problem::AlreadyMember {
+            username: user.username,
+        }));
     }
     memberships::ActiveModel {
         organization_id: Set(organization_id),
@@ -253,7 +258,7 @@ pub async fn synchronize(
         .await?;
     let now = Utc::now().fixed_offset();
     for (slug, role) in roles {
-        let slug = names::slug("the organization slug", slug)?;
+        let slug = names::slug(Field::OrganizationSlug, slug)?;
         let organization = match organizations::Entity::find()
             .filter(organizations::Column::Slug.eq(&slug))
             .one(&transaction)

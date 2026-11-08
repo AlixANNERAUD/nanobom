@@ -14,11 +14,13 @@ pub mod names;
 pub mod notifications;
 pub mod organizations;
 pub mod passwords;
+pub mod problem;
 pub mod projects;
 pub mod tokens;
 pub mod users;
 
 pub use error::{Error, Result};
+pub use problem::{Field, Problem};
 
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;

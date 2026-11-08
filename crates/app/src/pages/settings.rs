@@ -12,6 +12,7 @@ use crate::{
         SetUserAdministrator, SetUserDisabled, load_administration, load_settings,
     },
     model::{AdministrationData, Role, SettingsData, Severity},
+    t, tf,
 };
 
 fn role_options(selected: Option<Role>, owners_allowed: bool) -> impl IntoView {
@@ -58,12 +59,12 @@ fn Members(page: SettingsData) -> impl IntoView {
                                                             <input type="hidden" name="organization" value=organization.clone() />
                                                             <input type="hidden" name="user" value=user.clone() />
                                                             <label for=select_id.clone() class="sr-only">
-                                                                "Role of " {member.username.clone()}
+                                                                {tf!("settings.role_of", username = member.username.clone())}
                                                             </label>
                                                             <select id=select_id name="role" class=format!("{SELECT} w-32")>
                                                                 {role_options(member.manual_role, owners_allowed)}
                                                             </select>
-                                                            <Button variant=ButtonVariant::Outline size=ButtonSize::Small>"Save"</Button>
+                                                            <Button variant=ButtonVariant::Outline size=ButtonSize::Small>{t!("settings.save")}</Button>
                                                         </form>
                                                     }
                                                         .into_any()
@@ -85,7 +86,7 @@ fn Members(page: SettingsData) -> impl IntoView {
                                                                 <input type="hidden" name="organization" value=organization.clone() />
                                                                 <input type="hidden" name="user" value=user.clone() />
                                                                 <Button variant=ButtonVariant::Ghost size=ButtonSize::Small>
-                                                                    {if member.user_id == current_user { "Leave" } else { "Remove" }}
+                                                                    {if member.user_id == current_user { t!("settings.leave") } else { t!("settings.remove") }}
                                                                 </Button>
                                                             </form>
                                                         }
@@ -98,21 +99,19 @@ fn Members(page: SettingsData) -> impl IntoView {
     view! {
         <Card>
             <CardHeader>
-                <CardTitle>"Members"</CardTitle>
-                <CardDescription>
-                    "Viewers read; members also ignore findings and start checks; admins also manage members, projects, tokens and the webhook; owners also manage owners. Roles from the identity provider's groups are shown apart and follow each sign-in."
-                </CardDescription>
+                <CardTitle>{t!("settings.members_title")}</CardTitle>
+                <CardDescription>{t!("settings.members_description")}</CardDescription>
             </CardHeader>
             <CardContent>
                 <div class="grid gap-6">
-                    <Table caption="Members and their roles">
+                    <Table caption=t!("settings.members_caption")>
                         <thead>
                             <tr class=TABLE_HEAD_ROW>
-                                <th scope="col" class=TABLE_HEAD>"User"</th>
-                                <th scope="col" class=TABLE_HEAD>"Role"</th>
-                                <th scope="col" class=TABLE_HEAD>"From groups"</th>
+                                <th scope="col" class=TABLE_HEAD>{t!("settings.user")}</th>
+                                <th scope="col" class=TABLE_HEAD>{t!("settings.role")}</th>
+                                <th scope="col" class=TABLE_HEAD>{t!("settings.from_groups")}</th>
                                 <th scope="col" class=TABLE_HEAD>
-                                    <span class="sr-only">"Actions"</span>
+                                    <span class="sr-only">{t!("common.actions")}</span>
                                 </th>
                             </tr>
                         </thead>
@@ -127,18 +126,18 @@ fn Members(page: SettingsData) -> impl IntoView {
                     >
                         <input type="hidden" name="organization" value=organization.clone() />
                         <Field
-                            label="Add a user"
+                            label=t!("settings.add_user")
                             input_id="member-login"
-                            hint="Username or email address of an existing account."
+                            hint=t!("settings.add_user_hint")
                         >
                             <input id="member-login" name="login" class=INPUT required />
                         </Field>
-                        <Field label="Role" input_id="member-role">
+                        <Field label=t!("settings.role") input_id="member-role">
                             <select id="member-role" name="role" class=SELECT>
                                 {role_options(Some(Role::Viewer), owners_allowed)}
                             </select>
                         </Field>
-                        <Button>"Add member"</Button>
+                        <Button>{t!("settings.add_member")}</Button>
                     </form>
                 </div>
             </CardContent>
@@ -164,20 +163,20 @@ fn Tokens(page: SettingsData) -> impl IntoView {
                                                         </span>
                                                     </th>
                                                     <td class=TABLE_CELL>
-                                                        {token.project_slug.clone().unwrap_or_else(|| "Whole organization".to_owned())}
+                                                        {token.project_slug.clone().unwrap_or_else(|| t!("settings.whole_organization").to_owned())}
                                                     </td>
                                                     <td class=format!("{TABLE_CELL} text-muted-foreground whitespace-nowrap")>
-                                                        {token.last_used_at.map_or_else(|| "Never".to_owned(), format_time)}
+                                                        {token.last_used_at.map_or_else(|| t!("common.never").to_owned(), format_time)}
                                                     </td>
                                                     <td class=format!("{TABLE_CELL} text-right")>
                                                         {if token.revoked {
-                                                            view! { <Badge variant=BadgeVariant::Muted>"Revoked"</Badge> }.into_any()
+                                                            view! { <Badge variant=BadgeVariant::Muted>{t!("settings.revoked")}</Badge> }.into_any()
                                                         } else {
                                                             view! {
                                                                 <form method="post" action={action::<RevokeToken>()}>
                                                                     <input type="hidden" name="organization" value=organization />
                                                                     <input type="hidden" name="token" value=token.id.to_string() />
-                                                                    <Button variant=ButtonVariant::Ghost size=ButtonSize::Small>"Revoke"</Button>
+                                                                    <Button variant=ButtonVariant::Ghost size=ButtonSize::Small>{t!("settings.revoke")}</Button>
                                                                 </form>
                                                             }
                                                                 .into_any()
@@ -190,10 +189,8 @@ fn Tokens(page: SettingsData) -> impl IntoView {
     view! {
         <Card>
             <CardHeader>
-                <CardTitle>"Upload tokens"</CardTitle>
-                <CardDescription>
-                    "CI sends SBOMs with a token in the Authorization header. An organization token may also create projects; a project token only reaches its project."
-                </CardDescription>
+                <CardTitle>{t!("settings.tokens_title")}</CardTitle>
+                <CardDescription>{t!("settings.tokens_description")}</CardDescription>
             </CardHeader>
             <CardContent>
                 <div class="grid gap-6">
@@ -202,24 +199,24 @@ fn Tokens(page: SettingsData) -> impl IntoView {
                         .clone()
                         .map(|secret| {
                             view! {
-                                <Alert variant=AlertVariant::Success title="Your new token">
-                                    <p>"Copy it now and store it as a CI secret: it will not be shown again."</p>
-                                    <label for="new-token" class="sr-only">"New token"</label>
+                                <Alert variant=AlertVariant::Success title=t!("settings.new_token_title")>
+                                    <p>{t!("settings.new_token_text")}</p>
+                                    <label for="new-token" class="sr-only">{t!("settings.new_token_label")}</label>
                                     <input id="new-token" class=format!("{INPUT} mt-2 font-mono") readonly value=secret />
                                 </Alert>
                             }
                         })}
                     {if !has_tokens {
-                        view! { <Empty title="No token yet">"Create one below."</Empty> }.into_any()
+                        view! { <Empty title=t!("settings.no_token_title")>{t!("settings.no_token_text")}</Empty> }.into_any()
                     } else {
                         view! {
-                            <Table caption="Upload tokens">
+                            <Table caption=t!("settings.tokens_title")>
                                 <thead>
                                     <tr class=TABLE_HEAD_ROW>
-                                        <th scope="col" class=TABLE_HEAD>"Name"</th>
-                                        <th scope="col" class=TABLE_HEAD>"Scope"</th>
-                                        <th scope="col" class=TABLE_HEAD>"Last used"</th>
-                                        <th scope="col" class=TABLE_HEAD><span class="sr-only">"Actions"</span></th>
+                                        <th scope="col" class=TABLE_HEAD>{t!("settings.token_name_column")}</th>
+                                        <th scope="col" class=TABLE_HEAD>{t!("settings.scope")}</th>
+                                        <th scope="col" class=TABLE_HEAD>{t!("settings.last_used")}</th>
+                                        <th scope="col" class=TABLE_HEAD><span class="sr-only">{t!("common.actions")}</span></th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -235,12 +232,12 @@ fn Tokens(page: SettingsData) -> impl IntoView {
                         class="grid gap-4 sm:grid-cols-[2fr_1fr_auto] sm:items-end"
                     >
                         <input type="hidden" name="organization" value=organization.clone() />
-                        <Field label="Token name" input_id="token-name">
+                        <Field label=t!("settings.token_name") input_id="token-name">
                             <input id="token-name" name="name" class=INPUT required placeholder="GitHub Actions" />
                         </Field>
-                        <Field label="Scope" input_id="token-project">
+                        <Field label=t!("settings.scope") input_id="token-project">
                             <select id="token-project" name="project" class=SELECT>
-                                <option value="">"Whole organization"</option>
+                                <option value="">{t!("settings.whole_organization")}</option>
                                 {page
                                     .projects
                                     .into_iter()
@@ -248,7 +245,7 @@ fn Tokens(page: SettingsData) -> impl IntoView {
                                     .collect_view()}
                             </select>
                         </Field>
-                        <Button>"Create token"</Button>
+                        <Button>{t!("settings.create_token")}</Button>
                     </form>
                 </div>
             </CardContent>
@@ -273,7 +270,7 @@ fn WebhookSettings(page: SettingsData) -> impl IntoView {
         webhook.last_delivery_at.map(|date| {
             view! {
                 <p class="text-muted-foreground text-sm">
-                    "Last delivery " {format_time(date)} ": " {status}
+                    {tf!("settings.last_delivery", time = format_time(date), status = status)}
                 </p>
             }
         })
@@ -284,7 +281,7 @@ fn WebhookSettings(page: SettingsData) -> impl IntoView {
             view! {
                 <form method="post" action={action::<DeleteWebhook>()}>
                     <input type="hidden" name="organization" value=organization />
-                    <Button variant=ButtonVariant::Ghost size=ButtonSize::Small>"Remove webhook"</Button>
+                    <Button variant=ButtonVariant::Ghost size=ButtonSize::Small>{t!("settings.remove_webhook")}</Button>
                 </form>
             }
         }
@@ -292,17 +289,15 @@ fn WebhookSettings(page: SettingsData) -> impl IntoView {
     view! {
         <Card>
             <CardHeader>
-                <CardTitle>"Webhook"</CardTitle>
-                <CardDescription>
-                    "After each check, new findings at or above the chosen severity are sent as one JSON document (documented in the README)."
-                </CardDescription>
+                <CardTitle>{t!("settings.webhook_title")}</CardTitle>
+                <CardDescription>{t!("settings.webhook_description")}</CardDescription>
             </CardHeader>
             <CardContent>
                 <div class="grid gap-4">
                     {last_delivery}
                     <form method="post" action={action::<SaveWebhook>()} class="grid gap-4">
                         <input type="hidden" name="organization" value=organization.clone() />
-                        <Field label="URL" input_id="webhook-url">
+                        <Field label=t!("settings.webhook_url") input_id="webhook-url">
                             <input
                                 id="webhook-url"
                                 name="url"
@@ -314,7 +309,7 @@ fn WebhookSettings(page: SettingsData) -> impl IntoView {
                             />
                         </Field>
                         <div class="flex flex-wrap items-end gap-4">
-                            <Field label="Minimum severity" input_id="webhook-severity">
+                            <Field label=t!("settings.minimum_severity") input_id="webhook-severity">
                                 <select id="webhook-severity" name="minimum_severity" class=format!("{SELECT} w-40")>
                                     {Severity::DESCENDING
                                         .into_iter()
@@ -330,9 +325,9 @@ fn WebhookSettings(page: SettingsData) -> impl IntoView {
                             </Field>
                             <label class=format!("{LABEL} h-9")>
                                 <input type="checkbox" name="enabled" class=CHECKBOX checked=enabled />
-                                "Enabled"
+                                {t!("settings.enabled")}
                             </label>
-                            <Button>"Save webhook"</Button>
+                            <Button>{t!("settings.save_webhook")}</Button>
                         </div>
                     </form>
                     {remove}
@@ -352,10 +347,8 @@ fn OrganizationSettings(page: SettingsData) -> impl IntoView {
                 view! {
                     <Card class="border-destructive/40">
                         <CardHeader>
-                            <CardTitle>"Delete this organization"</CardTitle>
-                            <CardDescription>
-                                "Its projects, findings, tokens and memberships are deleted for good."
-                            </CardDescription>
+                            <CardTitle>{t!("settings.delete_title")}</CardTitle>
+                            <CardDescription>{t!("settings.delete_description")}</CardDescription>
                         </CardHeader>
                         <CardContent>
                             <form
@@ -364,10 +357,10 @@ fn OrganizationSettings(page: SettingsData) -> impl IntoView {
                                 class="flex flex-wrap items-end gap-3"
                             >
                                 <input type="hidden" name="organization" value=slug.clone() />
-                                <Field label=format!("Type {slug} to confirm") input_id="delete-confirmation">
+                                <Field label=tf!("common.type_to_confirm", slug = slug.clone()) input_id="delete-confirmation">
                                     <input id="delete-confirmation" name="confirmation" class=INPUT required autocomplete="off" />
                                 </Field>
-                                <Button variant=ButtonVariant::Destructive>"Delete organization"</Button>
+                                <Button variant=ButtonVariant::Destructive>{t!("settings.delete")}</Button>
                             </form>
                         </CardContent>
                     </Card>
@@ -377,7 +370,7 @@ fn OrganizationSettings(page: SettingsData) -> impl IntoView {
     view! {
         <Card>
             <CardHeader>
-                <CardTitle>"Organization"</CardTitle>
+                <CardTitle>{t!("settings.organization_title")}</CardTitle>
             </CardHeader>
             <CardContent>
                 <form
@@ -386,10 +379,10 @@ fn OrganizationSettings(page: SettingsData) -> impl IntoView {
                     class="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end"
                 >
                     <input type="hidden" name="organization" value=slug.clone() />
-                    <Field label="Name" input_id="organization-name">
+                    <Field label=t!("settings.organization_name") input_id="organization-name">
                         <input id="organization-name" name="name" class=INPUT required value=organization.name.clone() />
                     </Field>
-                    <Button variant=ButtonVariant::Secondary>"Rename"</Button>
+                    <Button variant=ButtonVariant::Secondary>{t!("settings.rename")}</Button>
                 </form>
             </CardContent>
         </Card>
@@ -403,21 +396,21 @@ pub fn SettingsPage() -> impl IntoView {
     let slug = move || params.read().get("organization").unwrap_or_default();
     let page = Resource::new(slug, load_settings);
     view! {
-        <Page title="Settings">
+        <Page title=t!("settings.title")>
             <Loaded
                 resource=page
                 render={|page: SettingsData| {
                     let organization = page.organization.clone();
                     view! {
-                        <Title text=format!("{} settings · nanobom", organization.name) />
-                        <nav aria-label="Breadcrumb" class="text-muted-foreground text-sm">
+                        <Title text=format!("{} · nanobom", tf!("settings.page_title", name = organization.name.clone())) />
+                        <nav aria-label=t!("common.breadcrumb") class="text-muted-foreground text-sm">
                             <a class="hover:underline" href=format!("/organizations/{}", organization.slug)>
                                 {organization.name.clone()}
                             </a>
                             " / "
-                            <span aria-current="page">"Settings"</span>
+                            <span aria-current="page">{t!("settings.title")}</span>
                         </nav>
-                        <Heading title="Settings" subtitle=organization.name.clone() />
+                        <Heading title=t!("settings.title") subtitle=organization.name.clone() />
                         <Members page=page.clone() />
                         <Tokens page=page.clone() />
                         <WebhookSettings page=page.clone() />
@@ -433,8 +426,8 @@ pub fn SettingsPage() -> impl IntoView {
 pub fn AdministrationPage() -> impl IntoView {
     let page = Resource::new(|| (), |()| load_administration());
     view! {
-        <Page title="Administration">
-            <Heading title="Administration" subtitle="Users and organizations of this instance." />
+        <Page title=t!("administration.title")>
+            <Heading title=t!("administration.title") subtitle=t!("administration.subtitle") />
             <Loaded
                 resource=page
                 render={|page: AdministrationData| {
@@ -443,16 +436,16 @@ pub fn AdministrationPage() -> impl IntoView {
                     view! {
                         <Card>
                             <CardHeader>
-                                <CardTitle>"Users"</CardTitle>
+                                <CardTitle>{t!("administration.users")}</CardTitle>
                             </CardHeader>
                             <CardContent>
-                                <Table caption="Users">
+                                <Table caption=t!("administration.users")>
                                     <thead>
                                         <tr class=TABLE_HEAD_ROW>
-                                            <th scope="col" class=TABLE_HEAD>"User"</th>
-                                            <th scope="col" class=TABLE_HEAD>"Last sign-in"</th>
-                                            <th scope="col" class=TABLE_HEAD>"Status"</th>
-                                            <th scope="col" class=TABLE_HEAD><span class="sr-only">"Actions"</span></th>
+                                            <th scope="col" class=TABLE_HEAD>{t!("administration.user")}</th>
+                                            <th scope="col" class=TABLE_HEAD>{t!("administration.last_sign_in")}</th>
+                                            <th scope="col" class=TABLE_HEAD>{t!("administration.status")}</th>
+                                            <th scope="col" class=TABLE_HEAD><span class="sr-only">{t!("common.actions")}</span></th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -473,13 +466,13 @@ pub fn AdministrationPage() -> impl IntoView {
                                                             </span>
                                                         </th>
                                                         <td class=format!("{TABLE_CELL} text-muted-foreground whitespace-nowrap")>
-                                                            {user.last_login_at.map_or_else(|| "Never".to_owned(), format_time)}
+                                                            {user.last_login_at.map_or_else(|| t!("common.never").to_owned(), format_time)}
                                                         </td>
                                                         <td class=TABLE_CELL>
                                                             <div class="flex flex-wrap gap-1">
-                                                                {user.is_instance_administrator.then(|| view! { <Badge>"Administrator"</Badge> })}
-                                                                {user.is_disabled.then(|| view! { <Badge variant=BadgeVariant::Destructive>"Disabled"</Badge> })}
-                                                                {(!user.has_password).then(|| view! { <Badge variant=BadgeVariant::Muted>"Single sign-on"</Badge> })}
+                                                                {user.is_instance_administrator.then(|| view! { <Badge>{t!("administration.administrator")}</Badge> })}
+                                                                {user.is_disabled.then(|| view! { <Badge variant=BadgeVariant::Destructive>{t!("administration.disabled")}</Badge> })}
+                                                                {(!user.has_password).then(|| view! { <Badge variant=BadgeVariant::Muted>{t!("administration.single_sign_on")}</Badge> })}
                                                             </div>
                                                         </td>
                                                         <td class=TABLE_CELL>
@@ -491,14 +484,18 @@ pub fn AdministrationPage() -> impl IntoView {
                                                                                 <input type="hidden" name="user" value=id.clone() />
                                                                                 <input type="hidden" name="disabled" value=(!user.is_disabled).to_string() />
                                                                                 <Button variant=ButtonVariant::Outline size=ButtonSize::Small>
-                                                                                    {if user.is_disabled { "Enable" } else { "Disable" }}
+                                                                                    {if user.is_disabled { t!("administration.enable") } else { t!("administration.disable") }}
                                                                                 </Button>
                                                                             </form>
                                                                             <form method="post" action={action::<SetUserAdministrator>()}>
                                                                                 <input type="hidden" name="user" value=id.clone() />
                                                                                 <input type="hidden" name="administrator" value=(!user.is_instance_administrator).to_string() />
                                                                                 <Button variant=ButtonVariant::Outline size=ButtonSize::Small>
-                                                                                    {if user.is_instance_administrator { "Remove administrator" } else { "Make administrator" }}
+                                                                                    {if user.is_instance_administrator {
+                                                                                        t!("administration.remove_administrator")
+                                                                                    } else {
+                                                                                        t!("administration.make_administrator")
+                                                                                    }}
                                                                                 </Button>
                                                                             </form>
                                                                             {(page.local_accounts)
@@ -507,7 +504,7 @@ pub fn AdministrationPage() -> impl IntoView {
                                                                                         <form method="post" action={action::<ResetPassword>()} class="flex gap-2">
                                                                                             <input type="hidden" name="user" value=id.clone() />
                                                                                             <label for=password_id.clone() class="sr-only">
-                                                                                                "New password for " {user.username.clone()}
+                                                                                                {tf!("administration.new_password_for", username = user.username.clone())}
                                                                                             </label>
                                                                                             <input
                                                                                                 id=password_id.clone()
@@ -516,10 +513,10 @@ pub fn AdministrationPage() -> impl IntoView {
                                                                                                 class=format!("{INPUT} h-8 w-40")
                                                                                                 autocomplete="new-password"
                                                                                                 minlength=minimum.to_string()
-                                                                                                placeholder="New password"
+                                                                                                placeholder=t!("administration.new_password")
                                                                                                 required
                                                                                             />
-                                                                                            <Button variant=ButtonVariant::Outline size=ButtonSize::Small>"Reset"</Button>
+                                                                                            <Button variant=ButtonVariant::Outline size=ButtonSize::Small>{t!("administration.reset")}</Button>
                                                                                         </form>
                                                                                     }
                                                                                 })}
@@ -541,20 +538,20 @@ pub fn AdministrationPage() -> impl IntoView {
                                 view! {
                                     <Card>
                                         <CardHeader>
-                                            <CardTitle>"New local account"</CardTitle>
+                                            <CardTitle>{t!("administration.new_account")}</CardTitle>
                                         </CardHeader>
                                         <CardContent>
                                             <form method="post" action={action::<CreateUser>()} class="grid gap-4 sm:grid-cols-2">
-                                                <Field label="Username" input_id="new-username">
+                                                <Field label=t!("administration.username") input_id="new-username">
                                                     <input id="new-username" name="username" class=INPUT required autocomplete="off" />
                                                 </Field>
-                                                <Field label="Email address (optional)" input_id="new-email">
+                                                <Field label=t!("administration.email") input_id="new-email">
                                                     <input id="new-email" name="email" type="email" class=INPUT autocomplete="off" />
                                                 </Field>
                                                 <Field
-                                                    label="Password"
+                                                    label=t!("administration.password")
                                                     input_id="new-password"
-                                                    hint=format!("At least {minimum} characters.")
+                                                    hint=tf!("administration.password_hint", minimum = minimum)
                                                 >
                                                     <input
                                                         id="new-password"
@@ -568,10 +565,10 @@ pub fn AdministrationPage() -> impl IntoView {
                                                 </Field>
                                                 <label class=format!("{LABEL} self-end h-9")>
                                                     <input type="checkbox" name="administrator" class=CHECKBOX />
-                                                    "Instance administrator"
+                                                    {t!("administration.instance_administrator")}
                                                 </label>
                                                 <div>
-                                                    <Button>"Create user"</Button>
+                                                    <Button>{t!("administration.create_user")}</Button>
                                                 </div>
                                             </form>
                                         </CardContent>
@@ -580,8 +577,8 @@ pub fn AdministrationPage() -> impl IntoView {
                             })}
                         <Card>
                             <CardHeader>
-                                <CardTitle>"Organizations"</CardTitle>
-                                <CardDescription>"Every organization of the instance; open one to manage it."</CardDescription>
+                                <CardTitle>{t!("administration.organizations")}</CardTitle>
+                                <CardDescription>{t!("administration.organizations_description")}</CardDescription>
                             </CardHeader>
                             <CardContent>
                                 <ul class="grid gap-2 text-sm">
@@ -595,7 +592,7 @@ pub fn AdministrationPage() -> impl IntoView {
                                                         {organization.name}
                                                     </a>
                                                     <span class="text-muted-foreground">
-                                                        " · " {organization.slug} {organization.is_personal.then_some(" · personal")}
+                                                        " · " {organization.slug} {organization.is_personal.then(|| format!(" · {}", t!("common.personal")))}
                                                     </span>
                                                 </li>
                                             }

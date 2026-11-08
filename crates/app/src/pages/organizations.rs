@@ -10,18 +10,17 @@ use crate::{
         CreateOrganization, TriggerRun, load_organization, load_organizations, load_sign_in_options,
     },
     model::{Organization, OrganizationData, Run, Severity, SeverityCounts, SignInOptions},
+    t, tp,
 };
 
 fn sign_in_error(code: &str) -> &'static str {
     match code {
-        "invalid" => "The username or password is incorrect.",
-        "unknown" => {
-            "This account is not known here and new accounts are not created automatically."
-        }
-        "disabled" => "This account is disabled.",
-        "expired" => "The sign-in took too long; please try again.",
-        "provider" => "The identity provider could not sign you in; please try again.",
-        _ => "Signing in is not available right now; please try again later.",
+        "invalid" => t!("sign_in.error_invalid"),
+        "unknown" => t!("sign_in.error_unknown"),
+        "disabled" => t!("sign_in.error_disabled"),
+        "expired" => t!("sign_in.error_expired"),
+        "provider" => t!("sign_in.error_provider"),
+        _ => t!("sign_in.error_unavailable"),
     }
 }
 
@@ -36,12 +35,13 @@ pub fn SignInPage() -> impl IntoView {
     };
     let error = move || query.read().get("error").map(|code| sign_in_error(&code));
     let options = Resource::new(|| (), |()| load_sign_in_options());
+    let title = format!("{} · nanobom", t!("sign_in.title"));
     view! {
-        <Title text="Sign in · nanobom" />
+        <Title text=title />
         <main id="content" class="mx-auto grid max-w-sm gap-6 px-4 py-16">
             <div class="grid gap-1 text-center">
                 <h1 class="text-2xl font-semibold tracking-tight">"nanobom"</h1>
-                <p class="text-muted-foreground text-sm">"Sign in to your vulnerability inventory"</p>
+                <p class="text-muted-foreground text-sm">{t!("sign_in.subtitle")}</p>
             </div>
             {move || error().map(|error| view! { <Alert variant=AlertVariant::Destructive>{error}</Alert> })}
             <Loaded
@@ -58,7 +58,7 @@ pub fn SignInPage() -> impl IntoView {
                                             view! {
                                                 <form method="post" action="/auth/login" class="grid gap-4">
                                                     <input type="hidden" name="next" value=next.clone() />
-                                                    <Field label="Username or email address" input_id="login">
+                                                    <Field label=t!("sign_in.login") input_id="login">
                                                         <input
                                                             id="login"
                                                             name="login"
@@ -68,7 +68,7 @@ pub fn SignInPage() -> impl IntoView {
                                                             autofocus
                                                         />
                                                     </Field>
-                                                    <Field label="Password" input_id="password">
+                                                    <Field label=t!("sign_in.password") input_id="password">
                                                         <input
                                                             id="password"
                                                             name="password"
@@ -78,7 +78,7 @@ pub fn SignInPage() -> impl IntoView {
                                                             required
                                                         />
                                                     </Field>
-                                                    <Button>"Sign in"</Button>
+                                                    <Button>{t!("sign_in.submit")}</Button>
                                                 </form>
                                             }
                                         })}
@@ -109,15 +109,15 @@ pub fn SignInPage() -> impl IntoView {
 pub fn OrganizationsPage() -> impl IntoView {
     let list = Resource::new(|| (), |()| load_organizations());
     view! {
-        <Page title="Organizations">
-            <Heading title="Organizations" subtitle="The organizations you belong to." />
+        <Page title=t!("organizations.title")>
+            <Heading title=t!("organizations.title") subtitle=t!("organizations.subtitle") />
             <Loaded
                 resource=list
                 render={|organizations: Vec<Organization>| {
                     if organizations.is_empty() {
                         view! {
-                            <Empty title="No organization yet">
-                                "Create one below, or ask an administrator to add you to one."
+                            <Empty title=t!("organizations.empty_title")>
+                                {t!("organizations.empty_text")}
                             </Empty>
                         }
                             .into_any()
@@ -137,7 +137,7 @@ pub fn OrganizationsPage() -> impl IntoView {
                                                     <span class="font-medium">{organization.name}</span>
                                                     <span class="text-muted-foreground block text-sm">
                                                         {organization.slug} " · " {organization.role.label()}
-                                                        {organization.is_personal.then_some(" · personal")}
+                                                        {organization.is_personal.then(|| format!(" · {}", t!("common.personal")))}
                                                     </span>
                                                 </a>
                                             </li>
@@ -152,10 +152,8 @@ pub fn OrganizationsPage() -> impl IntoView {
             />
             <Card>
                 <CardHeader>
-                    <CardTitle>"New organization"</CardTitle>
-                    <CardDescription>
-                        "You will be its owner. The slug appears in addresses and upload URLs."
-                    </CardDescription>
+                    <CardTitle>{t!("organizations.new_title")}</CardTitle>
+                    <CardDescription>{t!("organizations.new_description")}</CardDescription>
                 </CardHeader>
                 <CardContent>
                     <form
@@ -163,10 +161,10 @@ pub fn OrganizationsPage() -> impl IntoView {
                         action={action::<CreateOrganization>()}
                         class="grid gap-4 sm:grid-cols-[1fr_1fr_auto] sm:items-end"
                     >
-                        <Field label="Name" input_id="organization-name">
+                        <Field label=t!("organizations.name") input_id="organization-name">
                             <input id="organization-name" name="name" class=INPUT required />
                         </Field>
-                        <Field label="Slug" input_id="organization-slug">
+                        <Field label=t!("organizations.slug") input_id="organization-slug">
                             <input
                                 id="organization-slug"
                                 name="slug"
@@ -176,7 +174,7 @@ pub fn OrganizationsPage() -> impl IntoView {
                                 placeholder="acme"
                             />
                         </Field>
-                        <Button>"Create"</Button>
+                        <Button>{t!("organizations.create")}</Button>
                     </form>
                 </CardContent>
             </Card>
@@ -202,13 +200,29 @@ fn severity_cells(open: SeverityCounts) -> impl IntoView {
         .collect_view()
 }
 
+fn trigger_label(trigger: &str) -> String {
+    match trigger {
+        "scheduled" => t!("organization.trigger_scheduled").to_owned(),
+        "manual" => t!("organization.trigger_manual").to_owned(),
+        "upload" => t!("organization.trigger_upload").to_owned(),
+        other => other.to_owned(),
+    }
+}
+
+fn scope_label(scope: &str) -> String {
+    match scope {
+        "all" => t!("organization.scope_all").to_owned(),
+        "organization" => t!("organization.scope_organization").to_owned(),
+        "project" => t!("organization.scope_project").to_owned(),
+        other => other.to_owned(),
+    }
+}
+
 #[component]
 fn RunHistory(runs: Vec<Run>) -> impl IntoView {
     if runs.is_empty() {
         return view! {
-            <p class="text-muted-foreground text-sm">
-                "No run yet. Runs start after each upload and every night."
-            </p>
+            <p class="text-muted-foreground text-sm">{t!("organization.no_run")}</p>
         }
         .into_any();
     }
@@ -222,19 +236,21 @@ fn RunHistory(runs: Vec<Run>) -> impl IntoView {
                         <li class="flex flex-wrap items-baseline gap-x-2">
                             <span class=if failed { "text-destructive font-medium" } else { "font-medium" }>
                                 {match run.status.as_str() {
-                                    "succeeded" => "Succeeded",
-                                    "failed" => "Failed",
-                                    _ => "Running",
+                                    "succeeded" => t!("organization.run_succeeded"),
+                                    "failed" => t!("organization.run_failed"),
+                                    _ => t!("organization.run_running"),
                                 }}
                             </span>
                             <span class="text-muted-foreground">
-                                {format_time(run.started_at)} " · " {run.trigger} " · " {run.scope}
+                                {format_time(run.started_at)} " · " {trigger_label(&run.trigger)} " · "
+                                {scope_label(&run.scope)}
                             </span>
                             {(!failed && run.status == "succeeded")
                                 .then(|| {
                                     view! {
                                         <span>
-                                            {run.new_findings} " new, " {run.fixed_findings} " fixed"
+                                            {tp!("organization.run_new", run.new_findings)} ", "
+                                            {tp!("organization.run_fixed", run.fixed_findings)}
                                         </span>
                                     }
                                 })}
@@ -254,7 +270,7 @@ pub fn OrganizationPage() -> impl IntoView {
     let slug = move || params.read().get("organization").unwrap_or_default();
     let page = Resource::new(slug, load_organization);
     view! {
-        <Page title="Organization">
+        <Page title=t!("organization.title")>
             <Loaded
                 resource=page
                 render={|page: OrganizationData| {
@@ -266,7 +282,7 @@ pub fn OrganizationPage() -> impl IntoView {
                             view! {
                                 <form method="post" action={action::<TriggerRun>()}>
                                     <input type="hidden" name="organization" value=slug />
-                                    <Button variant=ButtonVariant::Outline>"Check now"</Button>
+                                    <Button variant=ButtonVariant::Outline>{t!("organization.check_now")}</Button>
                                 </form>
                             }
                         }
@@ -276,7 +292,7 @@ pub fn OrganizationPage() -> impl IntoView {
                         move || {
                             view! {
                                 <LinkButton href variant=ButtonVariant::Secondary>
-                                    "Settings"
+                                    {t!("organization.settings")}
                                 </LinkButton>
                             }
                         }
@@ -291,7 +307,7 @@ pub fn OrganizationPage() -> impl IntoView {
                             let name = project.name.clone();
                             let last_upload = project
                                 .last_upload_at
-                                .map_or_else(|| "never".to_owned(), format_time);
+                                .map_or_else(|| t!("organization.never").to_owned(), format_time);
                             view! {
                                 <tr class=TABLE_ROW>
                                     <th scope="row" class=format!("{TABLE_CELL} text-left font-medium")>
@@ -312,8 +328,8 @@ pub fn OrganizationPage() -> impl IntoView {
                         .collect_view();
                     let projects = if page.projects.is_empty() {
                         view! {
-                            <Empty title="No project yet">
-                                "Projects appear with their first SBOM upload. Create an upload token in the settings, then follow the README's CI examples."
+                            <Empty title=t!("organization.no_project_title")>
+                                {t!("organization.no_project_text")}
                             </Empty>
                         }
                             .into_any()
@@ -329,13 +345,13 @@ pub fn OrganizationPage() -> impl IntoView {
                             })
                             .collect_view();
                         view! {
-                            <Table caption="Projects with their open findings by severity">
+                            <Table caption=t!("organization.projects_caption")>
                                 <thead>
                                     <tr class=TABLE_HEAD_ROW>
-                                        <th scope="col" class=TABLE_HEAD>"Project"</th>
+                                        <th scope="col" class=TABLE_HEAD>{t!("organization.project")}</th>
                                         {headers}
-                                        <th scope="col" class=format!("{TABLE_HEAD} text-right")>"Ignored"</th>
-                                        <th scope="col" class=TABLE_HEAD>"Last upload"</th>
+                                        <th scope="col" class=format!("{TABLE_HEAD} text-right")>{t!("organization.ignored")}</th>
+                                        <th scope="col" class=TABLE_HEAD>{t!("organization.last_upload")}</th>
                                     </tr>
                                 </thead>
                                 <tbody>{rows}</tbody>
@@ -353,10 +369,8 @@ pub fn OrganizationPage() -> impl IntoView {
                         {projects}
                         <Card>
                             <CardHeader>
-                                <CardTitle>"Recent runs"</CardTitle>
-                                <CardDescription>
-                                    "A failed run changes nothing: findings stay as they were until a run succeeds."
-                                </CardDescription>
+                                <CardTitle>{t!("organization.runs_title")}</CardTitle>
+                                <CardDescription>{t!("organization.runs_description")}</CardDescription>
                             </CardHeader>
                             <CardContent>
                                 <RunHistory runs=page.runs />

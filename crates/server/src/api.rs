@@ -72,8 +72,11 @@ impl From<nanobom_domain::Error> for ApiError {
                 StatusCode::FORBIDDEN,
                 "this token does not allow uploads to this project",
             ),
-            Error::Invalid(message) => Self::new(StatusCode::UNPROCESSABLE_ENTITY, message),
-            Error::Conflict(message) => Self::new(StatusCode::CONFLICT, message),
+            // The API speaks English: CI logs are read by whoever maintains the pipeline.
+            Error::Invalid(problem) => {
+                Self::new(StatusCode::UNPROCESSABLE_ENTITY, problem.to_string())
+            }
+            Error::Conflict(problem) => Self::new(StatusCode::CONFLICT, problem.to_string()),
             Error::Database(error) => {
                 tracing::error!(%error, "database error");
                 Self::new(StatusCode::INTERNAL_SERVER_ERROR, "internal error")

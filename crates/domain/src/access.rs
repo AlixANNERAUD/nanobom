@@ -9,7 +9,10 @@ use nanobom_entity::{memberships, users};
 use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
 use serde::{Deserialize, Serialize};
 
-use crate::error::{Error, Result};
+use crate::{
+    error::{Error, Result},
+    problem::Problem,
+};
 
 /// A role within one organization, from the least to the most privileged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -43,9 +46,9 @@ impl Role {
             "member" => Ok(Role::Member),
             "admin" => Ok(Role::Admin),
             "owner" => Ok(Role::Owner),
-            other => Err(Error::invalid(format!(
-                "unknown role {other:?}; expected viewer, member, admin or owner"
-            ))),
+            other => Err(Error::invalid(Problem::UnknownRole {
+                role: other.to_owned(),
+            })),
         }
     }
 

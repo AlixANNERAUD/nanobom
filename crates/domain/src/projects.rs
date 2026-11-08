@@ -11,6 +11,7 @@ use crate::{
     access::{Actor, Permission},
     error::{Error, Result},
     names,
+    problem::{Field, Problem},
 };
 
 /// The projects of an organization, sorted by slug.
@@ -79,18 +80,16 @@ pub(crate) async fn insert(
     slug: &str,
     name: Option<&str>,
 ) -> Result<projects::Model> {
-    let slug = names::slug("the project slug", slug)?;
+    let slug = names::slug(Field::ProjectSlug, slug)?;
     let name = match name {
-        Some(name) => names::display_name("the project name", name)?,
+        Some(name) => names::display_name(Field::ProjectName, name)?,
         None => slug.clone(),
     };
     if find_model(database, organization_id, &slug)
         .await?
         .is_some()
     {
-        return Err(Error::conflict(format!(
-            "the project {slug:?} already exists"
-        )));
+        return Err(Error::conflict(Problem::ProjectExists { slug }));
     }
     Ok(projects::ActiveModel {
         organization_id: Set(organization_id),
@@ -126,7 +125,7 @@ pub async fn rename(
     name: &str,
 ) -> Result<projects::Model> {
     let project = authorize(database, actor, project_id, Permission::ManageProjects).await?;
-    let name = names::display_name("the project name", name)?;
+    let name = names::display_name(Field::ProjectName, name)?;
     let mut project: projects::ActiveModel = project.into();
     project.name = Set(name);
     Ok(project.update(database).await?)

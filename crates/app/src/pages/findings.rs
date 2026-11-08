@@ -16,6 +16,7 @@ use crate::{
     model::{
         ComponentMatch, FindingData, FindingFilter, FindingRow, ProjectData, Severity, Status,
     },
+    t, tf, tp,
 };
 
 fn finding_rows(findings: Vec<FindingRow>) -> impl IntoView {
@@ -68,11 +69,11 @@ fn finding_rows(findings: Vec<FindingRow>) -> impl IntoView {
 fn Filters(page: ProjectData, filter: FindingFilter) -> impl IntoView {
     let selected = |current: &Option<String>, value: &str| current.as_deref() == Some(value);
     view! {
-        <form method="get" class="flex flex-wrap items-end gap-3" aria-label="Filter findings">
+        <form method="get" class="flex flex-wrap items-end gap-3" aria-label=t!("project.filter_label")>
             <div class="grid gap-2">
-                <label class=LABEL for="filter-severity">"Severity"</label>
+                <label class=LABEL for="filter-severity">{t!("project.severity")}</label>
                 <select id="filter-severity" name="severity" class=SELECT>
-                    <option value="">"Any"</option>
+                    <option value="">{t!("project.filter_any_severity")}</option>
                     {Severity::DESCENDING
                         .into_iter()
                         .map(|severity| {
@@ -89,9 +90,9 @@ fn Filters(page: ProjectData, filter: FindingFilter) -> impl IntoView {
                 </select>
             </div>
             <div class="grid gap-2">
-                <label class=LABEL for="filter-status">"Status"</label>
+                <label class=LABEL for="filter-status">{t!("project.status")}</label>
                 <select id="filter-status" name="status" class=SELECT>
-                    <option value="">"Open and ignored"</option>
+                    <option value="">{t!("project.filter_open_and_ignored")}</option>
                     {Status::ALL
                         .into_iter()
                         .map(|status| {
@@ -105,13 +106,13 @@ fn Filters(page: ProjectData, filter: FindingFilter) -> impl IntoView {
                             }
                         })
                         .collect_view()}
-                    <option value="all" selected=selected(&filter.status, "all")>"All"</option>
+                    <option value="all" selected=selected(&filter.status, "all")>{t!("project.filter_all")}</option>
                 </select>
             </div>
             <div class="grid gap-2">
-                <label class=LABEL for="filter-ecosystem">"Ecosystem"</label>
+                <label class=LABEL for="filter-ecosystem">{t!("project.filter_ecosystem")}</label>
                 <select id="filter-ecosystem" name="ecosystem" class=SELECT>
-                    <option value="">"Any"</option>
+                    <option value="">{t!("project.filter_any_ecosystem")}</option>
                     {page
                         .ecosystems
                         .into_iter()
@@ -126,7 +127,7 @@ fn Filters(page: ProjectData, filter: FindingFilter) -> impl IntoView {
                         .collect_view()}
                 </select>
             </div>
-            <Button variant=ButtonVariant::Secondary>"Filter"</Button>
+            <Button variant=ButtonVariant::Secondary>{t!("project.filter")}</Button>
         </form>
     }
 }
@@ -153,7 +154,7 @@ pub fn ProjectPage() -> impl IntoView {
         load_project(organization, project, filter)
     });
     view! {
-        <Page title="Project">
+        <Page title=t!("project.title")>
             <Loaded
                 resource=page
                 render={move |page: ProjectData| {
@@ -163,11 +164,16 @@ pub fn ProjectPage() -> impl IntoView {
                     let project_slug = page.slug.clone();
                     let latest = page.uploads.first().cloned();
                     let subtitle = format!(
-                        "{} components{}",
-                        page.component_count,
+                        "{}{}",
+                        tp!("project.components", page.component_count),
                         latest
                             .as_ref()
-                            .map(|upload| format!(" · last upload {}", format_time(upload.uploaded_at)))
+                            .map(|upload| {
+                                format!(
+                                    " · {}",
+                                    tf!("project.last_upload", time = format_time(upload.uploaded_at)),
+                                )
+                            })
                             .unwrap_or_default(),
                     );
                     let check_now = organization.role.can_triage().then({
@@ -178,7 +184,7 @@ pub fn ProjectPage() -> impl IntoView {
                                 <form method="post" action={action::<TriggerRun>()}>
                                     <input type="hidden" name="organization" value=organization_slug />
                                     <input type="hidden" name="project" value=project_slug />
-                                    <Button variant=ButtonVariant::Outline>"Check now"</Button>
+                                    <Button variant=ButtonVariant::Outline>{t!("organization.check_now")}</Button>
                                 </form>
                             }
                         }
@@ -189,9 +195,8 @@ pub fn ProjectPage() -> impl IntoView {
                         .filter(|count| *count > 0)
                         .map(|count| {
                             view! {
-                                <Alert title="Some components cannot be checked">
-                                    {count}
-                                    " components of the last SBOM have no package URL, so OSV cannot match them. Check the generator's settings."
+                                <Alert title=t!("project.without_purl_title")>
+                                    {tp!("project.without_purl_text", count)}
                                 </Alert>
                             }
                         });
@@ -199,21 +204,21 @@ pub fn ProjectPage() -> impl IntoView {
                     let rows = finding_rows(page.findings.clone());
                     let table = if page.findings.is_empty() {
                         view! {
-                            <Empty title="No finding matches">
-                                "Nothing to show for these filters. A project is checked after each upload and every night."
+                            <Empty title=t!("project.no_match_title")>
+                                {t!("project.no_match_text")}
                             </Empty>
                         }
                             .into_any()
                     } else {
                         view! {
-                            <Table caption=format!("{count} findings, most severe first")>
+                            <Table caption=tp!("project.findings_caption", count)>
                                 <thead>
                                     <tr class=TABLE_HEAD_ROW>
-                                        <th scope="col" class=TABLE_HEAD>"Severity"</th>
-                                        <th scope="col" class=TABLE_HEAD>"Vulnerability"</th>
-                                        <th scope="col" class=TABLE_HEAD>"Component"</th>
-                                        <th scope="col" class=TABLE_HEAD>"Status"</th>
-                                        <th scope="col" class=TABLE_HEAD>"Since"</th>
+                                        <th scope="col" class=TABLE_HEAD>{t!("project.severity")}</th>
+                                        <th scope="col" class=TABLE_HEAD>{t!("project.vulnerability")}</th>
+                                        <th scope="col" class=TABLE_HEAD>{t!("project.component")}</th>
+                                        <th scope="col" class=TABLE_HEAD>{t!("project.status")}</th>
+                                        <th scope="col" class=TABLE_HEAD>{t!("project.since")}</th>
                                     </tr>
                                 </thead>
                                 <tbody>{rows}</tbody>
@@ -230,10 +235,10 @@ pub fn ProjectPage() -> impl IntoView {
                                 <li class="flex flex-wrap gap-x-2">
                                     <span class="font-medium">{format_time(upload.uploaded_at)}</span>
                                     <span class="text-muted-foreground">
-                                        {upload.component_count} " components · CycloneDX "
+                                        {tp!("project.components", upload.component_count)} " · CycloneDX "
                                         {upload.specification_version}
-                                        {upload.source_commit.map(|commit| format!(" · commit {commit}"))}
-                                        {upload.image_tag.map(|tag| format!(" · image {tag}"))}
+                                        {upload.source_commit.map(|commit| format!(" · {}", tf!("project.commit", commit = commit)))}
+                                        {upload.image_tag.map(|tag| format!(" · {}", tf!("project.image", tag = tag)))}
                                     </span>
                                 </li>
                             }
@@ -246,10 +251,8 @@ pub fn ProjectPage() -> impl IntoView {
                             view! {
                                 <Card class="border-destructive/40">
                                     <CardHeader>
-                                        <CardTitle>"Delete this project"</CardTitle>
-                                        <CardDescription>
-                                            "Its components, upload history and findings are deleted. A later upload with an organization token creates it again."
-                                        </CardDescription>
+                                        <CardTitle>{t!("project.delete_title")}</CardTitle>
+                                        <CardDescription>{t!("project.delete_description")}</CardDescription>
                                     </CardHeader>
                                     <CardContent>
                                         <form
@@ -260,7 +263,7 @@ pub fn ProjectPage() -> impl IntoView {
                                             <input type="hidden" name="organization" value=organization_slug />
                                             <input type="hidden" name="project" value=project_slug.clone() />
                                             <Field
-                                                label=format!("Type {project_slug} to confirm")
+                                                label=tf!("common.type_to_confirm", slug = project_slug.clone())
                                                 input_id="delete-project-confirmation"
                                             >
                                                 <input
@@ -271,7 +274,7 @@ pub fn ProjectPage() -> impl IntoView {
                                                     autocomplete="off"
                                                 />
                                             </Field>
-                                            <Button variant=ButtonVariant::Destructive>"Delete project"</Button>
+                                            <Button variant=ButtonVariant::Destructive>{t!("project.delete")}</Button>
                                         </form>
                                     </CardContent>
                                 </Card>
@@ -280,7 +283,7 @@ pub fn ProjectPage() -> impl IntoView {
                     });
                     view! {
                         <Title text=format!("{} · nanobom", page.name) />
-                        <nav aria-label="Breadcrumb" class="text-muted-foreground text-sm">
+                        <nav aria-label=t!("common.breadcrumb") class="text-muted-foreground text-sm">
                             <a class="hover:underline" href=format!("/organizations/{organization_slug}")>
                                 {organization.name.clone()}
                             </a>
@@ -295,7 +298,7 @@ pub fn ProjectPage() -> impl IntoView {
                         {table}
                         <Card>
                             <CardHeader>
-                                <CardTitle>"Upload history"</CardTitle>
+                                <CardTitle>{t!("project.uploads_title")}</CardTitle>
                             </CardHeader>
                             <CardContent>
                                 <ul class="grid gap-2 text-sm">{uploads}</ul>
@@ -311,13 +314,13 @@ pub fn ProjectPage() -> impl IntoView {
 
 fn event_label(kind: &str) -> &'static str {
     match kind {
-        "opened" => "Opened",
-        "fixed" => "Fixed",
-        "reopened" => "Reopened",
-        "ignored" => "Ignored",
-        "restored" => "Restored",
-        "ignore_expired" => "Ignore expired",
-        _ => "Changed",
+        "opened" => t!("finding.event_opened"),
+        "fixed" => t!("finding.event_fixed"),
+        "reopened" => t!("finding.event_reopened"),
+        "ignored" => t!("finding.event_ignored"),
+        "restored" => t!("finding.event_restored"),
+        "ignore_expired" => t!("finding.event_ignore_expired"),
+        _ => t!("finding.event_changed"),
     }
 }
 
@@ -329,21 +332,21 @@ fn Triage(page: FindingData) -> impl IntoView {
             <form method="post" action={action::<IgnoreFinding>()} class="grid gap-4">
                 <input type="hidden" name="finding" value=finding />
                 <Field
-                    label="Reason"
+                    label=t!("finding.reason")
                     input_id="ignore-reason"
-                    hint="Why this finding does not apply or is accepted; kept in the history."
+                    hint=t!("finding.reason_hint")
                 >
                     <textarea id="ignore-reason" name="reason" class=TEXTAREA required></textarea>
                 </Field>
                 <Field
-                    label="Ignore until (optional)"
+                    label=t!("finding.ignore_until")
                     input_id="ignore-expiry"
-                    hint="The finding opens again after this date (UTC)."
+                    hint=t!("finding.ignore_until_hint")
                 >
                     <input id="ignore-expiry" name="expires_on" type="date" class=format!("{INPUT} w-fit") />
                 </Field>
                 <div>
-                    <Button variant=ButtonVariant::Secondary>"Ignore finding"</Button>
+                    <Button variant=ButtonVariant::Secondary>{t!("finding.ignore")}</Button>
                 </div>
             </form>
         }
@@ -351,12 +354,12 @@ fn Triage(page: FindingData) -> impl IntoView {
         Status::Ignored => view! {
             <form method="post" action={action::<RestoreFinding>()}>
                 <input type="hidden" name="finding" value=finding />
-                <Button variant=ButtonVariant::Secondary>"Restore finding"</Button>
+                <Button variant=ButtonVariant::Secondary>{t!("finding.restore")}</Button>
             </form>
         }
         .into_any(),
         Status::Fixed => view! {
-            <p class="text-muted-foreground text-sm">"Fixed findings need no action."</p>
+            <p class="text-muted-foreground text-sm">{t!("finding.fixed_no_action")}</p>
         }
         .into_any(),
     }
@@ -374,7 +377,7 @@ pub fn FindingPage() -> impl IntoView {
     };
     let page = Resource::new(finding, load_finding);
     view! {
-        <Page title="Finding">
+        <Page title=t!("finding.title")>
             <Loaded
                 resource=page
                 render={|page: FindingData| {
@@ -385,7 +388,7 @@ pub fn FindingPage() -> impl IntoView {
                             view! {
                                 <Card>
                                     <CardHeader>
-                                        <CardTitle>"Triage"</CardTitle>
+                                        <CardTitle>{t!("finding.triage")}</CardTitle>
                                     </CardHeader>
                                     <CardContent>
                                         <Triage page />
@@ -408,17 +411,18 @@ pub fn FindingPage() -> impl IntoView {
                     let ignore_expires_at = finding.ignore_expires_at;
                     let ignored = finding.ignore_reason.clone().map(move |reason| {
                         view! {
-                            <dt class="text-muted-foreground">"Ignored"</dt>
+                            <dt class="text-muted-foreground">{t!("finding.ignored")}</dt>
                             <dd>
                                 {reason}
-                                {ignored_by.map(|actor| format!(" (by {actor})"))}
-                                {ignore_expires_at.map(|date| format!(" until {}", format_date(date)))}
+                                {ignored_by.map(|actor| format!(" ({})", tf!("finding.by", actor = actor)))}
+                                {ignore_expires_at
+                                    .map(|date| format!(" {}", tf!("finding.until", date = format_date(date))))}
                             </dd>
                         }
                     });
                     view! {
                         <Title text=format!("{} · nanobom", finding.vulnerability_id) />
-                        <nav aria-label="Breadcrumb" class="text-muted-foreground text-sm">
+                        <nav aria-label=t!("common.breadcrumb") class="text-muted-foreground text-sm">
                             <a class="hover:underline" href=format!("/organizations/{}", page.organization_slug)>
                                 {page.organization_slug.clone()}
                             </a>
@@ -443,21 +447,23 @@ pub fn FindingPage() -> impl IntoView {
                             <div class="grid content-start gap-6">
                                 <Card>
                                     <CardHeader>
-                                        <CardTitle>"Details"</CardTitle>
+                                        <CardTitle>{t!("finding.details")}</CardTitle>
                                         <CardDescription>
-                                            {page.published.map(|date| format!("Published {} · ", format_date(date)))}
-                                            "modified " {format_date(page.modified)}
+                                            {page
+                                                .published
+                                                .map(|date| format!("{} · ", tf!("finding.published", date = format_date(date))))}
+                                            {tf!("finding.modified", date = format_date(page.modified))}
                                         </CardDescription>
                                     </CardHeader>
                                     <CardContent>
                                         <p class="text-sm whitespace-pre-wrap break-words">
-                                            {page.details.clone().unwrap_or_else(|| "No description.".to_owned())}
+                                            {page.details.clone().unwrap_or_else(|| t!("finding.no_description").to_owned())}
                                         </p>
                                     </CardContent>
                                 </Card>
                                 <Card>
                                     <CardHeader>
-                                        <CardTitle>"History"</CardTitle>
+                                        <CardTitle>{t!("finding.history")}</CardTitle>
                                     </CardHeader>
                                     <CardContent>
                                         <ol class="grid gap-2 text-sm">
@@ -471,7 +477,7 @@ pub fn FindingPage() -> impl IntoView {
                                                             <span class="font-medium">{event_label(&event.kind)}</span>
                                                             <span class="text-muted-foreground">
                                                                 " · " {format_time(event.created_at)}
-                                                                {event.actor.clone().map(|actor| format!(" · by {actor}"))}
+                                                                {event.actor.clone().map(|actor| format!(" · {}", tf!("finding.by", actor = actor)))}
                                                             </span>
                                                             {event
                                                                 .reason
@@ -489,23 +495,23 @@ pub fn FindingPage() -> impl IntoView {
                             <div class="grid content-start gap-6">
                                 <Card>
                                     <CardHeader>
-                                        <CardTitle>"Component"</CardTitle>
+                                        <CardTitle>{t!("finding.component")}</CardTitle>
                                     </CardHeader>
                                     <CardContent>
                                         <dl class="grid gap-2 text-sm">
-                                            <dt class="text-muted-foreground">"Package"</dt>
+                                            <dt class="text-muted-foreground">{t!("finding.package")}</dt>
                                             <dd class="font-medium break-all">{finding.component_name.clone()}</dd>
-                                            <dt class="text-muted-foreground">"Version"</dt>
+                                            <dt class="text-muted-foreground">{t!("finding.version")}</dt>
                                             <dd>{finding.component_version.clone().unwrap_or_default()}</dd>
-                                            <dt class="text-muted-foreground">"Fixed in"</dt>
+                                            <dt class="text-muted-foreground">{t!("finding.fixed_in")}</dt>
                                             <dd>
                                                 {if page.fixed_versions.is_empty() {
-                                                    "No fixed version known".to_owned()
+                                                    t!("finding.no_fixed_version").to_owned()
                                                 } else {
                                                     page.fixed_versions.join(", ")
                                                 }}
                                             </dd>
-                                            <dt class="text-muted-foreground">"Package URL"</dt>
+                                            <dt class="text-muted-foreground">{t!("finding.package_url")}</dt>
                                             <dd class="font-mono text-xs break-all">{finding.purl.clone()}</dd>
                                             {cvss}
                                             {ignored}
@@ -514,7 +520,7 @@ pub fn FindingPage() -> impl IntoView {
                                 </Card>
                                 <Card>
                                     <CardHeader>
-                                        <CardTitle>"Aliases"</CardTitle>
+                                        <CardTitle>{t!("finding.aliases")}</CardTitle>
                                     </CardHeader>
                                     <CardContent>
                                         <ul class="flex flex-wrap gap-2">
@@ -530,7 +536,7 @@ pub fn FindingPage() -> impl IntoView {
                                                     href=format!("https://osv.dev/vulnerability/{}", finding.vulnerability_id)
                                                     rel="noreferrer"
                                                 >
-                                                    "View on OSV"
+                                                    {t!("finding.view_on_osv")}
                                                 </a>
                                             </li>
                                         </ul>
@@ -538,12 +544,12 @@ pub fn FindingPage() -> impl IntoView {
                                 </Card>
                                 <Card>
                                     <CardHeader>
-                                        <CardTitle>"Also affected"</CardTitle>
-                                        <CardDescription>"In the organizations you can see."</CardDescription>
+                                        <CardTitle>{t!("finding.also_affected")}</CardTitle>
+                                        <CardDescription>{t!("finding.also_affected_description")}</CardDescription>
                                     </CardHeader>
                                     <CardContent>
                                         {if page.affected_components.is_empty() {
-                                            view! { <p class="text-muted-foreground text-sm">"No other component."</p> }.into_any()
+                                            view! { <p class="text-muted-foreground text-sm">{t!("finding.no_other_component")}</p> }.into_any()
                                         } else {
                                             view! {
                                                 <ul class="grid gap-2 text-sm">
@@ -573,7 +579,7 @@ pub fn FindingPage() -> impl IntoView {
                                 </Card>
                                 <Card>
                                     <CardHeader>
-                                        <CardTitle>"References"</CardTitle>
+                                        <CardTitle>{t!("finding.references")}</CardTitle>
                                     </CardHeader>
                                     <CardContent>
                                         <ul class="grid gap-1 text-sm">
@@ -610,13 +616,10 @@ pub fn SearchPage() -> impl IntoView {
     let text = move || query.read().get("query").unwrap_or_default();
     let results = Resource::new(text, search_components);
     view! {
-        <Page title="Search">
-            <Heading
-                title="Search components"
-                subtitle="Find which projects use a package: a name, optionally followed by the start of a version (openssl 3.)."
-            />
+        <Page title=t!("search.title")>
+            <Heading title=t!("search.heading") subtitle=t!("search.subtitle") />
             <form method="get" role="search" class="flex flex-wrap gap-2">
-                <label for="search-query" class="sr-only">"Component"</label>
+                <label for="search-query" class="sr-only">{t!("search.label")}</label>
                 <input
                     id="search-query"
                     name="query"
@@ -625,7 +628,7 @@ pub fn SearchPage() -> impl IntoView {
                     value=text
                     placeholder="openssl 3."
                 />
-                <Button>"Search"</Button>
+                <Button>{t!("search.submit")}</Button>
             </form>
             <Loaded
                 resource=results
@@ -634,16 +637,16 @@ pub fn SearchPage() -> impl IntoView {
                         return ().into_any();
                     }
                     if results.is_empty() {
-                        return view! { <Empty title="No component found">"Try a shorter name."</Empty> }.into_any();
+                        return view! { <Empty title=t!("search.empty_title")>{t!("search.empty_text")}</Empty> }.into_any();
                     }
                     let count = results.len();
                     view! {
-                        <Table caption=format!("{count} components found")>
+                        <Table caption=tp!("search.caption", count)>
                             <thead>
                                 <tr class=TABLE_HEAD_ROW>
-                                    <th scope="col" class=TABLE_HEAD>"Component"</th>
-                                    <th scope="col" class=TABLE_HEAD>"Version"</th>
-                                    <th scope="col" class=TABLE_HEAD>"Project"</th>
+                                    <th scope="col" class=TABLE_HEAD>{t!("search.component")}</th>
+                                    <th scope="col" class=TABLE_HEAD>{t!("search.version")}</th>
+                                    <th scope="col" class=TABLE_HEAD>{t!("search.project")}</th>
                                 </tr>
                             </thead>
                             <tbody>

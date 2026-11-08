@@ -18,6 +18,7 @@ use crate::{
     access::{Actor, Permission},
     error::{Error, Result},
     names,
+    problem::{Field, Problem},
 };
 
 /// Every token starts with this prefix, so leaked tokens are easy to recognize and search for.
@@ -99,12 +100,16 @@ async fn insert(
     name: &str,
     created_by: Option<i64>,
 ) -> Result<CreatedToken> {
-    let name = names::display_name("the token name", name)?;
+    let name = names::display_name(Field::TokenName, name)?;
     let project = match project_slug {
         Some(slug) => Some(
             crate::projects::find_model(database, organization_id, slug)
                 .await?
-                .ok_or_else(|| Error::invalid(format!("no project named {slug:?}")))?,
+                .ok_or_else(|| {
+                    Error::invalid(Problem::UnknownProject {
+                        slug: slug.to_owned(),
+                    })
+                })?,
         ),
         None => None,
     };
@@ -137,7 +142,11 @@ async fn organization_by_slug(
         .filter(organizations::Column::Slug.eq(slug.trim().to_ascii_lowercase()))
         .one(database)
         .await?
-        .ok_or_else(|| Error::invalid(format!("no organization named {slug:?}")))
+        .ok_or_else(|| {
+            Error::invalid(Problem::UnknownOrganization {
+                slug: slug.to_owned(),
+            })
+        })
 }
 
 /// Creates a token from the command line, which has direct access to the database.

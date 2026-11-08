@@ -1,14 +1,17 @@
 //! Validation of the identifiers that appear in URLs: usernames and organization and project
 //! slugs. They are lower case, so `MyProject` and `myproject` name the same project.
 
-use crate::error::{Error, Result};
+use crate::{
+    error::{Error, Result},
+    problem::{Field, Problem},
+};
 
 pub const MAXIMUM_LENGTH: usize = 64;
 
 /// Normalizes and validates a slug or username: 1 to 64 characters among lower-case ASCII
 /// letters, digits, `.`, `_` and `-`, starting with a letter or a digit. Upper-case letters are
 /// folded to lower case.
-pub fn slug(kind: &str, value: &str) -> Result<String> {
+pub fn slug(field: Field, value: &str) -> Result<String> {
     let value = value.trim().to_ascii_lowercase();
     let valid_characters = value
         .chars()
@@ -18,21 +21,16 @@ pub fn slug(kind: &str, value: &str) -> Result<String> {
         .next()
         .is_some_and(|character| character.is_ascii_alphanumeric());
     if value.len() > MAXIMUM_LENGTH || !valid_characters || !valid_start {
-        return Err(Error::invalid(format!(
-            "{kind} must be 1 to {MAXIMUM_LENGTH} characters: letters, digits, '.', '_' or '-', \
-             starting with a letter or a digit"
-        )));
+        return Err(Error::invalid(Problem::InvalidSlug(field)));
     }
     Ok(value)
 }
 
 /// Validates a display name: not blank, at most 200 characters.
-pub fn display_name(kind: &str, value: &str) -> Result<String> {
+pub fn display_name(field: Field, value: &str) -> Result<String> {
     let value = value.trim();
     if value.is_empty() || value.chars().count() > 200 {
-        return Err(Error::invalid(format!(
-            "{kind} must be 1 to 200 characters"
-        )));
+        return Err(Error::invalid(Problem::InvalidName(field)));
     }
     Ok(value.to_owned())
 }
@@ -49,7 +47,7 @@ pub fn email(value: &str) -> Result<String> {
     if valid {
         Ok(value)
     } else {
-        Err(Error::invalid("invalid email address"))
+        Err(Error::invalid(Problem::InvalidEmail))
     }
 }
 
@@ -59,8 +57,14 @@ mod tests {
 
     #[test]
     fn slugs_are_folded_to_lower_case() {
-        assert_eq!(slug("project", " MyProject ").unwrap(), "myproject");
-        assert_eq!(slug("project", "api.v2_beta-1").unwrap(), "api.v2_beta-1");
+        assert_eq!(
+            slug(Field::ProjectSlug, " MyProject ").unwrap(),
+            "myproject"
+        );
+        assert_eq!(
+            slug(Field::ProjectSlug, "api.v2_beta-1").unwrap(),
+            "api.v2_beta-1"
+        );
     }
 
     #[test]
@@ -75,7 +79,7 @@ mod tests {
             &"a".repeat(65),
         ] {
             assert!(
-                slug("project", value).is_err(),
+                slug(Field::ProjectSlug, value).is_err(),
                 "{value:?} should be rejected"
             );
         }
