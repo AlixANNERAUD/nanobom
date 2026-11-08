@@ -36,7 +36,8 @@
 //! - Findings are prioritized with exploitation signals ([`exploitation`]: CISA KEV and EPSS),
 //!   projects whose SBOM stopped coming are flagged ([`staleness`]), and organizations are told
 //!   about new findings through webhooks ([`notifications`]), whose deliveries are queued and
-//!   retried ([`deliveries`]).
+//!   retried ([`deliveries`]); they can post to Slack and Microsoft Teams ([`chat`]) instead of
+//!   sending JSON.
 //!
 //! The crate builds on [`nanobom_entity`] (the tables), `nanobom_migration` (the schema) and
 //! [`nanobom_osv`] (the vulnerability source and severity scoring). The `app` crate calls it
@@ -57,6 +58,7 @@
 //! fresh database and a fake vulnerability source.
 
 pub mod access;
+pub mod chat;
 pub mod database;
 pub mod deliveries;
 pub mod dependencies;

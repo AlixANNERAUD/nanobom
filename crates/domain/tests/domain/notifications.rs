@@ -81,10 +81,13 @@ async fn only_admins_configure_webhooks_and_urls_are_checked() {
             &database,
             &member,
             organization,
-            "https://example.org/hook",
-            Severity::High,
-            true,
-            false
+            &notifications::Webhook {
+                url: "https://example.org/hook".into(),
+                minimum_severity: Severity::High,
+                enabled: true,
+                exploited_only: false,
+                format: notifications::Format::Json
+            }
         )
         .await,
         Err(Error::Forbidden)
@@ -95,10 +98,13 @@ async fn only_admins_configure_webhooks_and_urls_are_checked() {
                 &database,
                 &owner,
                 organization,
-                url,
-                Severity::High,
-                true,
-                false
+                &notifications::Webhook {
+                    url: url.into(),
+                    minimum_severity: Severity::High,
+                    enabled: true,
+                    exploited_only: false,
+                    format: notifications::Format::Json
+                }
             )
             .await,
             Err(Error::Invalid(_))
@@ -108,10 +114,13 @@ async fn only_admins_configure_webhooks_and_urls_are_checked() {
         &database,
         &owner,
         organization,
-        "https://hooks.example.org/nanobom",
-        Severity::High,
-        true,
-        false,
+        &notifications::Webhook {
+            url: "https://hooks.example.org/nanobom".into(),
+            minimum_severity: Severity::High,
+            enabled: true,
+            exploited_only: false,
+            format: notifications::Format::Json,
+        },
     )
     .await
     .unwrap();
@@ -120,10 +129,13 @@ async fn only_admins_configure_webhooks_and_urls_are_checked() {
         &database,
         &owner,
         organization,
-        "https://hooks.example.org/other",
-        Severity::Critical,
-        false,
-        false,
+        &notifications::Webhook {
+            url: "https://hooks.example.org/other".into(),
+            minimum_severity: Severity::Critical,
+            enabled: false,
+            exploited_only: false,
+            format: notifications::Format::Json,
+        },
     )
     .await
     .unwrap();
@@ -171,10 +183,13 @@ async fn new_findings_are_grouped_per_organization_and_filtered_by_severity() {
         &database,
         &owner,
         acme.id,
-        &format!("{}/acme", server.uri()),
-        Severity::High,
-        true,
-        false,
+        &notifications::Webhook {
+            url: format!("{}/acme", server.uri()),
+            minimum_severity: Severity::High,
+            enabled: true,
+            exploited_only: false,
+            format: notifications::Format::Json,
+        },
     )
     .await
     .unwrap();
@@ -182,10 +197,13 @@ async fn new_findings_are_grouped_per_organization_and_filtered_by_severity() {
         &database,
         &owner,
         quiet.id,
-        &format!("{}/quiet", server.uri()),
-        Severity::Critical,
-        true,
-        false,
+        &notifications::Webhook {
+            url: format!("{}/quiet", server.uri()),
+            minimum_severity: Severity::Critical,
+            enabled: true,
+            exploited_only: false,
+            format: notifications::Format::Json,
+        },
     )
     .await
     .unwrap();
@@ -255,10 +273,13 @@ async fn failed_deliveries_are_recorded_for_a_retry() {
         &database,
         &owner,
         acme.id,
-        "http://127.0.0.1:9/hook",
-        Severity::Unknown,
-        true,
-        false,
+        &notifications::Webhook {
+            url: "http://127.0.0.1:9/hook".into(),
+            minimum_severity: Severity::Unknown,
+            enabled: true,
+            exploited_only: false,
+            format: notifications::Format::Json,
+        },
     )
     .await
     .unwrap();
@@ -330,10 +351,13 @@ impl Exploited {
             &database,
             &owner,
             organization,
-            "http://127.0.0.1:9/hook",
-            minimum,
-            true,
-            exploited_only,
+            &notifications::Webhook {
+                url: "http://127.0.0.1:9/hook".into(),
+                minimum_severity: minimum,
+                enabled: true,
+                exploited_only,
+                format: notifications::Format::Json,
+            },
         )
         .await
         .unwrap();
@@ -581,10 +605,13 @@ async fn exploited_findings_are_marked_even_without_a_webhook() {
         &fixture.database,
         &fixture.owner,
         fixture.organization,
-        "http://127.0.0.1:9/hook",
-        Severity::Unknown,
-        true,
-        false,
+        &notifications::Webhook {
+            url: "http://127.0.0.1:9/hook".into(),
+            minimum_severity: Severity::Unknown,
+            enabled: true,
+            exploited_only: false,
+            format: notifications::Format::Json,
+        },
     )
     .await
     .unwrap();

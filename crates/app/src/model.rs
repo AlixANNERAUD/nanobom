@@ -407,6 +407,8 @@ pub struct Webhook {
     pub minimum_severity: Severity,
     pub enabled: bool,
     pub exploited_only: bool,
+    /// `json`, `slack` or `teams`: the names of `nanobom_domain::notifications::Format`.
+    pub format: String,
 }
 
 /// Where a webhook delivery stands.

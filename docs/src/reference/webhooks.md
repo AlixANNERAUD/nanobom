@@ -1,6 +1,7 @@
 # Webhook payloads
 
-nanobom sends JSON documents with `POST` to webhooks:
+nanobom sends documents with `POST` to webhooks, as JSON or, for an organization's webhook,
+as a message for Slack or Microsoft Teams:
 
 | Event | Sent to | When |
 | --- | --- | --- |
@@ -8,13 +9,109 @@ nanobom sends JSON documents with `POST` to webhooks:
 | `projects.stale` | the organization's webhook | after a successful scheduled run, when projects became stale |
 | `run.failed` | `NANOBOM_FAILURE_WEBHOOK_URL` (instance) | when a run fails |
 
-An organization's webhook is configured in **Settings → Webhook** (URL, minimum severity, only
-known exploited vulnerabilities, enabled); see [Get notified](../how-to/notifications.md).
+An organization's webhook is configured in **Settings → Webhook** (URL, format, minimum severity,
+only known exploited vulnerabilities, enabled); see [Get notified](../how-to/notifications.md).
+
+## Formats
+
+The **Format** of an organization's webhook says what its `findings.new` and `projects.stale`
+events are posted as:
+
+| Format | Posted as | For |
+| --- | --- | --- |
+| `json` (default) | The JSON documents described below | Your own receiver, Home Assistant, n8n |
+| `slack` | A Slack message: `text` and Block Kit `blocks` ([Slack messages](#slack-messages)) | A Slack [Incoming Webhook](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks) |
+| `teams` | A `message` with an Adaptive Card ([Microsoft Teams messages](#microsoft-teams-messages)) | A Microsoft Teams Workflows webhook |
+
+`run.failed`, which goes to the instance's `NANOBOM_FAILURE_WEBHOOK_URL` and not to an
+organization's webhook, is always JSON. The same filters apply to every format: minimum severity,
+known exploited findings, which projects are reported. The format is stored per organization,
+`json` for webhooks created before it existed.
+
+The body is written when the delivery is recorded, so a retry posts exactly what the first
+attempt did. Changing the format abandons the deliveries waiting for a retry, as changing the URL
+does.
+
+### Slack messages
+
+The body is `{"text": …, "blocks": […]}`, the payload of a Slack Incoming Webhook. `text` is the
+notification preview and the fallback of clients that do not display blocks. Texts are in English
+whatever the language of the interface, since nanobom does not know the readers' language.
+
+`findings.new`:
+
+| Block | Content |
+| --- | --- |
+| `header` | `Acme: 3 new findings (highest severity: critical, 1 known exploited)` |
+| one `section` per finding, at most 10 | `*<finding page\|vulnerability id>* - severity - reopened - known exploited`, then the component's package URL in code and the project, the OSV summary, and `Introduced via` the project's direct dependencies (at most 5) when the SBOM's dependency graph says |
+| `context` | `N more findings not shown.` when some were left out, and a link to the organization |
+
+`projects.stale`: a `header` (`Acme: 2 projects stopped sending SBOMs`), one `section` per project
+at most 10 (`*<project page\|slug>* - last SBOM 2026-09-30 14:21 UTC`, or `never received an SBOM`)
+and the same `context`.
+
+The tags after the identifier are the severity, `reopened` for a reopened finding, and `known
+exploited` (`newly known exploited` for an open finding that CISA added to its catalog after it
+was reported). Findings come in the order of the JSON document.
+
+Limits that nanobom stays within: a section's text is clipped to 3000 characters (Slack's limit),
+the header to 150, and a message has at most 12 blocks. Values that come from SBOMs and
+vulnerability records are clipped too, and `&`, `<` and `>` in them are escaped as `&amp;`,
+`&lt;` and `&gt;`, as Slack requires, so that a package name cannot mention a channel
+(`<!channel>`) or add a link. Slack has no other escape: `*`, `_` and `~` in a value can still
+format it.
+
+Slack answers `200` with the body `ok`. Bad requests (`400`) and revoked webhooks (`404`) are
+not retried.
+
+### Microsoft Teams messages
+
+The body is the envelope Teams' **Workflows** webhooks accept, a `message` with one Adaptive Card
+attachment, not the `MessageCard` format of the Office 365 connectors that Microsoft
+[retired](https://learn.microsoft.com/en-us/microsoftteams/platform/webhooks-and-connectors/how-to/add-incoming-webhook)
+in May 2026:
+
+```json
+{
+  "type": "message",
+  "attachments": [
+    {
+      "contentType": "application/vnd.microsoft.card.adaptive",
+      "contentUrl": null,
+      "content": {
+        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+        "type": "AdaptiveCard",
+        "version": "1.2",
+        "msteams": { "width": "Full" },
+        "body": [ … ],
+        "actions": [
+          { "type": "Action.OpenUrl", "title": "Open Acme in nanobom", "url": "https://nanobom.example.org/organizations/acme" }
+        ]
+      }
+    }
+  ]
+}
+```
+
+The `body` has the same content as the Slack message, in English: a bold title, then one
+container per finding or project (at most 10) with the vulnerability identifier linking to its
+page, its tags, the component and project, the summary and the `Introduced via` line, and a last
+line counting what was left out. Known exploited findings are in the card's attention color. The
+button opens the organization's page.
+
+Texts are Markdown, as Adaptive Cards allow in a `TextBlock`; `\`, `*`, `_`, `[`, `]`, `` ` ``,
+`<` and `>` in values from SBOMs are backslash-escaped, so a value cannot add a link or
+formatting. Teams refuses incoming messages above 28 KB: nanobom lists fewer items, and says how
+many were left out, until the message is under 24 KB.
+
+A Workflows webhook usually answers `202 Accepted` before the workflow posts the card, so a
+delivery shown as delivered can still fail inside Power Automate (see the workflow's run
+history).
 
 ## Delivery
 
 - One `POST` per document, `Content-Type: application/json`, with the `User-Agent`
-  `nanobom/<version>`.
+  `nanobom/<version>`; the body is in the webhook's [format](#formats).
 - Each document is recorded in the database before it is sent, then posted right away. All the
   documents of a run are recorded before the first is posted, so a receiver that hangs delays
   the others but a restart meanwhile loses none. Deliveries happen after uploads waiting for the
@@ -24,7 +121,7 @@ known exploited vulnerabilities, enabled); see [Get notified](../how-to/notifica
 
   | Answer | Outcome |
   | --- | --- |
-  | `2xx` | Delivered |
+  | `2xx` (`200 ok` from Slack, `202 Accepted` from a Teams Workflows webhook, `204` from most receivers) | Delivered |
   | `4xx`, except `408` and `429` | Failed for good: the receiver refuses the document and would refuse it again, so it is not retried |
   | `408`, `429`, `5xx`, any other status, a network error or a timeout | Retried |
 
@@ -36,7 +133,7 @@ known exploited vulnerabilities, enabled); see [Get notified](../how-to/notifica
   the attempt number and the status) and counted by `nanobom_webhook_deliveries_total`
   ([metrics](metrics.md)). The latest deliveries to an organization's webhook are listed in its
   settings.
-- Removing an organization's webhook, disabling it or changing its URL abandons its deliveries
+- Removing an organization's webhook, disabling it or changing its URL or format abandons its deliveries
   still waiting for an attempt or a retry: no new attempt goes to an address the admins replaced
   or turned off. An attempt already in progress at that moment is not stopped, so its request
   may still reach the old address; its result is not recorded and it is not retried. A delivery
@@ -48,12 +145,14 @@ known exploited vulnerabilities, enabled); see [Get notified](../how-to/notifica
 - A document can arrive more than once, when the receiver accepted it but its answer was lost or
   came after 15 seconds. The `event`, with the run's `id` for `findings.new` and `run.failed`,
   identifies it.
-- The document is the one prepared after the run: a retry sends it unchanged, even if the
-  findings changed since.
+- The document is the one prepared after the run: a retry sends it unchanged (in the same
+  format), even if the findings changed since.
 - Requests are not signed.
 - New fields may be added to the documents in later versions.
 
 ## `findings.new`
+
+These are the JSON documents; the other [formats](#formats) carry the same findings.
 
 After each successful run, each organization with an enabled webhook receives one document
 listing its findings that are:

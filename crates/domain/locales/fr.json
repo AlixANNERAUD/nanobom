@@ -39,6 +39,7 @@
     "only_open_can_be_ignored": "seules les vulnérabilités ouvertes peuvent être ignorées",
     "only_ignored_can_be_restored": "seules les vulnérabilités ignorées peuvent être rétablies",
     "invalid_webhook_url": "l’URL du webhook n’est pas une URL valide",
-    "webhook_scheme": "l’URL du webhook doit commencer par http ou https"
+    "webhook_scheme": "l’URL du webhook doit commencer par http ou https",
+    "unknown_webhook_format": "format de webhook inconnu"
   }
 }

@@ -360,10 +360,13 @@ async fn findings_webhooks_and_ci_name_the_direct_dependency() {
         &fixture.database,
         &fixture.owner,
         fixture.organization,
-        "https://hooks.example.org/nanobom",
-        Severity::Unknown,
-        true,
-        false,
+        &notifications::Webhook {
+            url: "https://hooks.example.org/nanobom".into(),
+            minimum_severity: Severity::Unknown,
+            enabled: true,
+            exploited_only: false,
+            format: notifications::Format::Json,
+        },
     )
     .await
     .unwrap();

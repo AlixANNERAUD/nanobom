@@ -25,6 +25,11 @@
 //! one later does not replay old findings; stale projects are marked only when a document
 //! reports them, so a webhook enabled later still hears about projects that are already stale.
 //!
+//! An organization's webhook has a [`Format`]: the generic JSON documents above, or a message
+//! for Slack or Microsoft Teams ([`crate::chat`]) that says the same thing. The format applies to
+//! `findings.new` and `projects.stale`; `run.failed` is always JSON. The body is rendered when
+//! the delivery is queued ([`Payload::render`]), so retries resend it unchanged.
+//!
 //! Webhook addresses are not restricted to public hosts: an organization admin can make the
 //! server post to any address it reaches. Only the status of the answer is kept, never its
 //! body.
@@ -48,6 +53,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     access::{Actor, Permission},
+    chat,
     deliveries::{self, Attempt, Outcome},
     dependencies::Graph,
     error::{Error, Result},
@@ -56,6 +62,39 @@ use crate::{
     problem::Problem,
     staleness,
 };
+
+/// What a webhook receives.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Format {
+    /// The documents described in the webhook reference.
+    #[default]
+    Json,
+    /// A Slack Incoming Webhook message (Block Kit).
+    Slack,
+    /// A message with an Adaptive Card, for a Microsoft Teams Workflows webhook.
+    Teams,
+}
+
+impl Format {
+    pub const ALL: [Format; 3] = [Format::Json, Format::Slack, Format::Teams];
+
+    /// The lower-case name stored in the database and shown in the settings form; parsed back
+    /// with [`Format::parse`].
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Format::Json => "json",
+            Format::Slack => "slack",
+            Format::Teams => "teams",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|format| format.as_str() == value)
+    }
+}
 
 /// An organization's webhook settings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,6 +106,8 @@ pub struct Webhook {
     pub enabled: bool,
     /// Deliver only known exploited findings.
     pub exploited_only: bool,
+    /// What the receiver gets: JSON documents, or a chat message.
+    pub format: Format,
 }
 
 fn view(model: organization_webhooks::Model) -> Webhook {
@@ -75,6 +116,7 @@ fn view(model: organization_webhooks::Model) -> Webhook {
         minimum_severity: model.minimum_severity.parse().unwrap_or(Severity::Unknown),
         enabled: model.enabled,
         exploited_only: model.exploited_only,
+        format: Format::parse(&model.format).unwrap_or_default(),
     }
 }
 
@@ -109,26 +151,31 @@ pub async fn get(
 
 /// Creates or replaces the webhook of an organization. Disabling it or changing its URL abandons
 /// its pending deliveries, as removing it does: retries never go to an address the admins
-/// replaced or turned off. Requires [`Permission::ManageWebhook`].
+/// replaced or turned off. Changing its format abandons them too, since their bodies were
+/// rendered for the previous one. Requires [`Permission::ManageWebhook`].
 pub async fn set(
     database: &impl ConnectionTrait,
     actor: &Actor,
     organization_id: i64,
-    url: &str,
-    minimum_severity: Severity,
-    enabled: bool,
-    exploited_only: bool,
+    webhook: &Webhook,
 ) -> Result<Webhook> {
     actor
         .authorize(database, organization_id, Permission::ManageWebhook)
         .await?;
-    let url = validate_url(url)?;
+    let url = validate_url(&webhook.url)?;
+    let Webhook {
+        minimum_severity,
+        enabled,
+        exploited_only,
+        format,
+        ..
+    } = *webhook;
     let existing = organization_webhooks::Entity::find_by_id(organization_id)
         .one(database)
         .await?;
     let model = match existing {
         Some(model) => {
-            if !enabled || model.url != url.as_str() {
+            if !enabled || model.url != url.as_str() || model.format != format.as_str() {
                 deliveries::cancel_pending(database, organization_id).await?;
             }
             let mut active: organization_webhooks::ActiveModel = model.into();
@@ -136,6 +183,7 @@ pub async fn set(
             active.minimum_severity = Set(minimum_severity.as_str().to_owned());
             active.enabled = Set(enabled);
             active.exploited_only = Set(exploited_only);
+            active.format = Set(format.as_str().to_owned());
             active.update(database).await?
         }
         None => {
@@ -145,6 +193,7 @@ pub async fn set(
                 minimum_severity: Set(minimum_severity.as_str().to_owned()),
                 enabled: Set(enabled),
                 exploited_only: Set(exploited_only),
+                format: Set(format.as_str().to_owned()),
             }
             .insert(database)
             .await?
@@ -267,17 +316,39 @@ pub fn link(public_url: &Url, path: &str) -> String {
 pub trait Payload: Serialize {
     /// The `event` field: `findings.new`, `projects.stale` or `run.failed`.
     fn event(&self) -> &str;
+
+    /// The body to post, in the webhook's format. Documents without a chat rendering are sent
+    /// as JSON whatever the format.
+    fn render(&self, _format: Format) -> String {
+        serde_json::to_string(self).expect("payloads serialize to JSON")
+    }
 }
 
 impl Payload for NewFindingsPayload {
     fn event(&self) -> &str {
         &self.event
     }
+
+    fn render(&self, format: Format) -> String {
+        match format {
+            Format::Json => serde_json::to_string(self).expect("payloads serialize to JSON"),
+            Format::Slack => chat::slack_new_findings(self),
+            Format::Teams => chat::teams_new_findings(self),
+        }
+    }
 }
 
 impl Payload for StaleProjectsPayload {
     fn event(&self) -> &str {
         &self.event
+    }
+
+    fn render(&self, format: Format) -> String {
+        match format {
+            Format::Json => serde_json::to_string(self).expect("payloads serialize to JSON"),
+            Format::Slack => chat::slack_stale_projects(self),
+            Format::Teams => chat::teams_stale_projects(self),
+        }
     }
 }
 
@@ -293,6 +364,8 @@ pub struct Delivery<T> {
     /// `None` for the instance's failure webhook.
     pub organization_id: Option<i64>,
     pub url: String,
+    /// How the payload is rendered when the delivery is queued.
+    pub format: Format,
     pub payload: T,
 }
 
@@ -596,6 +669,7 @@ pub async fn new_findings_deliveries(
         deliveries.push(Delivery {
             organization_id: Some(organization_id),
             url: webhook.url,
+            format: Format::parse(&webhook.format).unwrap_or_default(),
             payload,
         });
     }
@@ -630,6 +704,7 @@ pub async fn stale_deliveries(
         notified.extend(projects.iter().map(|project| project.id));
         deliveries.push(Delivery {
             organization_id: Some(organization_id),
+            format: Format::parse(&webhook.format).unwrap_or_default(),
             url: webhook.url,
             payload: StaleProjectsPayload {
                 event: "projects.stale".to_owned(),
@@ -680,12 +755,12 @@ pub async fn enqueue<T: Payload>(
     let now = Utc::now().fixed_offset();
     let mut ids = Vec::with_capacity(deliveries.len());
     for delivery in deliveries {
-        let row = deliveries::enqueue(
+        let row = deliveries::enqueue_body(
             database,
             delivery.organization_id,
             &delivery.url,
             delivery.payload.event(),
-            &delivery.payload,
+            delivery.payload.render(delivery.format),
             now,
         )
         .await?;
@@ -742,6 +817,7 @@ pub async fn fail_interrupted_runs(
                 Some(Delivery {
                     organization_id: None,
                     url: url.to_string(),
+                    format: Format::Json,
                     payload: run_failed_payload(outcome, public_url)?,
                 })
             })
@@ -770,7 +846,8 @@ impl Notifier {
         })
     }
 
-    /// Posts a JSON document once.
+    /// Posts a JSON body once. Slack and Teams answer 200 and 202, which count as delivered
+    /// like any 2xx.
     async fn post(&self, url: &str, body: String) -> Attempt {
         let request = self
             .http

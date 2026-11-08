@@ -16,6 +16,7 @@ mod m20261108_000001_prioritization;
 mod m20261108_000002_webhook_deliveries;
 mod m20261108_000003_component_dependencies;
 mod m20261108_000004_dependency_graph_partial;
+mod m20261108_000005_webhook_format;
 
 /// Every migration of nanobom, in the order they apply; used by
 /// `nanobom_domain::database::migrate` and by the `migrate` command.
@@ -30,6 +31,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261108_000002_webhook_deliveries::Migration),
             Box::new(m20261108_000003_component_dependencies::Migration),
             Box::new(m20261108_000004_dependency_graph_partial::Migration),
+            Box::new(m20261108_000005_webhook_format::Migration),
         ]
     }
 }

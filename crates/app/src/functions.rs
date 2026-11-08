@@ -362,6 +362,7 @@ pub async fn load_settings(organization: String) -> Result<SettingsData, ServerF
             minimum_severity: crate::server::severity(webhook.minimum_severity),
             enabled: webhook.enabled,
             exploited_only: webhook.exploited_only,
+            format: webhook.format.as_str().to_owned(),
         }),
         deliveries: deliveries
             .into_iter()
@@ -655,6 +656,7 @@ pub async fn save_webhook(
     minimum_severity: String,
     enabled: Option<String>,
     exploited_only: Option<String>,
+    format: Option<String>,
 ) -> Result<(), ServerFnError> {
     let actor = actor().await?;
     let database = &context()?.database;
@@ -663,14 +665,24 @@ pub async fn save_webhook(
         let severity = Severity::parse(&minimum_severity).ok_or(nanobom_domain::Error::invalid(
             nanobom_domain::Problem::UnknownSeverity,
         ))?;
+        // A form that predates the setting does not send it: JSON, as before.
+        let format = match format.as_deref() {
+            None | Some("") => nanobom_domain::notifications::Format::Json,
+            Some(name) => nanobom_domain::notifications::Format::parse(name).ok_or(
+                nanobom_domain::Error::invalid(nanobom_domain::Problem::UnknownWebhookFormat),
+            )?,
+        };
         nanobom_domain::notifications::set(
             database,
             &actor,
             id,
-            &url,
-            crate::server::domain_severity(severity),
-            enabled.is_some(),
-            exploited_only.is_some(),
+            &nanobom_domain::notifications::Webhook {
+                url,
+                minimum_severity: crate::server::domain_severity(severity),
+                enabled: enabled.is_some(),
+                exploited_only: exploited_only.is_some(),
+                format,
+            },
         )
         .await?;
         Ok(crate::t!("notices.webhook_saved").to_owned())

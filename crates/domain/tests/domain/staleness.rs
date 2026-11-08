@@ -118,10 +118,13 @@ async fn a_stale_period_is_notified_once_and_again_after_a_new_upload() {
         &database,
         &owner,
         organization.id,
-        "http://127.0.0.1:9/hook",
-        Severity::Critical,
-        true,
-        true,
+        &notifications::Webhook {
+            url: "http://127.0.0.1:9/hook".into(),
+            minimum_severity: Severity::Critical,
+            enabled: true,
+            exploited_only: true,
+            format: notifications::Format::Json,
+        },
     )
     .await
     .unwrap();
@@ -199,10 +202,13 @@ async fn projects_that_never_uploaded_are_notified_once() {
         &database,
         &owner,
         organization.id,
-        "http://127.0.0.1:9/hook",
-        Severity::Low,
-        true,
-        false,
+        &notifications::Webhook {
+            url: "http://127.0.0.1:9/hook".into(),
+            minimum_severity: Severity::Low,
+            enabled: true,
+            exploited_only: false,
+            format: notifications::Format::Json,
+        },
     )
     .await
     .unwrap();

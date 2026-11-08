@@ -1,14 +1,18 @@
 # Get notified
 
-nanobom posts JSON documents to webhooks: new findings and stale projects to each organization's
-webhook, failed runs to the instance's failure webhook. The documents, and when each is sent, are
-described in the [webhook reference](../reference/webhooks.md).
+nanobom posts to webhooks: new findings and stale projects to each organization's webhook, failed
+runs to the instance's failure webhook. An organization's webhook receives JSON documents, or
+messages that Slack and Microsoft Teams show in a channel. The documents, the messages, and when
+each is sent, are described in the [webhook reference](../reference/webhooks.md).
 
 ## Send an organization's new findings to a webhook
 
 An organization's admins configure one webhook in **Settings → Webhook**:
 
 - **URL**: an `http` or `https` address;
+- **Format**: **JSON document** (the default), **Slack message** or **Microsoft Teams message
+  (Workflows)**; see [Post to Slack](#post-to-slack) and
+  [Post to Microsoft Teams](#post-to-microsoft-teams);
 - **Minimum severity**: findings below it are not sent (known exploited ones always are);
 - **Only known exploited vulnerabilities**: send only known exploited findings, whatever their
   severity;
@@ -21,7 +25,8 @@ attempt), **Failed** or **Cancelled** (the webhook was removed, disabled or move
 attempt was recorded), the number of attempts, and the time and answer of the last attempt (the
 HTTP status, or the error). **Remove webhook** deletes the configuration and abandons the
 deliveries still waiting for a retry; disabling the webhook or changing its URL abandons them
-too, so retries never go to the old address.
+too, so retries never go to the old address, and changing its format does as well, since their
+bodies were written for the previous one.
 
 A receiver that is down for a while misses nothing: failed deliveries are retried after 1 minute,
 10 minutes and 1 hour. A `4xx` answer other than `408` and `429` is not retried, so fix the
@@ -31,6 +36,59 @@ receiver or the URL and wait for the next document. The rules are in the
 Requests are not signed: use an unguessable URL (most receivers put a random identifier in the
 path) over `https`, and answer within 15 seconds. A document can arrive twice when an answer is
 lost; receivers that must not act twice can remember the run's `id` per event.
+
+## Post to Slack
+
+nanobom posts to a Slack [Incoming Webhook](https://docs.slack.dev/messaging/sending-messages-using-incoming-webhooks):
+
+1. Open [api.slack.com/apps](https://api.slack.com/apps), choose **Create New App**, then
+   **From scratch**; name it `nanobom` and pick your workspace.
+2. In the app's **Incoming Webhooks** page, turn **Activate Incoming Webhooks** on.
+3. Choose **Add New Webhook to Workspace**, pick the channel that should receive the alerts and
+   allow the app. Slack shows a URL like
+   `https://hooks.slack.com/services/T0000/B0000/XXXXXXXX`; copy it. Anyone with this URL can
+   post to the channel, so keep it secret.
+4. In nanobom, open the organization's **Settings → Webhook**, paste the URL, set **Format** to
+   **Slack message** and choose the minimum severity. Then **Save webhook**.
+
+The next run that opens findings posts a message with a header (organization, number of
+findings, highest severity), then up to 10 findings: the vulnerability identifier linking to its
+page in nanobom, the component, the severity, whether it is known exploited and which direct
+dependency introduces it. A last line counts the findings left out and links to the
+organization. Messages are in English whatever the language of the interface; what they contain
+is in the [webhook reference](../reference/webhooks.md#slack-messages).
+
+Slack answers `200` with `ok`. A `400` (`invalid_payload`, `invalid_blocks`) or a `404`
+(`no_service`: the webhook was revoked, or the URL is wrong) is not retried and shows as
+**Failed** in **Recent deliveries**; fix the URL and wait for the next message.
+
+## Post to Microsoft Teams
+
+The connectors that Teams used to offer for incoming webhooks were
+[retired](https://learn.microsoft.com/en-us/microsoftteams/platform/webhooks-and-connectors/how-to/add-incoming-webhook)
+in favor of the **Workflows** app (Power Automate). nanobom sends what a Workflows webhook
+accepts: a `message` carrying an [Adaptive Card](https://adaptivecards.microsoft.com), not the
+`MessageCard` format of the old connectors, which a Workflows webhook does not render.
+
+1. In Teams, open the channel that should receive the alerts, choose **More options (…)** next to
+   its name, then **Workflows**.
+2. Choose the template **Send webhook alerts to a channel**, name the workflow and sign in the
+   connections it asks for, then **Next**.
+3. Pick the team and the channel, then **Add workflow**.
+4. Copy the **webhook URL** Teams shows (it is also on the workflow's page in Power Automate). It
+   is a long `https://…logic.azure.com/…` address that carries its own key: keep it secret.
+5. In nanobom, open the organization's **Settings → Webhook**, paste the URL, set **Format** to
+   **Microsoft Teams message (Workflows)** and choose the minimum severity. Then **Save webhook**.
+
+The next run that opens findings posts a card with the same content as the Slack message: a
+title, up to 10 findings and a **Open … in nanobom** button. What it contains is in the
+[webhook reference](../reference/webhooks.md#microsoft-teams-messages).
+
+A Workflows webhook usually answers `202 Accepted` as soon as it has received the request, before
+the workflow posts the card: nanobom counts it as delivered. If cards do not show up in the
+channel while **Recent deliveries** says **Delivered**, look at the workflow's run history in
+Power Automate: the workflow runs under the account of whoever created it, so it can stop working
+when that account loses access to the channel.
 
 ## Receive them in Home Assistant
 
@@ -67,10 +125,11 @@ actions:
 
 `local_only: false` is needed when nanobom is not on Home Assistant's local network.
 
-## Forward them to a chat
+## Forward them to another chat
 
-A receiver that turns every event into one chat line, with Python's standard library only; adapt
-`forward` to your chat's incoming webhook:
+For a chat nanobom does not format, keep the **JSON document** format and put a small receiver in
+between. This one turns every event into one chat line, with Python's standard library only;
+adapt `forward` to your chat's incoming webhook:
 
 ```python
 import json

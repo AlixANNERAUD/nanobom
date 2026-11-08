@@ -264,10 +264,18 @@ fn WebhookSettings(page: SettingsData) -> impl IntoView {
     let exploited_only = webhook
         .as_ref()
         .is_some_and(|webhook| webhook.exploited_only);
+    let format = webhook
+        .as_ref()
+        .map_or_else(|| "json".to_owned(), |webhook| webhook.format.clone());
     let url = webhook
         .as_ref()
         .map(|webhook| webhook.url.clone())
         .unwrap_or_default();
+    let formats = [
+        ("json", t!("settings.format_json")),
+        ("slack", t!("settings.format_slack")),
+        ("teams", t!("settings.format_teams")),
+    ];
     let deliveries = (!page.deliveries.is_empty())
         .then(|| view! { <Deliveries deliveries=page.deliveries.clone() /> });
     let remove = webhook.is_some().then({
@@ -303,6 +311,16 @@ fn WebhookSettings(page: SettingsData) -> impl IntoView {
                             />
                         </Field>
                         <div class="flex flex-wrap items-end gap-4">
+                            <Field label=t!("settings.webhook_format") input_id="webhook-format">
+                                <select id="webhook-format" name="format" class=format!("{SELECT} w-64")>
+                                    {formats
+                                        .into_iter()
+                                        .map(|(value, label)| {
+                                            view! { <option value=value selected=value == format>{label}</option> }
+                                        })
+                                        .collect_view()}
+                                </select>
+                            </Field>
                             <Field label=t!("settings.minimum_severity") input_id="webhook-severity">
                                 <select id="webhook-severity" name="minimum_severity" class=format!("{SELECT} w-40")>
                                     {Severity::DESCENDING
