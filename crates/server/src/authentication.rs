@@ -1,4 +1,13 @@
 //! Sign-in and sign-out routes, sessions and request checks.
+//!
+//! Sessions live in the database ([`DatabaseSessionStore`]) behind an `HttpOnly`,
+//! `SameSite=Lax` cookie, `Secure` when the public URL is HTTPS, and expire after a configurable
+//! inactivity period. Interface routes are wrapped in [`csrf::protect`]; the upload API is not,
+//! since it is authenticated by a bearer token rather than a cookie.
+//!
+//! Password sign-in is rate limited per client address. Behind a reverse proxy, the peer
+//! address is the proxy's, so every user shares one budget unless `--trust-forwarded-headers`
+//! is set; setting it without a proxy lets clients pick their own address and escape the limit.
 
 use std::{sync::Arc, time::Duration};
 
@@ -34,7 +43,9 @@ use crate::{
 
 const PENDING_SIGN_IN: &str = "openid.pending";
 
-/// The OpenID Connect provider from the options, if configured.
+/// The OpenID Connect provider from the options, if configured: the issuer and the client
+/// identifier must be set together. Empty optional settings count as unset, so environment
+/// variables can be blanked out.
 pub fn openid(options: &ServeOptions) -> Result<Option<OpenId>, crate::Failure> {
     let OpenIdOptions {
         oidc_issuer,
@@ -83,7 +94,8 @@ pub fn openid(options: &ServeOptions) -> Result<Option<OpenId>, crate::Failure> 
     Ok(Some(openid))
 }
 
-/// Adds the sign-in routes and wraps everything in sessions and request checks.
+/// Adds the sign-in routes and wraps everything in sessions and request checks. Also starts the
+/// hourly deletion of expired sessions, so it must be called inside a Tokio runtime.
 pub fn layer(router: Router<AppState>, state: &AppState) -> Router<AppState> {
     let mut routes = Router::new()
         .route("/auth/logout", post(sign_out))
@@ -166,7 +178,8 @@ fn forget_old_clients(retain_recent: impl Fn() + Send + 'static) {
     });
 }
 
-/// Keeps redirects on this site: a relative path, not `//host` nor `/\host`.
+/// Keeps redirects on this site: a relative path, not `//host` nor `/\host` (which browsers
+/// also read as another host), and without control characters. Anything else becomes `/`.
 pub fn safe_next(next: Option<&str>) -> String {
     match next {
         Some(path)

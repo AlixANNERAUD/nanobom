@@ -10,6 +10,8 @@ use reqwest::Url;
 
 use crate::{Failure, command_line::HealthcheckOptions};
 
+/// Checks the configured URL, or the one derived from the listen address; fails on a timeout,
+/// a connection error or an unsuccessful status.
 pub async fn run(options: HealthcheckOptions) -> Result<(), Failure> {
     let url = match options.url {
         Some(url) => url,

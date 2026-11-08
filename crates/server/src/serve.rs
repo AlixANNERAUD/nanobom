@@ -1,4 +1,5 @@
-//! The HTTP server.
+//! The HTTP server: checks the configuration, starts the background services and serves every
+//! route until `SIGINT` or `SIGTERM`.
 
 use std::sync::Arc;
 
@@ -91,6 +92,13 @@ pub fn router(state: AppState) -> Router {
     )
 }
 
+/// Starts the server on a migrated database and returns once it has shut down.
+///
+/// Fails before listening when the configuration cannot work: an invalid schedule or group
+/// mapping, half an OpenID Connect configuration, or no sign-in method at all. The identity
+/// provider itself is only contacted at the first sign-in. On shutdown, requests in flight
+/// finish; a run in progress is abandoned, and the next start records it as failed
+/// ([`runner::close_interrupted_runs`]).
 pub async fn run(
     database: DatabaseConnection,
     mut options: ServeOptions,

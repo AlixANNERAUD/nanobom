@@ -1,4 +1,8 @@
 //! State shared by every request handler.
+//!
+//! Cloned for every request, so every field is cheap to clone (handles and `Arc`s). Interface
+//! pages do not see it: [`crate::serve`] gives them a narrower `InterfaceContext` from the app
+//! crate.
 
 use std::sync::Arc;
 
@@ -10,13 +14,16 @@ use tokio::sync::Semaphore;
 
 use crate::{command_line::ServeOptions, runner::Runner};
 
+/// Handles to the database, the configuration and the background services.
 #[derive(Clone)]
 pub struct AppState {
     pub database: DatabaseConnection,
+    /// The `serve` options, with the public URL normalized by [`crate::serve::run`].
     pub options: Arc<ServeOptions>,
     pub leptos_options: LeptosOptions,
     /// Bounds how many SBOMs are parsed at once, which bounds memory use.
     pub sbom_parsing: Arc<Semaphore>,
+    /// Queues runs; see [`crate::runner`].
     pub runner: Runner,
     /// The OpenID Connect provider, when configured.
     pub openid: Option<Arc<OpenId>>,
