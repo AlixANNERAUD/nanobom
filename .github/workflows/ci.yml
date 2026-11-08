@@ -54,6 +54,32 @@ jobs:
       - run: mise run doc
       - run: mise run test
 
+  postgres:
+    if: github.event.action != 'edited'
+    name: Tests on PostgreSQL
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: nanobom
+          POSTGRES_PASSWORD: nanobom
+          POSTGRES_DB: nanobom
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready --username nanobom --dbname nanobom"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NANOBOM_TEST_DATABASE_URL: postgres://nanobom:nanobom@localhost:5432/nanobom
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: jdx/mise-action@v5.2.7
+      - uses: Swatinem/rust-cache@v2.9.3
+      - run: mise run test-postgres
+
   coverage:
     if: github.event.action != 'edited'
     name: Coverage
@@ -135,6 +161,17 @@ jobs:
         run: |
           if ! docker compose up --detach --no-build --wait --wait-timeout 150; then
             docker compose logs
+            exit 1
+          fi
+          curl --fail --silent http://localhost:8080/login > /dev/null
+        env:
+          NANOBOM_IMAGE: nanobom:ci
+      # The PostgreSQL example too: healthy means the migrations ran on PostgreSQL.
+      - name: Start the image on PostgreSQL and wait until it reports healthy
+        run: |
+          docker compose down
+          if ! docker compose -f examples/compose-postgres.yaml up --detach --wait --wait-timeout 150; then
+            docker compose -f examples/compose-postgres.yaml logs
             exit 1
           fi
           curl --fail --silent http://localhost:8080/login > /dev/null

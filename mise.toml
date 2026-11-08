@@ -45,6 +45,15 @@ run = "cargo doc $NANOBOM_SERVER_PACKAGES --no-deps --document-private-items"
 [tasks.doc.env]
 RUSTDOCFLAGS = "-D warnings"
 
+# The tests recreate the schema of the database in NANOBOM_TEST_DATABASE_URL for each test, so
+# they run one at a time. Without the variable they would quietly run on SQLite instead.
+[tasks.test-postgres]
+description = "Run the test suite on the PostgreSQL database in NANOBOM_TEST_DATABASE_URL"
+run = [
+  'case "$NANOBOM_TEST_DATABASE_URL" in postgres://*|postgresql://*) ;; *) echo "Set NANOBOM_TEST_DATABASE_URL to an empty PostgreSQL database, such as postgres://nanobom:nanobom@localhost:5432/nanobom" >&2; exit 1 ;; esac',
+  "cargo nextest run $NANOBOM_SERVER_PACKAGES --no-tests=pass --test-threads 1",
+]
+
 [tasks.coverage]
 description = "Run the test suite with coverage, writing lcov.info"
 run = "cargo llvm-cov nextest $NANOBOM_SERVER_PACKAGES --no-tests=pass --lcov --output-path lcov.info"

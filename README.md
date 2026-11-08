@@ -3,7 +3,7 @@
 <p align="center">
   <strong>The lightweight, self-hosted SBOM vulnerability tracker.</strong><br>
   Know what you ship, see what is actually exploited, and stop it in CI,
-  with one container and a SQLite file.
+  with one container and a SQLite file (or PostgreSQL).
 </p>
 
 <p align="center">
@@ -82,8 +82,8 @@ and fails the job when they cross your threshold. GitLab CI and any other CI wor
   SBOM stopped coming; a Home Assistant example turns them into phone notifications.
 
 **Fits your stack**
-- One container (about 20 MB compressed, amd64 and arm64) with its database in a volume; no
-  queue, no cache server, no vulnerability mirror to keep in sync.
+- One container (about 20 MB compressed, amd64 and arm64) with its database, SQLite in a volume
+  or PostgreSQL; no queue, no cache server, no vulnerability mirror to keep in sync.
 - Organizations and roles, local accounts and OpenID Connect single sign-on (Keycloak, Zitadel,
   Authentik, …) with roles mapped from groups.
 - Prometheus metrics, health check, JSON logs, online backups.

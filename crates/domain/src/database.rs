@@ -1,9 +1,8 @@
 //! Opening the database, applying migrations and taking backups.
 //!
-//! SQLite is the supported database: one file, no server. Queries are nevertheless written with
-//! SeaORM's builder rather than SQLite-specific SQL, and the test suite can run against
-//! PostgreSQL (see the `testing` module), so the domain stays portable; [`backup`] is the one
-//! SQLite-only operation.
+//! SQLite (the default: one file, no server) and PostgreSQL are both supported. Queries are
+//! written with SeaORM's builder rather than the SQL of one database, and CI runs the test suite
+//! on both (see the `testing` module); [`backup`] is the one SQLite-only operation.
 
 use std::{path::Path, time::Duration};
 
@@ -13,10 +12,12 @@ use sea_orm::{
     Statement,
 };
 
-/// Opens a connection pool; the URL scheme picks the backend. SQLite databases are created if
-/// missing, use write-ahead logging so readers never block the writer, and enforce foreign keys
-/// (deleting an organization or a project relies on cascades). The schema is not touched: call
-/// [`migrate`] afterwards.
+/// Opens a connection pool; the URL scheme picks the backend, SQLite (`sqlite://…`) or
+/// PostgreSQL (`postgres://…`). SQLite databases are created if missing, use write-ahead logging
+/// so readers never block the writer, and enforce foreign keys (deleting an organization or a
+/// project relies on cascades); a PostgreSQL database must exist already. Eight connections cover
+/// the web server and the run worker on either. The schema is not touched: call [`migrate`]
+/// afterwards.
 pub async fn connect(url: &str) -> Result<DatabaseConnection, DbErr> {
     let mut options = ConnectOptions::new(url);
     options
@@ -44,7 +45,10 @@ pub async fn migrate(database: &DatabaseConnection) -> Result<(), DbErr> {
 /// Why [`backup`] refused or failed.
 #[derive(Debug, thiserror::Error)]
 pub enum BackupError {
-    #[error("backups use SQLite's VACUUM INTO; use the database's own tools (pg_dump) for {0:?}")]
+    #[error(
+        "nanobom backup copies SQLite databases only; back up this {0:?} database with its own \
+         tools, pg_dump for PostgreSQL"
+    )]
     UnsupportedBackend(DatabaseBackend),
     #[error("the backup destination {0} already exists")]
     DestinationExists(String),

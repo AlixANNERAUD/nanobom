@@ -11,14 +11,15 @@ cargo-deny, wasm-bindgen, mdBook…) and runs the tasks. Every cargo command goe
 
 ```sh
 mise install
-mise run dev       # server with live reload on http://127.0.0.1:3000
-mise run dev-admin # first administrator of the development database
-mise run check     # formatting, clippy, rustdoc, tests and cargo-deny, as CI
-mise run test      # tests only (cargo-nextest)
-mise run coverage  # tests with coverage, written to lcov.info
-mise run build     # release binary and site in target/
-mise run docs      # this book, in docs/book
-mise run doc       # the API documentation (rustdoc); broken links fail it
+mise run dev           # server with live reload on http://127.0.0.1:3000
+mise run dev-admin     # first administrator of the development database
+mise run check         # formatting, clippy, rustdoc, tests and cargo-deny, as CI
+mise run test          # tests only (cargo-nextest)
+mise run test-postgres # tests on PostgreSQL (see below)
+mise run coverage      # tests with coverage, written to lcov.info
+mise run build         # release binary and site in target/
+mise run docs          # this book, in docs/book
+mise run doc           # the API documentation (rustdoc); broken links fail it
 ```
 
 `mise run dev` needs neither `/data` nor root. It runs `cargo leptos watch -- serve` (cargo-leptos
@@ -51,6 +52,19 @@ helpers of `nanobom_domain::testing`.
   interface, operations); `common.rs` starts a server on a fresh database.
 - Unit tests sit next to the code they test.
 
+Tests use an in-memory SQLite database each. To run them on PostgreSQL, as CI also does, start an
+empty database and point `NANOBOM_TEST_DATABASE_URL` at it; the schema is dropped and recreated
+for each test, so `mise run test-postgres` runs them one at a time:
+
+```sh
+docker run -d --name nanobom-test-postgres -p 127.0.0.1:5432:5432 \
+  -e POSTGRES_USER=nanobom -e POSTGRES_PASSWORD=nanobom -e POSTGRES_DB=nanobom postgres:17-alpine
+NANOBOM_TEST_DATABASE_URL=postgres://nanobom:nanobom@localhost:5432/nanobom mise run test-postgres
+docker rm -f nanobom-test-postgres
+```
+
+Never point it at a database you care about: every test empties it.
+
 ## Change the database schema
 
 1. Add a migration to `crates/migration/src/` and list it in `lib.rs`. Never edit a migration
@@ -58,7 +72,9 @@ helpers of `nanobom_domain::testing`.
 2. Regenerate the entities with `mise run entities` (it applies the migrations to a temporary
    database and runs `sea-orm-cli`).
 
-Migrations run at startup on SQLite; keep them compatible with existing data.
+Migrations run at startup, on SQLite and on PostgreSQL: write them with SeaORM's schema builder
+rather than SQL of one database, keep them compatible with existing data, and run the tests on
+both.
 
 ## Add a language
 

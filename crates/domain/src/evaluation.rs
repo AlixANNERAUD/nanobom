@@ -49,7 +49,8 @@ use nanobom_osv::{Severity, Vulnerability, VulnerabilityReference, Vulnerability
 use sea_orm::{
     ActiveModelTrait,
     ActiveValue::Set,
-    ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter, TransactionTrait,
+    ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
+    TransactionTrait,
     sea_query::{Expr, OnConflict},
 };
 use serde::{Deserialize, Serialize};
@@ -518,11 +519,14 @@ async fn store_record(
     Ok(())
 }
 
+/// The projects in scope, in creation order. Explicitly ordered, as are the components below:
+/// SQLite happens to return rows by identifier, PostgreSQL in whatever order its table holds
+/// them, and the order of a run's new findings (and so of webhook payloads) follows these.
 async fn scope_projects(
     database: &impl ConnectionTrait,
     scope: Scope,
 ) -> std::result::Result<Vec<projects::Model>, sea_orm::DbErr> {
-    let query = projects::Entity::find();
+    let query = projects::Entity::find().order_by_asc(projects::Column::Id);
     match scope {
         Scope::All => query.all(database).await,
         Scope::Organization(id) => {
@@ -555,6 +559,7 @@ async fn targets(
         let models = components::Entity::find()
             .filter(components::Column::ProjectId.is_in(chunk.iter().copied()))
             .filter(components::Column::Version.is_not_null())
+            .order_by_asc(components::Column::Id)
             .all(database)
             .await?;
         targets.extend(models.into_iter().map(|component| Target {
@@ -916,7 +921,7 @@ pub async fn recent_runs(
     organization_id: i64,
     limit: u64,
 ) -> Result<Vec<RunSummary>> {
-    use sea_orm::{Condition, QueryOrder, QuerySelect};
+    use sea_orm::{Condition, QuerySelect};
     actor
         .authorize(database, organization_id, Permission::View)
         .await?;

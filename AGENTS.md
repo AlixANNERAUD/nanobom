@@ -33,6 +33,7 @@ fail: the build directory is set up by mise.
 | `mise run format` | Formats the code |
 | `mise run lint` | rustfmt check, clippy with `-D warnings` for the server and for the WebAssembly frontend |
 | `mise run test` | The test suite (nextest) |
+| `mise run test-postgres` | The test suite on the PostgreSQL database in `NANOBOM_TEST_DATABASE_URL`, one test at a time |
 | `mise run check` | What CI runs: lint, rustdoc, tests, cargo-deny |
 | `mise run doc` | Rustdoc with warnings as errors (broken intra-doc links fail) |
 | `mise run dev` / `mise run dev-admin` | Development server on http://127.0.0.1:3000 with a local database / its first administrator |
@@ -52,6 +53,9 @@ before committing.
 - Integer columns are 64 bits, enumerations are stored as text, timestamps are UTC with time zone.
   On SQLite, timestamps are compared as text, which is only correct because every write uses
   UTC.
+- The code runs on SQLite and PostgreSQL: no SQL specific to one of them, and an explicit order
+  (`order_by`) wherever the order of rows matters, since PostgreSQL returns them in no particular
+  order otherwise. CI runs the tests on both.
 - Errors shown to users are `Problem` variants (`crates/domain/src/problem.rs`), translated in
   `crates/domain/locales/`. The upload API answers in English.
 - Every interface string goes through `t!`/`tf!`/`tp!` with keys in **both**

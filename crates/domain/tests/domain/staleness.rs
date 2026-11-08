@@ -78,6 +78,33 @@ async fn projects_are_stale_past_the_threshold_and_never_when_disabled() {
 }
 
 #[tokio::test]
+async fn stale_projects_come_in_creation_order() {
+    let database = testing::database().await;
+    let owner = owner(&database).await;
+    let organization = organizations::create(&database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let first = projects::create(&database, &owner, organization.id, "first", "First")
+        .await
+        .unwrap();
+    let first = age(&database, first, 90, None).await;
+    let second = projects::create(&database, &owner, organization.id, "second", "Second")
+        .await
+        .unwrap();
+    age(&database, second, 90, None).await;
+    // Updated last: PostgreSQL now holds its row after the second one.
+    age(&database, first, 80, None).await;
+
+    let stale: Vec<String> = staleness::stale_projects(&database, 30)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|project| project.slug)
+        .collect();
+    assert_eq!(stale, ["first", "second"]);
+}
+
+#[tokio::test]
 async fn a_stale_period_is_notified_once_and_again_after_a_new_upload() {
     let database = testing::database().await;
     let owner = owner(&database).await;

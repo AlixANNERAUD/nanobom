@@ -10,6 +10,7 @@
 # How-to guides
 
 - [Install nanobom](how-to/install.md)
+- [Run on PostgreSQL](how-to/postgresql.md)
 - [Generate an SBOM](how-to/generate-sbom.md)
 - [Upload from CI](how-to/upload-from-ci.md)
 - [Fail CI on vulnerabilities](how-to/fail-ci.md)

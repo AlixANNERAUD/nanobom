@@ -42,9 +42,13 @@ step. Migrations only go forward.
 | --- | --- | --- |
 | `<destination>` | `NANOBOM_BACKUP_DESTINATION` | The file to write; it must not exist yet. |
 
-Writes a consistent copy of the live database with SQLite's `VACUUM INTO`, without stopping the
-server or blocking it. It never overwrites a file; the directory must exist and be writable by
-the user nanobom runs as.
+Writes a consistent copy of the live SQLite database with SQLite's `VACUUM INTO`, without
+stopping the server or blocking it. It never overwrites a file; the directory must exist and be
+writable by the user nanobom runs as.
+
+On PostgreSQL it writes nothing and fails with `nanobom backup copies SQLite databases only; back
+up this Postgres database with its own tools, pg_dump for PostgreSQL`: see
+[Back up and restore PostgreSQL](../how-to/maintenance.md#back-up-and-restore-postgresql).
 
 ## `nanobom create-administrator`
 

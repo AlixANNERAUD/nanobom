@@ -117,5 +117,7 @@ stay private.
 
 ## Data at rest
 
-Everything, password hashes and token digests included, is in the SQLite database: treat it and
-its backups as sensitive.
+Everything, password hashes and token digests included, is in the database (SQLite or
+PostgreSQL): treat it and its backups as sensitive. On PostgreSQL, the connection carries that
+data too: use `sslmode=verify-full` when the database is on another host
+([PostgreSQL URLs](../reference/configuration.md#postgresql-urls)).
