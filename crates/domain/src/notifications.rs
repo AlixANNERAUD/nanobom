@@ -14,7 +14,7 @@ use std::{
 };
 
 use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
-use nanobom_entity::{findings, organization_webhooks, organizations, projects, vulnerabilities};
+use nanobom_entity::{findings, organization_webhooks, organizations, projects};
 use nanobom_osv::Severity;
 use reqwest::Url;
 use sea_orm::{
@@ -27,13 +27,10 @@ use crate::{
     access::{Actor, Permission},
     error::{Error, Result},
     evaluation::{RunOutcome, Scope},
-    exploitation::{self, Exploitation},
+    exploitation::{self, Exploitation, QUERY_CHUNK},
     problem::Problem,
     staleness,
 };
-
-/// Identifiers per database query, below SQLite's limit on bound variables.
-const QUERY_CHUNK: usize = 500;
 
 /// An organization's webhook settings.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -266,10 +263,6 @@ struct Candidate {
     cvss_score: Option<f64>,
 }
 
-fn aliases_of(vulnerability: &vulnerabilities::Model) -> Vec<String> {
-    serde_json::from_str(&vulnerability.aliases).unwrap_or_default()
-}
-
 /// The open findings of a run's scope that were never notified as known exploited.
 async fn unnotified_open_findings(
     database: &impl ConnectionTrait,
@@ -304,32 +297,26 @@ async fn unnotified_open_findings(
         .map(|project| (project.id, project))
         .collect();
     let open = query.all(database).await?;
-    let identifiers: BTreeSet<String> = open
-        .iter()
-        .map(|finding| finding.vulnerability_id.clone())
-        .collect();
-    let identifiers: Vec<String> = identifiers.into_iter().collect();
-    let mut records: HashMap<String, vulnerabilities::Model> = HashMap::new();
-    for chunk in identifiers.chunks(QUERY_CHUNK) {
-        for record in vulnerabilities::Entity::find()
-            .filter(vulnerabilities::Column::Id.is_in(chunk.to_vec()))
-            .all(database)
-            .await?
-        {
-            records.insert(record.id.clone(), record);
-        }
-    }
+    let facts = exploitation::vulnerability_facts(
+        database,
+        open.iter().map(|finding| finding.vulnerability_id.as_str()),
+    )
+    .await?;
     Ok(open
         .into_iter()
         .filter_map(|finding| {
             let project = projects.get(&finding.project_id)?;
-            let record = records.get(&finding.vulnerability_id);
+            // Cloned, not removed: several findings can share a vulnerability.
+            let record = facts
+                .get(&finding.vulnerability_id)
+                .cloned()
+                .unwrap_or_default();
             Some(Candidate {
                 organization_id: project.organization_id,
                 project_slug: project.slug.clone(),
-                aliases: record.map(aliases_of).unwrap_or_default(),
-                summary: record.and_then(|record| record.summary.clone()),
-                cvss_score: record.and_then(|record| record.cvss_score),
+                aliases: record.aliases,
+                summary: record.summary,
+                cvss_score: record.cvss_score,
                 finding,
             })
         })

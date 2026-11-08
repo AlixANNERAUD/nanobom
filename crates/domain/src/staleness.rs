@@ -6,12 +6,12 @@ use std::collections::BTreeMap;
 
 use chrono::{DateTime, Duration, FixedOffset, Utc};
 use nanobom_entity::{organization_webhooks, projects};
-use sea_orm::{ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter};
+use sea_orm::{
+    ColumnTrait, ConnectionTrait, EntityTrait, ExprTrait, QueryFilter,
+    sea_query::{Expr, Func},
+};
 
-use crate::error::Result;
-
-/// Identifiers per database query, below SQLite's limit on bound variables.
-const QUERY_CHUNK: usize = 500;
+use crate::{error::Result, exploitation::QUERY_CHUNK};
 
 /// Whether a project with these dates is stale at `now`.
 pub fn is_stale(
@@ -27,11 +27,11 @@ pub fn is_stale(
     now - reference > Duration::days(i64::from(stale_after_days))
 }
 
-fn project_is_stale(project: &projects::Model, now: DateTime<FixedOffset>, days: u32) -> bool {
-    is_stale(project.created_at, project.last_upload_at, now, days)
-}
-
 /// Every stale project of the instance.
+///
+/// Filtered in SQL, like [`is_stale`] (`COALESCE(last_upload_at, created_at)` older than the
+/// threshold). Timestamps are stored as text in one format and always written in UTC, so
+/// comparing them as text orders them in time.
 pub async fn stale_projects(
     database: &impl ConnectionTrait,
     stale_after_days: u32,
@@ -39,13 +39,17 @@ pub async fn stale_projects(
     if stale_after_days == 0 {
         return Ok(Vec::new());
     }
-    let now = Utc::now().fixed_offset();
+    let cutoff = Utc::now().fixed_offset() - Duration::days(i64::from(stale_after_days));
     Ok(projects::Entity::find()
+        .filter(
+            Expr::expr(Func::coalesce([
+                Expr::col(projects::Column::LastUploadAt),
+                Expr::col(projects::Column::CreatedAt),
+            ]))
+            .lt(cutoff),
+        )
         .all(database)
-        .await?
-        .into_iter()
-        .filter(|project| project_is_stale(project, now, stale_after_days))
-        .collect())
+        .await?)
 }
 
 /// How many projects are stale, for the metrics.

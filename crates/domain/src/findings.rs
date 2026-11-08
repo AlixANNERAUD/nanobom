@@ -19,7 +19,7 @@ use crate::{
     access::{Actor, Permission},
     error::{Error, Result},
     evaluation::record_event,
-    exploitation::{self, Exploitation},
+    exploitation::{self, Exploitation, QUERY_CHUNK, VulnerabilityFacts, vulnerability_facts},
     problem::Problem,
 };
 
@@ -147,14 +147,10 @@ fn component_name_and_version(purl: &str) -> (String, Option<String>) {
     }
 }
 
-fn aliases(vulnerability: &vulnerabilities::Model) -> Vec<String> {
-    serde_json::from_str(&vulnerability.aliases).unwrap_or_default()
-}
-
 fn view(
     finding: findings::Model,
     project_slug: String,
-    vulnerability: Option<&vulnerabilities::Model>,
+    vulnerability: Option<&VulnerabilityFacts>,
 ) -> Finding {
     let (component_name, component_version) = component_name_and_version(&finding.purl);
     Finding {
@@ -164,7 +160,9 @@ fn view(
         component_name,
         component_version,
         ecosystem: finding.ecosystem,
-        aliases: vulnerability.map(aliases).unwrap_or_default(),
+        aliases: vulnerability
+            .map(|vulnerability| vulnerability.aliases.clone())
+            .unwrap_or_default(),
         summary: vulnerability.and_then(|vulnerability| vulnerability.summary.clone()),
         cvss_score: vulnerability.and_then(|vulnerability| vulnerability.cvss_score),
         severity: finding.severity.parse().unwrap_or(Severity::Unknown),
@@ -243,13 +241,20 @@ async fn project_findings(
         query = query.filter(findings::Column::Ecosystem.eq(ecosystem));
     }
     let rows = query
-        .find_also_related(vulnerabilities::Entity)
         .order_by_asc(findings::Column::Purl)
         .all(database)
         .await?;
+    let facts = vulnerability_facts(
+        database,
+        rows.iter().map(|finding| finding.vulnerability_id.as_str()),
+    )
+    .await?;
     let mut findings: Vec<Finding> = rows
         .into_iter()
-        .map(|(finding, vulnerability)| view(finding, project.slug.clone(), vulnerability.as_ref()))
+        .map(|finding| {
+            let vulnerability = facts.get(&finding.vulnerability_id);
+            view(finding, project.slug.clone(), vulnerability)
+        })
         .collect();
     let keys: Vec<(i64, Vec<String>)> = findings
         .iter()
@@ -483,7 +488,12 @@ pub async fn detail(
             .collect(),
         affected_components,
         finding: {
-            let mut view = view(finding, project.slug, Some(&vulnerability));
+            let facts = VulnerabilityFacts {
+                aliases: serde_json::from_str(&vulnerability.aliases).unwrap_or_default(),
+                summary: vulnerability.summary.clone(),
+                cvss_score: vulnerability.cvss_score,
+            };
+            let mut view = view(finding, project.slug, Some(&facts));
             view.exploitation = exploitation::for_cves(
                 database,
                 &exploitation::cve_ids(&view.vulnerability_id, &view.aliases),
@@ -669,25 +679,31 @@ pub async fn overview(
         .map(|(position, project)| (project.id, position))
         .collect();
     let identifiers: Vec<i64> = projects.iter().map(|project| project.id).collect();
-    for chunk in identifiers.chunks(500) {
+    for chunk in identifiers.chunks(QUERY_CHUNK) {
         let rows = findings::Entity::find()
             .filter(findings::Column::ProjectId.is_in(chunk.iter().copied()))
             .filter(findings::Column::Status.ne(Status::Fixed.as_str()))
-            .find_also_related(vulnerabilities::Entity)
             .all(database)
             .await?;
+        let facts = vulnerability_facts(
+            database,
+            rows.iter().map(|finding| finding.vulnerability_id.as_str()),
+        )
+        .await?;
         let keys: Vec<(i64, Vec<String>)> = rows
             .iter()
-            .map(|(finding, vulnerability)| {
-                let aliases = vulnerability.as_ref().map(aliases).unwrap_or_default();
+            .map(|finding| {
+                let aliases = facts
+                    .get(&finding.vulnerability_id)
+                    .map_or(&[][..], |facts| facts.aliases.as_slice());
                 (
                     finding.id,
-                    exploitation::cve_ids(&finding.vulnerability_id, &aliases),
+                    exploitation::cve_ids(&finding.vulnerability_id, aliases),
                 )
             })
             .collect();
         let exploitations = exploitation::for_findings(database, &keys).await?;
-        for (finding, _) in rows {
+        for finding in rows {
             let overview = &mut overviews[index[&finding.project_id]];
             match Status::parse(&finding.status) {
                 Status::Ignored => overview.ignored += 1,
