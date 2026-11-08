@@ -12,6 +12,28 @@
 //!
 //! A run that cannot complete (OSV unreachable, for example) changes no finding and is recorded
 //! as failed, so a failure never reads as "no vulnerabilities".
+//!
+//! More precisely, everything that can fail on the network (querying and fetching records)
+//! happens before the first finding changes. Findings are then updated one project per
+//! transaction, so a database error halfway leaves earlier projects updated and later ones
+//! untouched; the next run converges. Expired ignores are reopened at the start of every run,
+//! even one that later fails.
+//!
+//! Records are cached in the `vulnerabilities` table with the severity derived by
+//! [`nanobom_osv::assess`]; withdrawn records are cached but match nothing. When several
+//! aliases of one issue affect a component, a single finding is kept, with the highest severity
+//! among them. A new finding is filed under the alphabetically first identifier OSV reported;
+//! an existing one keeps its identifier.
+//!
+//! The [`Evaluator`] serializes runs within one process (the server creates a single one). Two
+//! server processes on the same database would run concurrently, which this module does not
+//! guard against.
+//!
+//! A run's row is inserted as `running` before any work and updated at the end. A run that
+//! never reaches its end (a panic, a database error while recording it, or the process
+//! stopping) would leave the row `running` forever, so the server closes such rows as failed
+//! with [`STOPPED_UNEXPECTEDLY`]: [`Evaluator::take_unfinished_run`] and [`fail_unfinished`]
+//! right after the run's task ends, [`fail_interrupted`] at the next startup.
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -51,11 +73,14 @@ pub const STOPPED_UNEXPECTEDLY: &str = "the run stopped unexpectedly";
 pub enum Scope {
     /// Every project of every organization: the scheduled run.
     All,
+    /// Every project of the organization with this identifier.
     Organization(i64),
+    /// The project with this identifier.
     Project(i64),
 }
 
 impl Scope {
+    /// The name stored in the `runs.scope` column.
     pub fn as_str(self) -> &'static str {
         match self {
             Scope::All => "all",
@@ -77,12 +102,16 @@ impl Scope {
 /// Why a run started.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Trigger {
+    /// The server's schedule.
     Scheduled,
+    /// A user, from the interface, or the operator, from the command line.
     Manual,
+    /// An SBOM upload, for the uploaded project.
     Upload,
 }
 
 impl Trigger {
+    /// The name stored in the `runs.trigger` column.
     pub fn as_str(self) -> &'static str {
         match self {
             Trigger::Scheduled => "scheduled",
@@ -108,11 +137,15 @@ pub struct NewFinding {
     pub organization_slug: String,
     pub project_slug: String,
     pub purl: String,
+    /// The identifier the finding is filed under.
     pub vulnerability_id: String,
+    /// The other identifiers of the same issue, sorted.
     pub aliases: Vec<String>,
     pub summary: Option<String>,
+    /// The highest severity among the aliases.
     pub severity: Severity,
     pub cvss_score: Option<f64>,
+    /// Whether the finding had been fixed and came back, rather than being new.
     pub reopened: bool,
 }
 
@@ -124,21 +157,28 @@ pub struct RunOutcome {
     pub trigger: Trigger,
     pub started_at: DateTime<FixedOffset>,
     pub duration_seconds: f64,
-    /// Why the run failed; findings were left untouched.
+    /// Why the run failed; findings were left untouched. The message may name packages of any
+    /// organization in scope, so it is not for organization members of an instance-wide run.
     pub error: Option<String>,
+    /// Versioned components in scope, counted once per project.
     pub component_count: usize,
+    /// Distinct vulnerability records reported for them, withdrawn ones excluded.
     pub vulnerability_count: usize,
+    /// Findings opened or reopened, whatever their severity; webhooks filter them.
     pub new_findings: Vec<NewFinding>,
     pub fixed_findings: usize,
 }
 
 impl RunOutcome {
+    /// Whether the run completed; a failed run left findings untouched.
     pub fn succeeded(&self) -> bool {
         self.error.is_none()
     }
 }
 
-/// Checks that the actor may start a run on a scope.
+/// Checks that the actor may start a run on a scope: [`Scope::All`] needs an instance
+/// administrator, the others [`Permission::TriggerRuns`]. Call it before
+/// [`Evaluator::run`], which does not check anything.
 pub async fn authorize(database: &impl ConnectionTrait, actor: &Actor, scope: Scope) -> Result<()> {
     match scope {
         Scope::All => actor.require_instance_administrator(),
@@ -155,6 +195,9 @@ pub async fn authorize(database: &impl ConnectionTrait, actor: &Actor, scope: Sc
 }
 
 /// Runs evaluations one at a time against a vulnerability source.
+///
+/// The source is generic so tests can use an in-memory one; the server uses
+/// [`nanobom_osv::OsvClient`].
 pub struct Evaluator<S> {
     database: DatabaseConnection,
     source: Arc<S>,
@@ -174,6 +217,8 @@ struct Target {
 }
 
 impl<S: VulnerabilitySource + 'static> Evaluator<S> {
+    /// An evaluator; share one per process, since only runs of the same evaluator exclude
+    /// each other.
     pub fn new(database: DatabaseConnection, source: Arc<S>) -> Self {
         Self {
             database,
@@ -200,8 +245,11 @@ impl<S: VulnerabilitySource + 'static> Evaluator<S> {
     }
 
     /// Runs an evaluation; concurrent calls wait for the current run to finish. Errors are
-    /// database errors; a failure to reach the vulnerability source is a failed run, reported
-    /// in the outcome.
+    /// database errors, and [`Error::NotFound`] for a missing project; a failure to reach the
+    /// vulnerability source is a failed run, reported in the outcome.
+    ///
+    /// No permission is checked: `triggered_by` is only recorded. Check
+    /// [`authorize`] first when a user asks for the run.
     pub async fn run(
         &self,
         trigger: Trigger,
@@ -841,8 +889,11 @@ pub async fn fail_interrupted(database: &impl ConnectionTrait) -> Result<Vec<Run
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunSummary {
     pub id: i64,
+    /// [`Trigger::as_str`].
     pub trigger: String,
+    /// [`Scope::as_str`].
     pub scope: String,
+    /// `running`, `succeeded` or `failed`.
     pub status: String,
     pub started_at: DateTime<FixedOffset>,
     pub finished_at: Option<DateTime<FixedOffset>>,
@@ -852,7 +903,9 @@ pub struct RunSummary {
 }
 
 /// The latest runs that covered an organization: whole-instance runs, and runs of the
-/// organization or one of its projects.
+/// organization or one of its projects, newest first. Requires [`Permission::View`]. Errors of
+/// whole-instance runs are replaced by a generic message unless the actor is an instance
+/// administrator.
 pub async fn recent_runs(
     database: &impl ConnectionTrait,
     actor: &Actor,

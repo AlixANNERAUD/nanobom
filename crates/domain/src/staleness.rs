@@ -1,6 +1,12 @@
 //! Stale projects: those whose SBOM stopped coming. A project is stale when its last upload
 //! (or its creation, when nothing was uploaded yet) is older than the configured number of
 //! days; 0 disables the feature.
+//!
+//! The interface flags stale projects with [`is_stale`]; the instance-wide queries here, which
+//! take no actor, feed the metrics and the `projects.stale` webhook. A project is notified once
+//! per stale period: an upload ends the period, and the project is notified again if it goes
+//! stale again. The server sends these notifications after scheduled runs only, so their
+//! frequency follows the schedule rather than the uploads.
 
 use std::collections::BTreeMap;
 

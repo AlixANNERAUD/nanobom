@@ -1,4 +1,8 @@
 //! Projects: a repository, an application or a container image whose SBOM is uploaded by CI.
+//!
+//! A project belongs to one organization and is identified by its slug within it, as in
+//! `/api/organizations/{organization}/projects/{project}/sbom`. Its components are those of its
+//! latest upload ([`crate::inventory`]).
 
 use chrono::Utc;
 use nanobom_entity::projects;
@@ -14,7 +18,7 @@ use crate::{
     problem::{Field, Problem},
 };
 
-/// The projects of an organization, sorted by slug.
+/// The projects of an organization, sorted by slug. Requires [`Permission::View`].
 pub async fn list(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -42,7 +46,8 @@ pub(crate) async fn find_model(
         .await?)
 }
 
-/// Finds a project of an organization by slug.
+/// Finds a project of an organization by slug (case-insensitive). Requires
+/// [`Permission::View`] in the organization; a missing project is [`Error::NotFound`].
 pub async fn find(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -57,7 +62,9 @@ pub async fn find(
         .ok_or(Error::NotFound)
 }
 
-/// Finds a project by identifier and checks a permission in its organization.
+/// Finds a project by identifier and checks a permission in its organization. This is how
+/// functions that take a bare project identifier stay isolated: the organization comes from
+/// the project row, never from the caller.
 pub(crate) async fn authorize(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -74,6 +81,7 @@ pub(crate) async fn authorize(
     Ok(project)
 }
 
+/// Inserts a project without checking any permission; the name defaults to the slug.
 pub(crate) async fn insert(
     database: &impl ConnectionTrait,
     organization_id: i64,
@@ -104,7 +112,8 @@ pub(crate) async fn insert(
 }
 
 /// Creates an empty project; projects are also created by the first upload of an
-/// organization-wide token.
+/// organization-wide token. Requires [`Permission::ManageProjects`]; a taken slug is a
+/// [`Problem::ProjectExists`] conflict.
 pub async fn create(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -118,6 +127,7 @@ pub async fn create(
     insert(database, organization_id, slug, Some(name)).await
 }
 
+/// Changes the display name; the slug stays. Requires [`Permission::ManageProjects`].
 pub async fn rename(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -131,7 +141,9 @@ pub async fn rename(
     Ok(project.update(database).await?)
 }
 
-/// Deletes a project with its components, upload history and findings.
+/// Deletes a project with its components, upload history and findings. Requires
+/// [`Permission::ManageProjects`]. Upload tokens limited to the project are deleted with it;
+/// an organization-wide token that uploads to the same slug again recreates it, empty.
 pub async fn delete(database: &impl ConnectionTrait, actor: &Actor, project_id: i64) -> Result<()> {
     let project = authorize(database, actor, project_id, Permission::ManageProjects).await?;
     tracing::info!(project = %project.slug, user = actor.user_id, "project deleted");

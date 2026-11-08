@@ -10,6 +10,24 @@
 //! - `run.failed`: a run that could not complete, sent to the instance's failure webhook.
 //!
 //! Deliveries go through the queue of [`crate::deliveries`], which retries failed ones.
+//!
+//! Only the webhook settings ([`get`], [`set`], [`delete`]) take an actor. The rest is called
+//! by the run worker after a run, with no actor; isolation then rests on grouping: a
+//! `findings.new` or `projects.stale` document is built per organization from that
+//! organization's projects only, and goes to that organization's webhook only. `run.failed`,
+//! whose error may name packages of any organization, goes to the instance's failure webhook,
+//! configured by the operator, never to an organization.
+//!
+//! Preparing a document and marking what it reports as notified (findings that became known
+//! exploited, stale projects) happen in one transaction with the enqueueing
+//! ([`queue_new_findings`], [`queue_stale`]): a crash cannot lose a notification nor send it
+//! twice. Findings are marked even in organizations without an enabled webhook, so enabling
+//! one later does not replay old findings; stale projects are marked only when a document
+//! reports them, so a webhook enabled later still hears about projects that are already stale.
+//!
+//! Webhook addresses are not restricted to public hosts: an organization admin can make the
+//! server post to any address it reaches. Only the status of the answer is kept, never its
+//! body.
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -42,7 +60,9 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Webhook {
     pub url: String,
+    /// Findings below this severity are left out, unless they are known exploited.
     pub minimum_severity: Severity,
+    /// A disabled webhook keeps its settings but receives nothing.
     pub enabled: bool,
     /// Deliver only known exploited findings.
     pub exploited_only: bool,
@@ -57,7 +77,8 @@ fn view(model: organization_webhooks::Model) -> Webhook {
     }
 }
 
-/// Validates a webhook address: an absolute `http` or `https` URL.
+/// Validates a webhook address: an absolute `http` or `https` URL with a host. Private and
+/// loopback addresses are accepted.
 pub fn validate_url(value: &str) -> Result<Url> {
     let url: Url = value
         .trim()
@@ -69,7 +90,8 @@ pub fn validate_url(value: &str) -> Result<Url> {
     Ok(url)
 }
 
-/// The webhook of an organization, if configured.
+/// The webhook of an organization, if configured. Requires [`Permission::ManageWebhook`]: the
+/// URL may embed a secret, so members do not see it.
 pub async fn get(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -86,7 +108,7 @@ pub async fn get(
 
 /// Creates or replaces the webhook of an organization. Disabling it or changing its URL abandons
 /// its pending deliveries, as removing it does: retries never go to an address the admins
-/// replaced or turned off.
+/// replaced or turned off. Requires [`Permission::ManageWebhook`].
 pub async fn set(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -130,7 +152,8 @@ pub async fn set(
     Ok(view(model))
 }
 
-/// Removes the webhook of an organization and abandons its pending deliveries.
+/// Removes the webhook of an organization and abandons its pending deliveries. Requires
+/// [`Permission::ManageWebhook`]; removing a missing webhook succeeds.
 pub async fn delete(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -677,6 +700,8 @@ pub struct Notifier {
 }
 
 impl Notifier {
+    /// A client with a 15-second timeout per post, so a receiver that hangs holds one attempt
+    /// only. Fails only if the TLS backend cannot be initialized.
     pub fn new() -> std::result::Result<Self, reqwest::Error> {
         Ok(Self {
             http: reqwest::Client::builder()
@@ -728,7 +753,8 @@ impl Notifier {
         Ok(outcomes)
     }
 
-    /// Attempts the deliveries that are due, at most `limit` of them.
+    /// Attempts the deliveries that are due, at most `limit` of them, oldest due first. Called
+    /// by the server's retry loop; a delivery that a concurrent attempt claimed is skipped.
     pub async fn retry_due(
         &self,
         database: &impl ConnectionTrait,

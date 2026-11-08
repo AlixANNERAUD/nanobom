@@ -1,5 +1,10 @@
 //! Organizations. Every project belongs to exactly one organization, and users see only the
 //! organizations they are members of (instance administrators see all of them).
+//!
+//! Manual membership changes never leave an organization without an owner (see
+//! [`crate::memberships`]). A user may get a *personal* organization at creation, named after
+//! them; it behaves like any other organization. Organizations are also created on the fly from
+//! identity provider groups ([`crate::memberships::synchronize`]).
 
 use std::collections::BTreeMap;
 
@@ -25,7 +30,9 @@ pub struct Organization {
     pub id: i64,
     pub slug: String,
     pub name: String,
+    /// Created along with a user account, rather than by hand or from a group mapping.
     pub is_personal: bool,
+    /// The actor's effective role; [`Role::Owner`] for instance administrators.
     pub role: Role,
 }
 
@@ -41,7 +48,8 @@ impl Organization {
     }
 }
 
-/// Creates an organization owned by the actor.
+/// Creates an organization owned by the actor, through a manual membership. Any signed-in user
+/// may do so; a taken slug is a [`Problem::OrganizationExists`] conflict.
 pub async fn create(
     database: &(impl ConnectionTrait + TransactionTrait),
     actor: &Actor,
@@ -122,7 +130,8 @@ pub async fn list(database: &impl ConnectionTrait, actor: &Actor) -> Result<Vec<
         .collect())
 }
 
-/// Finds an organization by slug, if the actor can see it.
+/// Finds an organization by slug (case-insensitive). Organizations the actor cannot see are
+/// [`Error::NotFound`], like missing ones.
 pub async fn find(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -137,6 +146,8 @@ pub async fn find(
     Ok(Organization::new(model, role))
 }
 
+/// Changes the display name; the slug, which appears in URLs and upload endpoints, never
+/// changes. Requires [`Permission::ManageOrganization`].
 pub async fn rename(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -157,7 +168,10 @@ pub async fn rename(
     Ok(())
 }
 
-/// Deletes an organization with its projects, findings, tokens and memberships.
+/// Deletes an organization with its projects, findings, tokens and memberships (through
+/// foreign key cascades). Requires [`Permission::DeleteOrganization`]. A user who still has a
+/// synchronized group mapping to the slug gets a new, empty organization at their next
+/// sign-in.
 pub async fn delete(
     database: &impl ConnectionTrait,
     actor: &Actor,

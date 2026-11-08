@@ -30,7 +30,8 @@ const DISPLAYED_CHARACTERS: usize = PREFIX.len() + 6;
 pub struct UploadToken {
     pub id: i64,
     pub name: String,
-    /// The first characters of the token, to recognize it.
+    /// The first characters of the token (the prefix and six hexadecimal digits), to recognize
+    /// it.
     pub prefix: String,
     /// The project the token is limited to, or `None` for an organization-wide token.
     pub project_slug: Option<String>,
@@ -43,6 +44,7 @@ pub struct UploadToken {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreatedToken {
     pub token: UploadToken,
+    /// The full token, to show once: it cannot be recovered later.
     pub secret: String,
 }
 
@@ -56,6 +58,7 @@ fn hexadecimal(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
+/// The stored form of a secret: its SHA-256 digest in hexadecimal.
 pub(crate) fn digest(secret: &str) -> String {
     hexadecimal(&Sha256::digest(secret.as_bytes()))
 }
@@ -73,6 +76,8 @@ fn view(model: upload_tokens::Model, project_slug: Option<String>) -> UploadToke
 }
 
 /// Creates a token for an organization, or for one of its projects when `project_slug` is set.
+/// Requires [`Permission::ManageUploadTokens`]; an unknown project is
+/// [`Problem::UnknownProject`].
 pub async fn create(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -149,7 +154,8 @@ async fn organization_by_slug(
         })
 }
 
-/// Creates a token from the command line, which has direct access to the database.
+/// Creates a token from the command line, which has direct access to the database: no actor
+/// is checked and the token has no creator.
 pub async fn create_from_command_line(
     database: &impl ConnectionTrait,
     organization_slug: &str,
@@ -181,7 +187,8 @@ pub async fn revoke_from_command_line(
     mark_revoked(database, token).await
 }
 
-/// The tokens of an organization, newest first, including revoked ones.
+/// The tokens of an organization, newest first, including revoked ones. Requires
+/// [`Permission::ManageUploadTokens`]: viewers and members do not see them.
 pub async fn list(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -210,7 +217,9 @@ async fn list_models(
         .collect())
 }
 
-/// Revokes a token; it stops working immediately and stays listed for the record.
+/// Revokes a token; it stops working immediately and stays listed for the record. Revoking a
+/// revoked token does nothing. Requires [`Permission::ManageUploadTokens`] in the token's
+/// organization.
 pub async fn revoke(database: &impl ConnectionTrait, actor: &Actor, token_id: i64) -> Result<()> {
     let token = upload_tokens::Entity::find_by_id(token_id)
         .one(database)
@@ -236,7 +245,12 @@ async fn mark_revoked(database: &impl ConnectionTrait, token: upload_tokens::Mod
     Ok(())
 }
 
-/// Finds the active token matching a secret and records its use.
+/// Finds the active token matching a secret and records its use in `last_used_at`.
+///
+/// Returns `None` for anything that is not an active token, without saying why, so callers
+/// answer every failure the same way. The lookup is by digest, so it does not compare secrets
+/// in a timing-sensitive way. The token only authenticates the caller: what it may upload to is
+/// checked by [`crate::inventory::ingest`].
 pub async fn authenticate(
     database: &impl ConnectionTrait,
     secret: &str,

@@ -1,11 +1,15 @@
 //! Validation of the identifiers that appear in URLs: usernames and organization and project
 //! slugs. They are lower case, so `MyProject` and `myproject` name the same project.
+//!
+//! Each function returns the normalized value to store; lookups by slug elsewhere fold case the
+//! same way before comparing.
 
 use crate::{
     error::{Error, Result},
     problem::{Field, Problem},
 };
 
+/// Maximum length of a slug or username, in bytes (they are ASCII).
 pub const MAXIMUM_LENGTH: usize = 64;
 
 /// Normalizes and validates a slug or username: 1 to 64 characters among lower-case ASCII
@@ -26,7 +30,8 @@ pub fn slug(field: Field, value: &str) -> Result<String> {
     Ok(value)
 }
 
-/// Validates a display name: not blank, at most 200 characters.
+/// Validates a display name: not blank, at most 200 characters. Surrounding whitespace is
+/// removed; any other character is accepted, since display names are never part of a URL.
 pub fn display_name(field: Field, value: &str) -> Result<String> {
     let value = value.trim();
     if value.is_empty() || value.chars().count() > 200 {
