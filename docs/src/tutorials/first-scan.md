@@ -109,7 +109,7 @@ few seconds. The answer looks like this, shortened:
   "components_without_purl": 0,
   "evaluation": {
     "status": "succeeded",
-    "open": { "critical": 1, "high": 1, "medium": 1, "low": 0, "unknown": 0 },
+    "open": { "critical": 1, "high": 2, "medium": 2, "low": 0, "unknown": 0 },
     "known_exploited": 0,
     "findings": [ … ]
   }
