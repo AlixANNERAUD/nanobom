@@ -29,7 +29,7 @@ The PostgreSQL container has a health check (`pg_isready`), and nanobom starts o
 The data lives in the `postgres-data` volume; nanobom itself needs no volume.
 
 The password is part of a URL in `NANOBOM_DATABASE_URL`: keep it to letters, digits and `-._~`,
-or percent-encode the other characters (`@` is `%40`).
+or [percent-encode](../reference/configuration.md#postgresql-urls) the other characters.
 
 ## With an existing PostgreSQL server
 
@@ -40,23 +40,25 @@ or percent-encode the other characters (`@` is `%40`).
    CREATE DATABASE nanobom OWNER nanobom;
    ```
 
-2. Point nanobom at it, with the [URL form](../reference/configuration.md#every-command):
+2. Point nanobom at it, with the [URL form](../reference/configuration.md#postgresql-urls):
 
    ```sh
    NANOBOM_DATABASE_URL=postgres://nanobom:a-long-random-password@db.example.org:5432/nanobom?sslmode=verify-full
    ```
 
-   `sslmode=verify-full` encrypts the connection and checks the server's certificate against the
-   public certificate authorities; add `sslrootcert=/path/to/ca.pem` when the server's certificate
-   comes from a private one, as with most managed databases.
+   `sslmode=verify-full` encrypts the connection and checks the server's certificate and name
+   against the public certificate authorities; add `sslrootcert=/path/to/ca.pem` when the
+   server's certificate comes from a private one, as with most managed databases. Avoid
+   `verify-ca`, which accepts any publicly trusted certificate whatever the host.
 
 3. Start nanobom (`nanobom serve`): it creates the schema on the first start, and applies new
    migrations on later ones. Then
    [create the first administrator](install.md#create-the-first-administrator), with the same
    `NANOBOM_DATABASE_URL`.
 
-nanobom opens at most 8 connections. Run a single nanobom process per database
-([why](../explanation/architecture.md#one-process-per-database)).
+Run a single nanobom process per database
+([why](../explanation/architecture.md#one-process-per-database)); the
+[reference](../reference/configuration.md#postgresql-urls) says how many connections it opens.
 
 ## Back up
 

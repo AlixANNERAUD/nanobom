@@ -16,7 +16,7 @@ invalid one, which stops nanobom at startup.
 | --- | --- | --- | --- |
 | `NANOBOM_DATABASE_URL` | `--database-url` | `sqlite:///data/nanobom.db` | The database. SQLite: `sqlite:///absolute/path.db` (three slashes before an absolute path) or `sqlite://relative/path.db`, created if missing. PostgreSQL: `postgres://user:password@host:port/database`, an existing database (see below). |
 | `NANOBOM_LOG_FORMAT` | `--log-format` | `json` | `json` (one object per line, for collectors) or `text`. |
-| `NANOBOM_LOG_LEVEL` | `--log-level` | `info` | A [`tracing` filter](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html), such as `info,nanobom=debug`. |
+| `NANOBOM_LOG_LEVEL` | `--log-level` | `info` | A [`tracing` filter](https://docs.rs/tracing-subscriber/latest/tracing_subscriber/filter/struct.EnvFilter.html), such as `info,nanobom=debug`. On PostgreSQL, the notices the server sends at startup ("relation already exists, skipping") are logged from WARN up, not at INFO, unless the filter mentions `sqlx`; a filter such as `error` or `off` is never made more verbose. |
 
 ### PostgreSQL URLs
 
@@ -28,8 +28,8 @@ nanobom opens at most 8 connections.
 
 | Parameter | |
 | --- | --- |
-| `sslmode` | `disable`, `prefer` (the default: TLS when the server offers it, without checking the certificate), `require` (TLS, certificate not checked), `verify-ca` (certificate checked against the trusted authorities) or `verify-full` (also checks that it names the host). Without `sslrootcert`, the trusted authorities are the public ones of [webpki-roots](https://github.com/rustls/webpki-roots). |
-| `sslrootcert` | A PEM file of the authorities to trust instead, such as a managed database's CA bundle. |
+| `sslmode` | `disable`, `prefer` (the default: TLS when the server offers it, without checking the certificate), `require` (TLS, certificate not checked), `verify-ca` (certificate checked against the trusted authorities) or `verify-full` (also checks that it names the host). The trusted authorities are the public ones of [webpki-roots](https://github.com/rustls/webpki-roots), plus `sslrootcert` if given. Use `verify-full`: with `verify-ca`, any server holding a certificate from a public authority passes, whatever its name. |
+| `sslrootcert` | A PEM file of authorities to trust in addition to the public ones, such as a managed database's CA bundle. |
 | `sslcert`, `sslkey` | A client certificate and its key, for servers that require one. |
 | `application_name` | The name shown in `pg_stat_activity`. |
 

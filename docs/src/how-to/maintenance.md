@@ -76,21 +76,34 @@ docker compose -f examples/compose-postgres.yaml exec -T postgres \
 ```
 
 Against another server, `pg_dump --format=custom --file nanobom.dump "$NANOBOM_DATABASE_URL"`
-does the same (`pg_dump` reads the URL, `sslmode` included). A managed database's own snapshots
-work too.
+does the same (`pg_dump` reads the URL, `sslmode` included). It is libpq, not nanobom, that
+connects: with `sslmode=verify-full` and no `sslrootcert`, it looks for the authorities in
+`~/.postgresql/root.crt` instead of the public ones, and fails if the file is missing. Give it
+`sslrootcert=/path/to/ca.pem`, or `sslrootcert=system` on PostgreSQL 16 and later, to use the
+operating system's authorities. A managed database's own snapshots work too.
 
 To restore:
 
 1. Stop nanobom.
-2. Restore the dump over the database, replacing its objects:
+2. Empty the database. `pg_restore --clean` only drops the objects that are in the dump, so
+   restoring an older dump after an upgrade would leave the tables of newer migrations behind,
+   and the next start would fail on them. Drop the schema, or drop and recreate the database:
 
    ```sh
    docker compose -f examples/compose-postgres.yaml exec -T postgres \
-     pg_restore --username nanobom --dbname nanobom --clean --if-exists --no-owner \
+     psql --username nanobom --dbname nanobom \
+     --command 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;'
+   ```
+
+3. Restore the dump:
+
+   ```sh
+   docker compose -f examples/compose-postgres.yaml exec -T postgres \
+     pg_restore --username nanobom --dbname nanobom --no-owner \
      < backups/nanobom-2026-11-08.dump
    ```
 
-3. Start nanobom. If the dump comes from an older version, its migrations run at startup.
+4. Start nanobom. If the dump comes from an older version, its migrations run at startup.
 
 As with SQLite, sessions, uploads and runs since the dump are lost.
 
