@@ -36,7 +36,7 @@ use axum::{
 use nanobom_domain::{
     evaluation::{Scope, Trigger},
     findings::{self, Finding},
-    inventory::{self, UploadOutcome, UploadSource},
+    inventory::{self, ParsedSbom, UploadOutcome, UploadSource},
     notifications, tokens,
 };
 use nanobom_osv::Severity;
@@ -119,13 +119,41 @@ impl From<nanobom_domain::Error> for ApiError {
     }
 }
 
-/// The upload route, with the body limit of `--maximum-sbom-size` (in mebibytes).
+/// The upload route, with the body limit of `--maximum-sbom-size`.
 pub fn router(state: &AppState) -> Router<AppState> {
-    let maximum_size = state.options.maximum_sbom_size.saturating_mul(1024 * 1024);
     Router::new().route(
         "/api/organizations/{organization}/projects/{project}/sbom",
-        put(upload_sbom).layer(DefaultBodyLimit::max(maximum_size)),
+        put(upload_sbom).layer(DefaultBodyLimit::max(maximum_sbom_bytes(state))),
     )
+}
+
+/// `--maximum-sbom-size`, in bytes.
+pub(crate) fn maximum_sbom_bytes(state: &AppState) -> usize {
+    state.options.maximum_sbom_size.saturating_mul(1024 * 1024)
+}
+
+/// Parses an SBOM on the blocking thread pool, a few at a time
+/// ([`AppState::sbom_parsing`](crate::state::AppState::sbom_parsing)). The outer error is a
+/// parsing task that panicked.
+pub(crate) async fn parse_sbom(
+    state: &AppState,
+    document: Bytes,
+) -> Result<nanobom_domain::Result<ParsedSbom>, tokio::task::JoinError> {
+    let _permit = state
+        .sbom_parsing
+        .acquire()
+        .await
+        .expect("the semaphore is never closed");
+    tokio::task::spawn_blocking(move || inventory::parse(&document)).await
+}
+
+/// The run that evaluates a project after an upload.
+pub(crate) fn upload_run(project_id: i64) -> RunRequest {
+    RunRequest {
+        trigger: Trigger::Upload,
+        scope: Scope::Project(project_id),
+        triggered_by: None,
+    }
 }
 
 fn bearer_token(headers: &HeaderMap) -> Option<&str> {
@@ -330,16 +358,9 @@ async fn upload_sbom(
     }
     let wait = parse_wait(parameters.wait.as_deref())? || threshold.is_some();
 
-    let sbom = {
-        let _permit = state
-            .sbom_parsing
-            .acquire()
-            .await
-            .expect("the semaphore is never closed");
-        tokio::task::spawn_blocking(move || inventory::parse(&body))
-            .await
-            .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal error"))??
-    };
+    let sbom = parse_sbom(&state, body)
+        .await
+        .map_err(|_| ApiError::new(StatusCode::INTERNAL_SERVER_ERROR, "internal error"))??;
     let outcome = inventory::ingest(
         &state.database,
         &token,
@@ -352,11 +373,7 @@ async fn upload_sbom(
         },
     )
     .await?;
-    let request = RunRequest {
-        trigger: Trigger::Upload,
-        scope: Scope::Project(outcome.project_id),
-        triggered_by: None,
-    };
+    let request = upload_run(outcome.project_id);
     let mut status = if outcome.project_created {
         StatusCode::CREATED
     } else {

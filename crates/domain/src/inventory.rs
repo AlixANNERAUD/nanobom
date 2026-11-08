@@ -250,26 +250,75 @@ pub async fn ingest(
     sbom: ParsedSbom,
     source: UploadSource,
 ) -> Result<UploadOutcome> {
-    let source_commit = optional_label(Field::SourceCommit, source.source_commit)?;
-    let image_tag = optional_label(Field::ImageTag, source.image_tag)?;
     let organization = organizations::Entity::find()
         .filter(organizations::Column::Slug.eq(organization_slug.trim().to_ascii_lowercase()))
         .one(database)
         .await?
         .filter(|organization| organization.id == token.organization_id)
         .ok_or(Error::NotFound)?;
+    store(
+        database,
+        token,
+        organization,
+        project_slug,
+        sbom,
+        source,
+        true,
+    )
+    .await
+}
 
+/// Like [`ingest`], into the token's own organization, for clients that do not name one (the
+/// Dependency-Track API). With `create_missing` false, a missing project is
+/// [`Error::NotFound`] even for an organization-wide token.
+pub async fn ingest_into_token_organization(
+    database: &(impl ConnectionTrait + TransactionTrait),
+    token: &upload_tokens::Model,
+    project_slug: &str,
+    sbom: ParsedSbom,
+    source: UploadSource,
+    create_missing: bool,
+) -> Result<UploadOutcome> {
+    let organization = organizations::Entity::find_by_id(token.organization_id)
+        .one(database)
+        .await?
+        .ok_or(Error::NotFound)?;
+    store(
+        database,
+        token,
+        organization,
+        project_slug,
+        sbom,
+        source,
+        create_missing,
+    )
+    .await
+}
+
+/// The common part of [`ingest`] and [`ingest_into_token_organization`], once the
+/// organization is known to be the token's.
+async fn store(
+    database: &(impl ConnectionTrait + TransactionTrait),
+    token: &upload_tokens::Model,
+    organization: organizations::Model,
+    project_slug: &str,
+    sbom: ParsedSbom,
+    source: UploadSource,
+    create_missing: bool,
+) -> Result<UploadOutcome> {
+    let source_commit = optional_label(Field::SourceCommit, source.source_commit)?;
+    let image_tag = optional_label(Field::ImageTag, source.image_tag)?;
     let transaction = crate::database::begin_write(database).await?;
     let existing = crate::projects::find_model(&transaction, organization.id, project_slug).await?;
     let (project, project_created) = match (existing, token.project_id) {
         (Some(project), None) => (project, false),
         (Some(project), Some(allowed)) if project.id == allowed => (project, false),
         (Some(_), Some(_)) => return Err(Error::Forbidden),
-        (None, None) => (
+        (None, None) if create_missing => (
             crate::projects::insert(&transaction, organization.id, project_slug, None).await?,
             true,
         ),
-        (None, Some(_)) => return Err(Error::NotFound),
+        (None, _) => return Err(Error::NotFound),
     };
 
     let now = Utc::now().fixed_offset();

@@ -12,7 +12,7 @@ use nanobom_authentication::OpenId;
 use sea_orm::DatabaseConnection;
 use tokio::sync::Semaphore;
 
-use crate::{command_line::ServeOptions, runner::Runner};
+use crate::{command_line::ServeOptions, dependency_track::ProcessingTokens, runner::Runner};
 
 /// Handles to the database, the configuration and the background services.
 #[derive(Clone)]
@@ -27,6 +27,8 @@ pub struct AppState {
     pub runner: Runner,
     /// The OpenID Connect provider, when configured.
     pub openid: Option<Arc<OpenId>>,
+    /// Uploads through the Dependency-Track API whose run has not finished.
+    pub processing_tokens: ProcessingTokens,
 }
 
 /// SBOMs parsed concurrently; others wait their turn.
@@ -47,6 +49,7 @@ impl AppState {
             sbom_parsing: Arc::new(Semaphore::new(CONCURRENT_SBOM_PARSING)),
             runner,
             openid: openid.map(Arc::new),
+            processing_tokens: ProcessingTokens::default(),
         }
     }
 }
