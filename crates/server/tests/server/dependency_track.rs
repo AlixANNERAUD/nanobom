@@ -211,6 +211,42 @@ async fn uploads_without_a_valid_key_are_refused() {
 }
 
 #[tokio::test]
+async fn revoked_tokens_are_refused() {
+    let Setup {
+        server,
+        owner,
+        organization_id,
+        ..
+    } = setup(&[]).await;
+    let created = tokens::create(&server.database, &owner, organization_id, None, "old")
+        .await
+        .unwrap();
+    let request = json!({"projectName": "web", "autoCreate": true,
+        "bom": encoded(&sbom_document("cyclonedx-py.json"))});
+    let response = server.send(put_json(Some(&created.secret), &request)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    tokens::revoke(&server.database, &owner, created.token.id)
+        .await
+        .unwrap();
+    let response = server.send(put_json(Some(&created.secret), &request)).await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let form = gh_upload_sbom_form(
+        &sbom_document("cyclonedx-py.json"),
+        &[("projectName", "web"), ("autoCreate", "true")],
+    );
+    let response = server.send(post_form(Some(&created.secret), form)).await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let response = server
+        .send(status_request(
+            "/api/v1/event/token/7f6b3a9e-0f4e-4a43-9a51-3c2b8f0c1d2e",
+            &created.secret,
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
 async fn bearer_tokens_are_accepted_too() {
     let Setup { server, token, .. } = setup(&[]).await;
     let request = Request::put("/api/v1/bom")
@@ -321,6 +357,18 @@ async fn projects_must_be_named_with_a_valid_slug() {
     let response = server.send(put_json(Some(&token), &request)).await;
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     assert_eq!(body_text(response).await, "projectName is required");
+
+    // The name is echoed in the error, but cut.
+    let request = json!({"projectName": format!("{} x", "a".repeat(5000)), "autoCreate": true,
+        "bom": document});
+    let response = server.send(put_json(Some(&token), &request)).await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let message = body_text(response).await;
+    assert!(message.len() < 400, "{message}");
+    assert!(
+        message.contains(&format!("\"{}...\"", "a".repeat(80))),
+        "{message}"
+    );
 }
 
 #[tokio::test]
@@ -376,6 +424,27 @@ async fn sboms_over_the_size_limit_are_refused() {
     let mut document = sbom_document("cyclonedx-py.json");
     document.extend(std::iter::repeat_n(b' ', 900 * 1024));
     let request = json!({"projectName": "web", "autoCreate": true, "bom": encoded(&document)});
+    let response = server.send(put_json(Some(&token), &request)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // So is an SBOM of exactly the limit, with the base64 wrapped by CRLF lines (as `base64`
+    // prints on some systems), which JSON escapes: the body is over 4/3 of the limit plus the
+    // fixed allowance for the other fields.
+    let mut document = sbom_document("cyclonedx-py.json");
+    document.resize(1024 * 1024, b' ');
+    let wrapped = encoded(&document)
+        .as_bytes()
+        .chunks(76)
+        .map(|line| std::str::from_utf8(line).unwrap())
+        .collect::<Vec<_>>()
+        .join("\r\n");
+    let request = json!({"projectName": "web", "autoCreate": true, "bom": wrapped});
+    let body = request.to_string();
+    assert!(
+        body.len() > 1024 * 1024 / 3 * 4 + 64 * 1024,
+        "{}",
+        body.len()
+    );
     let response = server.send(put_json(Some(&token), &request)).await;
     assert_eq!(response.status(), StatusCode::OK);
 }

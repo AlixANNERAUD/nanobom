@@ -227,8 +227,10 @@ organization is the token's.
 In `PUT`, the body is parsed as JSON whatever its `Content-Type`; `autoCreate` may be a boolean
 or the string `"true"`. In `POST`, `autoCreate` is `true` when the field reads `true` in any case.
 
-The decoded SBOM may be at most `NANOBOM_MAXIMUM_SBOM_SIZE` MiB, like a native upload; the `PUT`
-body may be a third larger, for the base64 encoding.
+The decoded SBOM may be at most `NANOBOM_MAXIMUM_SBOM_SIZE` MiB, like a native upload. The `PUT`
+body may be larger, for the base64 encoding (a third more) and for the line breaks of wrapped
+base64 (about 5% more), plus 64 KiB for the other fields. Like Dependency-Track, nanobom
+requires the base64 text to be padded (`=`).
 
 ### Response
 
@@ -267,6 +269,7 @@ problems (`Content-Type: application/problem+json`):
 | `401` | No `X-Api-Key`, or a token that is unknown or revoked | `a valid nanobom upload token is required in the X-Api-Key header` |
 | `403` | A project token used for another existing project | `Access to the specified project is forbidden` |
 | `404` | A missing project without `autoCreate`, or with a project token | `The project could not be found.` |
+| `409` | `autoCreate` and another upload created the same project first: send the upload again | `the project "…" already exists` |
 | `413` | An SBOM larger than `NANOBOM_MAXIMUM_SBOM_SIZE` | Plain text |
 | `500` | A database error | `internal error` |
 

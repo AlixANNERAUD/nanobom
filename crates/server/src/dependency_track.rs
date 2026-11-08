@@ -58,8 +58,8 @@ use uuid::Uuid;
 
 use crate::{api, state::AppState};
 
-/// The routes, with body limits leaving room for the encoding around the SBOM: base64 makes it a
-/// third larger. The SBOM itself is then held to `--maximum-sbom-size`.
+/// The routes, with body limits leaving room for the encoding around the SBOM. The SBOM itself
+/// is then held to `--maximum-sbom-size`.
 pub fn router(state: &AppState) -> Router<AppState> {
     let maximum = api::maximum_sbom_bytes(state);
     let envelope = 64 * 1024;
@@ -68,7 +68,7 @@ pub fn router(state: &AppState) -> Router<AppState> {
             "/api/v1/bom",
             put(upload_json)
                 .layer(DefaultBodyLimit::max(
-                    (maximum / 3).saturating_mul(4).saturating_add(envelope),
+                    json_body_limit(maximum).saturating_add(envelope),
                 ))
                 .merge(
                     post(upload_form)
@@ -77,6 +77,14 @@ pub fn router(state: &AppState) -> Router<AppState> {
         )
         .route("/api/v1/bom/token/{token}", get(processing_status))
         .route("/api/v1/event/token/{token}", get(processing_status))
+}
+
+/// The largest JSON body, without its envelope, that carries an SBOM of `maximum` bytes: base64
+/// makes it a third larger, and the line breaks of wrapped base64 (a `\r\n` every 76
+/// characters, which JSON escapes as 4 bytes, the worst case) add another 1/19.
+fn json_body_limit(maximum: usize) -> usize {
+    let encoded = maximum.div_ceil(3).saturating_mul(4);
+    encoded.saturating_add(encoded / 19 + 4)
 }
 
 /// The tokens of uploads whose run has not finished yet, with their organization.
@@ -246,19 +254,7 @@ async fn upload_json(
     body: Bytes,
 ) -> Result<Json<UploadResponse>, Error> {
     let token = authenticate(&state, &headers).await?;
-    // Parsed by hand rather than with `Json`: scripts do not always send a JSON content type.
-    let request: SubmitRequest = serde_json::from_slice(&body)
-        .map_err(|error| Error::bad_request(format!("invalid upload request: {error}")))?;
-    let encoded = request.bom.unwrap_or_default();
-    // Wrapped base64, as `base64` prints by default, is accepted too.
-    let encoded: Vec<u8> = encoded
-        .into_bytes()
-        .into_iter()
-        .filter(|byte| !byte.is_ascii_whitespace())
-        .collect();
-    let bom = base64::engine::general_purpose::STANDARD
-        .decode(encoded)
-        .map_err(|_| Error::bad_request("The BOM must be Base64 encoded"))?;
+    let (request, bom) = decode_request(body)?;
     let auto_create = match &request.auto_create {
         Value::Bool(value) => *value,
         Value::String(value) => value.trim().eq_ignore_ascii_case("true"),
@@ -272,10 +268,28 @@ async fn upload_json(
             project_name: request.project_name,
             project_version: request.project_version,
             auto_create,
-            bom: Bytes::from(bom),
+            bom,
         },
     )
     .await
+}
+
+/// Reads the request and decodes its SBOM. Takes the raw body by value so that it is freed before
+/// the caller waits for a parsing slot and parses: the body is a third larger than the SBOM, and
+/// holding it (and the base64 text) through the parse would triple the memory of an upload.
+fn decode_request(body: Bytes) -> Result<(SubmitRequest, Bytes), Error> {
+    // Parsed by hand rather than with `Json`: scripts do not always send a JSON content type.
+    let mut request: SubmitRequest = serde_json::from_slice(&body)
+        .map_err(|error| Error::bad_request(format!("invalid upload request: {error}")))?;
+    drop(body);
+    let mut encoded = request.bom.take().unwrap_or_default();
+    // Wrapped base64, as `base64` prints by default, is accepted too. Dependency-Track's own
+    // check is stricter: it refuses line breaks, and unpadded text.
+    encoded.retain(|character| !character.is_ascii_whitespace());
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(&encoded)
+        .map_err(|_| Error::bad_request("The BOM must be Base64 encoded"))?;
+    Ok((request, Bytes::from(decoded)))
 }
 
 /// `POST /api/v1/bom`. The token is checked before the form is read.
@@ -327,8 +341,9 @@ async fn submit(
     let project_slug = match nonblank(submission.project_name) {
         Some(name) => names::slug(Field::ProjectSlug, &name).map_err(|_| {
             Error::bad_request(format!(
-                "projectName \"{name}\" cannot be a nanobom project slug: use 1 to {} \
+                "projectName \"{}\" cannot be a nanobom project slug: use 1 to {} \
                  letters, digits, '.', '_' or '-', starting with a letter or a digit",
+                truncated(&name, 80),
                 names::MAXIMUM_LENGTH
             ))
         })?,
@@ -395,6 +410,15 @@ async fn submit(
     }))
 }
 
+/// At most `limit` characters of `text`, with an ellipsis when it is cut: the name comes from
+/// the client and is echoed in an error.
+fn truncated(text: &str, limit: usize) -> String {
+    match text.char_indices().nth(limit) {
+        Some((end, _)) => format!("{}...", &text[..end]),
+        None => text.to_owned(),
+    }
+}
+
 fn nonblank(value: Option<String>) -> Option<String> {
     value
         .map(|value| value.trim().to_owned())
@@ -444,6 +468,23 @@ mod tests {
             sbom_document(Bytes::from_static(b"{}")),
             Bytes::from_static(b"{}")
         );
+    }
+
+    #[test]
+    fn long_names_are_cut_for_messages() {
+        assert_eq!(truncated("web", 80), "web");
+        assert_eq!(truncated("éééé", 4), "éééé");
+        assert_eq!(truncated("ééééé", 4), "éééé...");
+    }
+
+    #[test]
+    fn the_body_limit_covers_base64_with_line_breaks() {
+        for maximum in [1024_usize, 1024 * 1024, 5 * 1024 * 1024 + 1] {
+            let encoded = maximum.div_ceil(3) * 4;
+            // One `\r\n` per 76 characters, as 4 bytes in JSON.
+            let wrapped = encoded + encoded.div_ceil(76) * 4;
+            assert!(json_body_limit(maximum) >= wrapped, "{maximum}");
+        }
     }
 
     #[test]

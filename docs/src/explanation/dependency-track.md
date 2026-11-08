@@ -36,7 +36,10 @@ Dependency-Track processes an upload in the background and returns a token; clie
 poll the token until it is no longer processing, then usually fetch results. nanobom's work after
 an upload is the project's run, so a token is processing until that run has finished, exploitation
 data included. That is what a client polling before reading results needs: once `processing` is
-`false`, the project's findings are those of this SBOM.
+`false` after a run that completed, the project's findings are those of this SBOM. It is not a
+guarantee when the wait ended at `NANOBOM_UPLOAD_WAIT_SECONDS` before the run finished, when the
+run failed, or when runs after uploads are off: the token then reads as not processing although
+the findings may still be those of the previous SBOM.
 
 The tokens are kept in memory only. Persisting them would add a table for state that matters for
 a few minutes, and a restart already abandons the run they wait for. Like Dependency-Track, an
