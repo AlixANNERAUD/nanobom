@@ -4,7 +4,12 @@
 //! requests. On top of that, state-changing requests are refused when the browser says they
 //! come from another site (`Sec-Fetch-Site`) or from another origin (`Origin`). Requests
 //! authenticated with an `Authorization` header (upload tokens) are not exposed to this attack
-//! and are left alone.
+//! and are left alone: a page on another site cannot add that header without a CORS preflight,
+//! which the server never grants.
+//!
+//! The check is deliberately lenient with requests that carry neither header: those come from
+//! non-browser clients, which hold no session cookie of the user's, or from old browsers on
+//! same-origin forms.
 
 use std::sync::Arc;
 
@@ -20,6 +25,7 @@ use axum::{
 pub struct AllowedOrigin(Arc<str>);
 
 impl AllowedOrigin {
+    /// The origin of the instance's public URL; its path, if any, is ignored.
     pub fn new(public_url: &reqwest::Url) -> Self {
         Self(public_url.origin().ascii_serialization().into())
     }
@@ -32,7 +38,10 @@ fn is_safe(method: &Method) -> bool {
     )
 }
 
-/// Whether a state-changing request may proceed.
+/// Whether a request may proceed. Safe methods and requests with an `Authorization` header
+/// always may; others are refused when
+/// `Sec-Fetch-Site` is present and not `same-origin` (or `none`, a navigation typed by the
+/// user), or when `Origin` is present and differs from `origin`.
 pub fn allowed(method: &Method, headers: &HeaderMap, origin: &AllowedOrigin) -> bool {
     if is_safe(method) || headers.contains_key(header::AUTHORIZATION) {
         return true;

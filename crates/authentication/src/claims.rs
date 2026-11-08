@@ -51,7 +51,8 @@ pub fn is_administrator(claims: &Map<String, Value>, path: &str, value: Option<&
     }
 }
 
-/// A mapping from identity provider groups to organization roles.
+/// A mapping from identity provider groups to organization roles, from the operator's
+/// configuration. Organizations it names are created at the first sign-in that needs them.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GroupMapping {
     entries: Vec<(String, String, Role)>,
@@ -82,11 +83,13 @@ impl GroupMapping {
         Ok(Self { entries })
     }
 
+    /// Whether no entry was configured.
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
 
-    /// The role in each organization the groups grant; the highest wins.
+    /// The role in each organization the groups grant, keyed by organization slug; the highest
+    /// wins. Group names are compared exactly, case included.
     pub fn roles(&self, groups: &[String]) -> BTreeMap<String, Role> {
         let mut roles: BTreeMap<String, Role> = BTreeMap::new();
         for (group, organization, role) in &self.entries {

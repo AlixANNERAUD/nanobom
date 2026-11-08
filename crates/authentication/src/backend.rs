@@ -1,5 +1,9 @@
 //! The axum-login backend shared by both sign-in methods: local passwords, and identities
 //! already verified by the OpenID Connect flow.
+//!
+//! Password checks take the same time whether or not the login exists (a decoy hash is
+//! verified for unknown logins), and every refusal is the same `Ok(None)`, so the sign-in form
+//! cannot be used to find accounts. Accounts without a password never sign in with one.
 
 use std::sync::OnceLock;
 
@@ -10,13 +14,18 @@ use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
 
 /// The signed-in user kept in the session.
+///
+/// It is reloaded from the database on every request ([`AuthnBackend::get_user`]), so its
+/// fields reflect the current account, not the one at sign-in.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct SessionUser {
     pub id: i64,
     pub username: String,
     pub display_name: String,
     pub is_instance_administrator: bool,
-    /// Changes when the password changes, which ends the user's other sessions.
+    /// Changes when the password changes, which ends the user's other sessions. Accounts
+    /// without a password use a constant derived from their identifier: their sessions end
+    /// when the account is disabled or the session expires, or at sign-out.
     authentication_hash: Vec<u8>,
 }
 
@@ -31,6 +40,8 @@ impl std::fmt::Debug for SessionUser {
 }
 
 impl SessionUser {
+    /// The session view of a user. It does not check that the user is enabled; the backend
+    /// does.
     pub fn from_model(user: &Model) -> Self {
         let authentication_hash = match &user.password_hash {
             Some(hash) => hash.as_bytes().to_vec(),
@@ -45,6 +56,7 @@ impl SessionUser {
         }
     }
 
+    /// The actor to pass to domain functions on behalf of this user.
     pub fn actor(&self) -> Actor {
         Actor {
             user_id: self.id,
@@ -70,7 +82,9 @@ impl AuthUser for SessionUser {
 pub enum Credentials {
     /// A local account's username (or email address) and password.
     Password { login: String, password: String },
-    /// A user whose identity the OpenID Connect flow verified.
+    /// A user whose identity the OpenID Connect flow verified. Only build this from the result
+    /// of [`crate::OpenId::finish`]: the backend trusts it without further checks, beyond the
+    /// account being enabled.
     Verified { user_id: i64 },
 }
 
@@ -89,12 +103,14 @@ impl std::fmt::Debug for Credentials {
     }
 }
 
+/// The axum-login backend: authenticates [`Credentials`] and reloads [`SessionUser`]s.
 #[derive(Debug, Clone)]
 pub struct Backend {
     database: DatabaseConnection,
     local_accounts: bool,
 }
 
+/// A database failure while authenticating; wrong credentials are not errors.
 #[derive(Debug, thiserror::Error)]
 #[error(transparent)]
 pub struct BackendError(#[from] nanobom_domain::Error);
@@ -107,6 +123,8 @@ fn decoy_hash() -> &'static str {
 }
 
 impl Backend {
+    /// A backend; with `local_accounts` off, password credentials are always refused, even for
+    /// accounts that have a password.
     pub fn new(database: DatabaseConnection, local_accounts: bool) -> Self {
         Self {
             database,
@@ -114,7 +132,8 @@ impl Backend {
         }
     }
 
-    /// Computes the decoy hash ahead of the first sign-in.
+    /// Computes the decoy hash ahead of the first sign-in, so the first unknown login does
+    /// not take noticeably longer than later ones.
     pub fn prepare(&self) {
         let _ = decoy_hash();
     }

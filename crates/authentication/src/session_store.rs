@@ -1,5 +1,9 @@
 //! A tower-sessions store on top of SeaORM, so sessions live in the application's database and
 //! share its connection pool, whatever the database.
+//!
+//! Records are stored as JSON with their expiry. Expired records are never returned by
+//! [`SessionStore::load`] even before the periodic [`ExpiredDeletion::delete_expired`] removes
+//! them, so a slow cleanup cannot extend a session.
 
 use chrono::{DateTime, Utc};
 use nanobom_entity::sessions;
@@ -10,6 +14,7 @@ use sea_orm::{
 use tower_sessions::session::{Id, Record};
 use tower_sessions::session_store::{self, ExpiredDeletion, SessionStore};
 
+/// A [`SessionStore`] backed by the `sessions` table. Cloning shares the connection pool.
 #[derive(Debug, Clone)]
 pub struct DatabaseSessionStore {
     database: DatabaseConnection,
@@ -31,6 +36,8 @@ fn expiry(record: &Record) -> session_store::Result<DateTime<Utc>> {
 }
 
 impl DatabaseSessionStore {
+    /// Inserts a record, or replaces it when `overwrite` is set; returns whether a row was
+    /// written, which is how [`SessionStore::create`] detects identifier collisions.
     async fn upsert(&self, record: &Record, overwrite: bool) -> session_store::Result<bool> {
         let data = serde_json::to_string(record)
             .map_err(|error| session_store::Error::Encode(error.to_string()))?;
