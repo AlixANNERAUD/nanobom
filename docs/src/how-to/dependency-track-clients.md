@@ -99,13 +99,18 @@ curl --fail-with-body --silent --show-error \
 Or as JSON, with the SBOM base64-encoded:
 
 ```sh
-jq -n --arg bom "$(base64 -w0 bom.json)" \
-  '{projectName: "web", projectVersion: "1.4.0", autoCreate: true, bom: $bom}' |
+base64 < bom.json | tr -d '\n' |
+jq -Rs '{projectName: "web", projectVersion: "1.4.0", autoCreate: true, bom: .}' |
 curl --fail-with-body --silent --show-error -X PUT \
   -H "X-Api-Key: $NANOBOM_TOKEN" -H "Content-Type: application/json" \
   --data-binary @- \
   https://nanobom.example.org/api/v1/bom
 ```
+
+The SBOM travels through pipes: passing it as a command-line argument (`jq --arg bom "$(base64
+…)"`) fails for SBOMs of about 100 KiB or more, since the system limits the size of an
+argument. `tr` removes the line breaks that GNU `base64` adds; nanobom ignores them, but
+Dependency-Track does not, so the same command works against both.
 
 Both answer `{"token": "…"}`. A script that must wait for the project's evaluation polls
 `GET /api/v1/event/token/{token}` with the same header until it answers
