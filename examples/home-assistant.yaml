@@ -1,7 +1,9 @@
 # A Home Assistant automation notifying a phone when nanobom finds new vulnerabilities.
 # In nanobom, set the organization's webhook (Settings → Webhook) to
 #   https://home-assistant.example.org/api/webhook/nanobom-acme
-# and choose the minimum severity worth a notification.
+# and choose the minimum severity worth a notification. Known exploited findings (CISA KEV)
+# are always delivered, whatever the severity: each finding has known_exploited, and the
+# payload has known_exploited_count.
 alias: nanobom new vulnerabilities
 triggers:
   - trigger: webhook
@@ -17,9 +19,12 @@ actions:
       title: >-
         {{ trigger.json.count }} new {{ trigger.json.highest_severity }}
         vulnerabilities in {{ trigger.json.organization.name }}
+        {% if trigger.json.known_exploited_count > 0 %}
+        ({{ trigger.json.known_exploited_count }} known exploited)
+        {% endif %}
       message: >-
         {% for finding in trigger.json.findings[:5] %}
-        {{ finding.vulnerability }} ({{ finding.severity }}) in {{ finding.component }}, {{ finding.project }}
+        {{ '[exploited] ' if finding.known_exploited }}{{ finding.vulnerability }} ({{ finding.severity }}) in {{ finding.component }}, {{ finding.project }}
         {% endfor %}
       data:
         url: "{{ trigger.json.findings[0].url }}"
