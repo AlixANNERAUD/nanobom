@@ -91,6 +91,7 @@
     "never": "jamais",
     "stale": "Obsolète",
     "stale_title": "Dernier envoi : {date}",
+    "stale_never_title": "Aucun SBOM reçu",
     "no_project_title": "Aucun projet pour l’instant",
     "no_project_text": "Les projets apparaissent avec leur premier envoi de SBOM. Créez un jeton d’envoi dans les paramètres, puis suivez les exemples d’intégration continue du README.",
     "projects_caption": "Projets et leurs vulnérabilités ouvertes par gravité",
@@ -127,6 +128,7 @@
     },
     "last_upload": "dernier envoi {time}",
     "stale_alert": "Aucun SBOM reçu depuis le {date} : vérifiez le job de CI qui l’envoie.",
+    "stale_never_alert": "Aucun SBOM reçu depuis la création du projet le {date} : vérifiez le job d’intégration continue qui l’envoie.",
     "without_purl_title": "Certains composants ne peuvent pas être vérifiés",
     "without_purl_text": {
       "one": "{count} composant du dernier SBOM n’a pas d’URL de paquet : OSV ne peut donc pas le reconnaître. Vérifiez les paramètres du générateur.",

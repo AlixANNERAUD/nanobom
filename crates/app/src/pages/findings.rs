@@ -232,15 +232,13 @@ pub fn ProjectPage() -> impl IntoView {
                             }
                         });
                     let stale = page.stale.then(|| {
-                        let date = page
-                            .last_upload_at
-                            .or_else(|| latest.as_ref().map(|upload| upload.uploaded_at))
-                            .map_or_else(|| t!("organization.never").to_owned(), format_time);
-                        view! {
-                            <Alert variant=AlertVariant::Warning>
-                                {tf!("project.stale_alert", date = date)}
-                            </Alert>
-                        }
+                        let message = match page.last_upload_at {
+                            Some(time) => tf!("project.stale_alert", date = format_time(time)),
+                            None => {
+                                tf!("project.stale_never_alert", date = format_date(page.created_at))
+                            }
+                        };
+                        view! { <Alert variant=AlertVariant::Warning>{message}</Alert> }
                     });
                     let count = page.findings.len();
                     let rows = finding_rows(page.findings.clone());

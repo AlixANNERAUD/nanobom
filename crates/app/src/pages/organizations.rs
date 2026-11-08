@@ -310,7 +310,12 @@ pub fn OrganizationPage() -> impl IntoView {
                                 .last_upload_at
                                 .map_or_else(|| t!("organization.never").to_owned(), format_time);
                             let stale_badge = project.stale.then(|| {
-                                let title = tf!("organization.stale_title", date = last_upload.clone());
+                                let title = match project.last_upload_at {
+                                    Some(time) => {
+                                        tf!("organization.stale_title", date = format_time(time))
+                                    }
+                                    None => t!("organization.stale_never_title").to_owned(),
+                                };
                                 view! {
                                     <Badge variant=BadgeVariant::Outline title=title>
                                         {t!("organization.stale")}

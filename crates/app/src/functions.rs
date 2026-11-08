@@ -168,6 +168,7 @@ pub async fn load_project(
     );
     Ok(ProjectData {
         last_upload_at: model.last_upload_at,
+        created_at: model.created_at,
         stale,
         organization: crate::server::organization(found),
         slug: model.slug,

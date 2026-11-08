@@ -497,4 +497,18 @@ async fn stale_projects_are_flagged() {
     let html = alice.page(page).await;
     assert!(html.contains("No SBOM received since"));
     assert!(html.contains("check the CI job uploading it"));
+
+    // A project that never received an SBOM is stale from its creation.
+    let never = projects::create(&server.database, &owner, organization.id, "fresh", "Fresh")
+        .await
+        .unwrap();
+    let mut active: nanobom_entity::projects::ActiveModel = never.into();
+    active.created_at = Set((chrono::Utc::now() - chrono::Duration::days(45)).fixed_offset());
+    active.update(&server.database).await.unwrap();
+    let html = alice.page("/organizations/acme/projects/fresh").await;
+    assert!(html.contains("No SBOM received since this project was created on "));
+    assert!(!html.contains("since never"));
+    let html = alice.page("/organizations/acme").await;
+    assert!(html.contains("No SBOM received yet"));
+    assert!(!html.contains("Last upload: never"));
 }

@@ -275,6 +275,7 @@ pub struct ProjectData {
     pub uploads: Vec<Upload>,
     pub component_count: usize,
     pub last_upload_at: Option<DateTime<FixedOffset>>,
+    pub created_at: DateTime<FixedOffset>,
     pub stale: bool,
 }
 

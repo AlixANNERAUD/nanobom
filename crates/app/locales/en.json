@@ -91,6 +91,7 @@
     "never": "never",
     "stale": "Stale",
     "stale_title": "Last upload: {date}",
+    "stale_never_title": "No SBOM received yet",
     "no_project_title": "No project yet",
     "no_project_text": "Projects appear with their first SBOM upload. Create an upload token in the settings, then follow the README's CI examples.",
     "projects_caption": "Projects with their open findings by severity",
@@ -127,6 +128,7 @@
     },
     "last_upload": "last upload {time}",
     "stale_alert": "No SBOM received since {date}: check the CI job uploading it.",
+    "stale_never_alert": "No SBOM received since this project was created on {date}: check the CI job uploading it.",
     "without_purl_title": "Some components cannot be checked",
     "without_purl_text": {
       "one": "{count} component of the last SBOM has no package URL, so OSV cannot match it. Check the generator's settings.",
