@@ -605,6 +605,7 @@ pub async fn save_webhook(
             &url,
             crate::server::domain_severity(severity),
             enabled.is_some(),
+            false,
         )
         .await?;
         Ok(crate::t!("notices.webhook_saved").to_owned())

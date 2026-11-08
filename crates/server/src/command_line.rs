@@ -174,6 +174,26 @@ pub struct ServeOptions {
     #[arg(long, env = "NANOBOM_OSV_URL", default_value = "https://api.osv.dev/")]
     pub osv_url: reqwest::Url,
 
+    /// Download exploitation data (CISA KEV, FIRST EPSS) after each run.
+    #[arg(long, env = "NANOBOM_EXPLOITATION_DATA", default_value_t = true, action = ArgAction::Set)]
+    pub exploitation_data: bool,
+
+    /// Address of CISA's Known Exploited Vulnerabilities catalog (JSON).
+    #[arg(
+        long,
+        env = "NANOBOM_KEV_URL",
+        default_value = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+    )]
+    pub kev_url: reqwest::Url,
+
+    /// Address of the FIRST EPSS API.
+    #[arg(
+        long,
+        env = "NANOBOM_EPSS_URL",
+        default_value = "https://api.first.org/data/v1/epss"
+    )]
+    pub epss_url: reqwest::Url,
+
     /// Webhook receiving a JSON payload when a run fails (OSV unreachable, for example).
     #[arg(long, env = "NANOBOM_FAILURE_WEBHOOK_URL")]
     pub failure_webhook_url: Option<reqwest::Url>,

@@ -5,7 +5,7 @@ use std::{sync::OnceLock, time::Duration};
 
 use metrics::{counter, describe_counter, describe_gauge, describe_histogram, gauge, histogram};
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
-use nanobom_domain::{evaluation::RunOutcome, findings};
+use nanobom_domain::{evaluation::RunOutcome, exploitation, findings};
 use nanobom_entity::runs;
 use nanobom_osv::Severity;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
@@ -44,6 +44,14 @@ fn describe() {
         "Open findings across the instance, by severity"
     );
     describe_gauge!(
+        "nanobom_open_findings_known_exploited",
+        "Open findings with a CVE in CISA's Known Exploited Vulnerabilities catalog"
+    );
+    describe_counter!(
+        "nanobom_exploitation_refresh_failures_total",
+        "Refreshes of exploitation data (CISA KEV, FIRST EPSS) that failed"
+    );
+    describe_gauge!(
         "nanobom_last_successful_run_timestamp_seconds",
         "Unix time at which the last successful run started"
     );
@@ -80,6 +88,22 @@ pub fn record_failed_run() {
     counter!("nanobom_run_failures_total").increment(1);
 }
 
+/// Counts a failed refresh of exploitation data.
+pub fn record_exploitation_refresh_failure() {
+    handle();
+    counter!("nanobom_exploitation_refresh_failures_total").increment(1);
+}
+
+/// Updates the gauge of open findings with a known exploited CVE.
+pub async fn refresh_known_exploited(database: &DatabaseConnection) {
+    handle();
+    match exploitation::open_known_exploited_count(database).await {
+        #[allow(clippy::cast_precision_loss)]
+        Ok(count) => gauge!("nanobom_open_findings_known_exploited").set(count as f64),
+        Err(error) => tracing::warn!(%error, "counting known exploited findings failed"),
+    }
+}
+
 /// Updates the open findings gauges from the database.
 pub async fn refresh_open_findings(database: &DatabaseConnection) {
     handle();
@@ -98,6 +122,7 @@ pub async fn refresh_open_findings(database: &DatabaseConnection) {
 /// Sets the gauges from the database at startup.
 pub async fn initialize(database: &DatabaseConnection) {
     refresh_open_findings(database).await;
+    refresh_known_exploited(database).await;
     match runs::Entity::find()
         .filter(runs::Column::Status.eq("succeeded"))
         .order_by_desc(runs::Column::StartedAt)

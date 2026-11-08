@@ -1,6 +1,8 @@
 //! Runs started by uploads, failure notifications, health and metrics.
 
-use crate::common::{body_json, body_text, sbom_document, server, user};
+use crate::common::{
+    TestServer, body_json, body_text, sbom_document, server, server_with_exploitation, user,
+};
 use axum::{
     body::Body,
     http::{Request, StatusCode, header},
@@ -11,6 +13,8 @@ use nanobom_domain::{
     findings::{self, Filter},
     organizations, projects, tokens,
 };
+use nanobom_entity::exploitation;
+use sea_orm::EntityTrait;
 use serde_json::json;
 use std::time::Duration;
 use wiremock::{
@@ -61,6 +65,96 @@ async fn uploads_start_a_run_of_their_project() {
         .unwrap();
     assert_eq!(findings.len(), 1);
     assert_eq!(findings[0].vulnerability_id, "GHSA-35jh-r3h4-6jhm");
+}
+
+/// Uploads the lodash SBOM to a new organization and waits for the run it starts.
+async fn upload_lodash(server: &TestServer) {
+    server
+        .source
+        .publish(lodash_advisory(), &["pkg:npm/lodash@4.17.20"]);
+    let owner = user(&server.database, "owner").await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let token = tokens::create(&server.database, &owner, organization.id, None, "CI")
+        .await
+        .unwrap()
+        .secret;
+    let response = server
+        .send(
+            Request::put("/api/organizations/acme/projects/web/sbom")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::from(sbom_document("cyclonedx-npm.json")))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    server.runner.wait_until_idle().await;
+}
+
+#[tokio::test]
+async fn runs_refresh_exploitation_data() {
+    let feeds = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/kev.json"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"vulnerabilities": [
+                {"cveID": "CVE-2021-23337", "dateAdded": "2022-03-01", "dueDate": "2022-03-22",
+                 "knownRansomwareCampaignUse": "Unknown"}
+            ]})),
+        )
+        .expect(1)
+        .mount(&feeds)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/epss"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data": [
+            {"cve": "CVE-2021-23337", "epss": "0.5", "percentile": "0.9", "date": "2026-11-08"}
+        ]})))
+        .expect(1)
+        .mount(&feeds)
+        .await;
+    let kev_url = format!("{}/kev.json", feeds.uri());
+    let epss_url = format!("{}/epss", feeds.uri());
+    let server = server_with_exploitation(&["--kev-url", &kev_url, "--epss-url", &epss_url]).await;
+    upload_lodash(&server).await;
+
+    let row = exploitation::Entity::find_by_id("CVE-2021-23337")
+        .one(&server.database)
+        .await
+        .unwrap()
+        .expect("exploitation data is stored");
+    assert!(row.known_exploited);
+    assert_eq!(row.kev_due_date.as_deref(), Some("2022-03-22"));
+    assert_eq!(row.epss_score, Some(0.5));
+}
+
+#[tokio::test]
+async fn a_failing_feed_does_not_fail_the_run() {
+    let feeds = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/kev.json"))
+        .respond_with(ResponseTemplate::new(500))
+        .mount(&feeds)
+        .await;
+    let kev_url = format!("{}/kev.json", feeds.uri());
+    let epss_url = format!("{}/epss", feeds.uri());
+    let server = server_with_exploitation(&["--kev-url", &kev_url, "--epss-url", &epss_url]).await;
+    upload_lodash(&server).await;
+
+    assert!(
+        exploitation::Entity::find()
+            .all(&server.database)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    let findings = nanobom_entity::findings::Entity::find()
+        .all(&server.database)
+        .await
+        .unwrap();
+    assert_eq!(findings.len(), 1, "the run recorded its finding");
+    assert_eq!(findings[0].status, "open");
 }
 
 #[tokio::test]

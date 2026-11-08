@@ -14,6 +14,7 @@ use chrono::Utc;
 use croner::Cron;
 use nanobom_domain::{
     evaluation::{Evaluator, RunOutcome, Scope, Trigger},
+    exploitation::{self, Feeds},
     notifications::{self, Notifier},
 };
 use nanobom_osv::VulnerabilitySource;
@@ -60,6 +61,7 @@ impl Runner {
         evaluator: Arc<Evaluator<S>>,
         notifier: Notifier,
         settings: NotificationSettings,
+        feeds: Option<Arc<Feeds>>,
     ) -> Self {
         let runner = Self::default();
         let shared = Arc::clone(&runner.shared);
@@ -75,7 +77,7 @@ impl Runner {
                     .await
                 {
                     Ok(outcome) => {
-                        finish(&database, &notifier, &settings, &outcome).await;
+                        finish(&database, &notifier, &settings, feeds.as_deref(), &outcome).await;
                     }
                     Err(error) => {
                         tracing::error!(%error, "the run could not be recorded");
@@ -120,11 +122,26 @@ async fn finish(
     database: &DatabaseConnection,
     notifier: &Notifier,
     settings: &NotificationSettings,
+    feeds: Option<&Feeds>,
     outcome: &RunOutcome,
 ) {
     metrics::record_run(outcome);
     metrics::refresh_open_findings(database).await;
     if outcome.succeeded() {
+        if let Some(feeds) = feeds {
+            match exploitation::refresh(database, feeds, outcome.scope).await {
+                Ok(summary) => tracing::info!(
+                    cves = summary.cves,
+                    known_exploited = summary.known_exploited,
+                    "exploitation data refreshed"
+                ),
+                Err(error) => {
+                    tracing::warn!(%error, "refreshing exploitation data failed");
+                    metrics::record_exploitation_refresh_failure();
+                }
+            }
+        }
+        metrics::refresh_known_exploited(database).await;
         match notifications::new_findings_deliveries(database, outcome, &settings.public_url).await
         {
             Ok(deliveries) => {

@@ -11,7 +11,11 @@ use nanobom_app::{
     server::{InterfaceContext, InterfaceSettings},
     shell,
 };
-use nanobom_domain::{evaluation::Evaluator, notifications::Notifier};
+use nanobom_domain::{
+    evaluation::Evaluator,
+    exploitation::{FeedSettings, Feeds},
+    notifications::Notifier,
+};
 use nanobom_osv::OsvClient;
 use sea_orm::DatabaseConnection;
 
@@ -109,6 +113,15 @@ pub async fn run(
 
     let source = Arc::new(OsvClient::new(options.osv_url.clone())?);
     let evaluator = Arc::new(Evaluator::new(database.clone(), source));
+    let feeds = if options.exploitation_data {
+        Some(Arc::new(Feeds::new(FeedSettings {
+            kev_url: options.kev_url.clone(),
+            epss_url: options.epss_url.clone(),
+        })?))
+    } else {
+        tracing::info!("exploitation data is off");
+        None
+    };
     let runner = Runner::start(
         database.clone(),
         evaluator,
@@ -117,6 +130,7 @@ pub async fn run(
             public_url: options.public_url.clone(),
             failure_webhook: options.failure_webhook_url.clone(),
         },
+        feeds,
     );
     match schedule {
         Some(schedule) => runner::start_schedule(runner.clone(), schedule),
