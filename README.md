@@ -153,6 +153,19 @@ A reverse proxy in front of nanobom must let the request wait: with nginx, set
 `proxy_read_timeout` above `NANOBOM_UPLOAD_WAIT_SECONDS` (300 seconds by default), or lower the
 setting.
 
+On GitHub Actions, the [nanobom action](https://github.com/AlixANNERAUD/nanobom-action) does
+all of this in one step, generating the SBOM with Syft when none is given, and lists the
+project's open findings in the job summary:
+
+```yaml
+- uses: AlixANNERAUD/nanobom-action@v1
+  with:
+    url: ${{ vars.NANOBOM_URL }}
+    token: ${{ secrets.NANOBOM_TOKEN }}
+    organization: acme
+    fail-on: high
+```
+
 Complete pipelines, both failing on high findings: [GitHub Actions](examples/github-actions.yml),
 [GitLab CI](examples/gitlab-ci.yml). Upload tokens can also be managed from the command line:
 `nanobom token create --organization acme --name CI [--project web]`, `token list`,
