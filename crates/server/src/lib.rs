@@ -12,6 +12,9 @@
 //!   ([`authentication::layer`]). The app acts as the signed-in user.
 //! - **Upload API** (`PUT /api/organizations/{organization}/projects/{project}/sbom`): CI sends
 //!   an SBOM with a bearer upload token ([`api`]). No session is involved.
+//! - **Dependency-Track API** (`/api/v1/bom`, `/api/v1/event/token/…`): the same uploads from
+//!   clients written for Dependency-Track, with the upload token in `X-Api-Key`
+//!   ([`dependency_track`]).
 //! - **Operations** (`/healthz`, `/metrics`): unauthenticated ([`operations`]).
 //!
 //! Every response goes through [`http::layers`] (security headers, compression, request logs).
@@ -34,6 +37,7 @@ pub mod api;
 pub mod authentication;
 pub mod command_line;
 pub mod deliveries;
+pub mod dependency_track;
 pub mod healthcheck;
 pub mod http;
 pub mod logging;

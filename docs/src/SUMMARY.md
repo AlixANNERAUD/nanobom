@@ -13,6 +13,7 @@
 - [Run on PostgreSQL](how-to/postgresql.md)
 - [Generate an SBOM](how-to/generate-sbom.md)
 - [Upload from CI](how-to/upload-from-ci.md)
+- [Upload with Dependency-Track clients](how-to/dependency-track-clients.md)
 - [Fail CI on vulnerabilities](how-to/fail-ci.md)
 - [Triage findings](how-to/triage.md)
 - [Get notified](how-to/notifications.md)
@@ -42,4 +43,5 @@
 - [How findings are kept up to date](explanation/findings.md)
 - [Prioritization](explanation/prioritization.md)
 - [Security model](explanation/security.md)
+- [Dependency-Track compatibility](explanation/dependency-track.md)
 - [Architecture](explanation/architecture.md)

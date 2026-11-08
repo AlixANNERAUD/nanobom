@@ -3,6 +3,8 @@
 Each build that produces something you ship generates an SBOM ([Generate an
 SBOM](generate-sbom.md)) and sends it with one `PUT` request, authenticated with an upload token.
 The request and its answer are described in the [upload API reference](../reference/upload-api.md).
+Pipelines written for Dependency-Track keep their client: see [Upload with Dependency-Track
+clients](dependency-track-clients.md).
 
 ## Choose which builds upload
 
