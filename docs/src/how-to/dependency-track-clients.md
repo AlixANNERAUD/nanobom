@@ -8,8 +8,8 @@ is explained in [Dependency-Track compatibility](../explanation/dependency-track
 
 ## Before you start
 
-- **Generate the SBOM in CycloneDX JSON.** Many Dependency-Track setups upload `bom.xml`; nanobom
-  reads JSON only, so switch the generator's output format (see [Generate an
+- **Generate the SBOM in JSON.** Many Dependency-Track setups upload `bom.xml`; nanobom reads
+  CycloneDX JSON and SPDX JSON only, so switch the generator's output format (see [Generate an
   SBOM](generate-sbom.md)).
 - **Create an upload token** as in [Upload from CI](upload-from-ci.md#create-an-upload-token). Use
   an organization token for clients that create projects (`autoCreate`).

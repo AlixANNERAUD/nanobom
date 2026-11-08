@@ -16,7 +16,7 @@
 
 ---
 
-Your CI uploads a **CycloneDX SBOM** of each project. nanobom checks every component against
+Your CI uploads a **CycloneDX or SPDX SBOM** of each project. nanobom checks every component against
 **[OSV](https://osv.dev)** after each upload and every night, keeps the history of each
 vulnerability (open, ignored, fixed, reopened), tells you which ones are **known to be exploited
 (CISA KEV)** or likely to be (**EPSS**), and can **fail the pipeline** before a vulnerable build
@@ -66,8 +66,9 @@ upload to nanobom with a new address and key: see [Dependency-Track clients](htt
 ## What you get
 
 **Know what you ship**
-- CycloneDX 1.3 to 1.7 from any generator: cargo-cyclonedx, cyclonedx-npm, cyclonedx-py, Syft
-  for container images and anything else.
+- CycloneDX 1.3 to 1.7 and SPDX 2.2 and 2.3 (JSON) from any generator: cargo-cyclonedx,
+  cyclonedx-npm, cyclonedx-py, Syft and Trivy for container images and anything else, GitHub's
+  dependency graph export.
 - Every component matched against OSV, which aggregates GitHub, PyPI, RustSec, Go, npm, Debian,
   Alpine and more; aliases (GHSA, CVE, …) of one vulnerability merged into one finding.
 - A history per project: uploads with their commit and image tag, findings opened, fixed,

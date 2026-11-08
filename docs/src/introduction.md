@@ -1,7 +1,8 @@
 # Introduction
 
 nanobom is a self-hosted tracker of the vulnerabilities in the software you ship. Your CI
-uploads a [CycloneDX](https://cyclonedx.org) SBOM (software bill of materials) of each project;
+uploads a [CycloneDX](https://cyclonedx.org) or [SPDX](https://spdx.dev) SBOM (software bill of
+materials) of each project;
 nanobom checks every component against [OSV](https://osv.dev) right after the upload and again
 every night, keeps the history of what it found, and tells you when something new appears.
 
@@ -34,8 +35,8 @@ The container image is about 20 MB.
 ## What it does not do
 
 - **It does not generate SBOMs.** Your build does, with the generator of your ecosystem (see
-  [Generate an SBOM](how-to/generate-sbom.md)). nanobom only reads CycloneDX JSON, versions 1.3
-  to 1.7; SPDX is not supported.
+  [Generate an SBOM](how-to/generate-sbom.md)). nanobom only reads JSON: CycloneDX 1.3 to 1.7
+  and SPDX 2.2 and 2.3.
 - **It does not scan images or file systems.** It trusts the SBOM. A component missing from the
   SBOM is invisible to nanobom.
 - **It only knows what OSV knows.** Components are matched by their

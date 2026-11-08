@@ -43,6 +43,7 @@
 - [How findings are kept up to date](explanation/findings.md)
 - [Prioritization](explanation/prioritization.md)
 - [Dependency paths](explanation/dependency-paths.md)
+- [SPDX documents](explanation/spdx.md)
 - [Security model](explanation/security.md)
 - [Dependency-Track compatibility](explanation/dependency-track.md)
 - [Architecture](explanation/architecture.md)

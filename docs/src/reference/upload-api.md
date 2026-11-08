@@ -7,8 +7,8 @@ PUT /api/organizations/{organization}/projects/{project}/sbom
 Authorization: Bearer nanobom_…
 ```
 
-The body is the CycloneDX JSON document, as is; the `Content-Type` header is not checked, and a
-multipart form is not read. One request replaces the project's components with those of the
+The body is the CycloneDX or SPDX JSON document, as is; the `Content-Type` header is not
+checked, and a multipart form is not read. One request replaces the project's components with those of the
 document and records the upload in the project's history. The project is created if it does not
 exist and the token allows it.
 
@@ -36,25 +36,69 @@ token's scope and when it was last used, or with
 
 ## The document
 
-nanobom reads **CycloneDX JSON**, specification versions **1.3 to 1.7**. XML, SPDX and older or
-newer CycloneDX versions are refused with a `422`.
+nanobom reads two formats, told apart by the document's content, never by a header:
 
-- Only `components` count (nested components included). The `metadata.component`, which
-  describes the project itself, is not a component.
-- The dependency graph (`dependencies`) is kept between the components stored; the entry of
-  `metadata.component` gives the project's direct dependencies. It is optional: without it,
-  findings show no path ([Dependency paths](../explanation/dependency-paths.md)).
-- Components of type `file` and `operating-system` are skipped silently: they describe what was
-  scanned, not packages.
+| Format | Recognized by | Versions | Recorded as |
+| --- | --- | --- | --- |
+| **CycloneDX JSON** | `"bomFormat": "CycloneDX"` | `specVersion` 1.3 to 1.7 | `1.6` |
+| **SPDX JSON** | `spdxVersion` | `SPDX-2.2` and `SPDX-2.3` | `SPDX-2.3` |
+
+Anything else is refused with a `422` and a message naming what was sent: XML (CycloneDX XML),
+SPDX tag-value, SPDX RDF (RDF/XML or Turtle), SPDX 3.0 JSON-LD, older or newer versions of
+either format ([error messages](#error-messages)). The recorded version is shown in the
+project's upload history.
+
+In both formats:
+
 - Components are identified by their package URL (purl), such as `pkg:npm/lodash@4.17.20`.
   Components with the same package URL are merged.
 - A component without a package URL, or with an invalid one, is skipped: it is reported in the
   response (`components_without_purl`, `skipped`) and flagged on the project page, but cannot be
-  checked.
+  checked. So is a component whose package URL gives a version requirement rather than a
+  version (`pkg:npm/ava@%5E6.1.2`, that is `^6.1.2`; `2.*.*`): its `reason` is
+  `version requirement "^6.1.2" instead of a resolved version`.
 - A component whose package URL has no version is kept in the inventory and in search results,
   but cannot be matched.
 - Qualifiers and subpath of the package URL (`?arch=amd64&distro=debian-12`) are kept for display
   and dropped when querying OSV.
+- The dependency graph is kept between the components stored. It is optional: without it, or
+  without the project's own dependencies in it, findings show no path
+  ([Dependency paths](../explanation/dependency-paths.md)).
+
+### CycloneDX
+
+- Only `components` count (nested components included). The `metadata.component`, which
+  describes the project itself, is not a component.
+- Components of type `file` and `operating-system` are skipped silently: they describe what was
+  scanned, not packages.
+- The graph comes from `dependencies`; the entry of `metadata.component` gives the project's
+  direct dependencies.
+- The serial number (`serialNumber`) is recorded with the upload.
+
+### SPDX
+
+- Only `packages` count; `files` and `snippets` are ignored. A package's package URL is its
+  `externalRefs` entry of type `purl` in the `PACKAGE-MANAGER` category (`PACKAGE_MANAGER` in
+  SPDX 2.2).
+- The package the document describes (a `DESCRIBES` relationship from the document, or
+  `documentDescribes`) is the project, not a component.
+- Packages whose `primaryPackagePurpose` is `FILE` or `OPERATING-SYSTEM` are skipped silently.
+- The graph comes from `relationships`:
+
+  | Relationship | Edge |
+  | --- | --- |
+  | `A DEPENDS_ON B` | A depends on B |
+  | `B DEPENDENCY_OF A`, and `BUILD_`, `DEV_`, `OPTIONAL_`, `PROVIDED_`, `RUNTIME_`, `TEST_DEPENDENCY_OF` | A depends on B |
+  | `A CONTAINS B`, `B CONTAINED_BY A`, between two packages | A depends on B |
+  | `CONTAINS` from the project | none: a scanned directory or image contains every package, direct dependency or not |
+  | any other | none |
+
+  Edges from the project are its direct dependencies, but only to packages of an ecosystem
+  (purl type) the document also links between packages: a document whose project depends on
+  every crate of a lock file, with no edge between crates, gives no direct dependency for
+  crates ([why](../explanation/spdx.md#dependency-graph)).
+- The document namespace (`documentNamespace`) is recorded with the upload as its serial
+  number.
 
 ## Query parameters
 
@@ -172,7 +216,7 @@ not of this SBOM.
 | `404` | The organization does not exist or is not the token's; or a project token used for a project that does not exist | Check the organization slug in the URL; create the project first (with an organization token) |
 | `409` | With `fail_on`: the evaluation succeeded and open findings reach the threshold | Fix or triage the findings listed in `evaluation.findings` |
 | `413` | The body is larger than `NANOBOM_MAXIMUM_SBOM_SIZE` (16 MiB by default) | Raise the limit, or split the SBOM; this error's body is plain text, not JSON |
-| `422` | Invalid parameter, invalid project slug, or invalid document (not JSON, not CycloneDX, unsupported version) | Read `error` |
+| `422` | Invalid parameter, invalid project slug, or invalid document (not JSON, neither CycloneDX nor SPDX, unsupported version) | Read `error` |
 | `500` | A database error | See the server's logs |
 | `503` | With `fail_on`: the evaluation failed or timed out, so the findings are not up to date | Retry later; see [Troubleshoot](../how-to/troubleshoot.md#upload-answers-503) |
 
@@ -194,9 +238,14 @@ API messages are always in English, whatever the instance's users read: they end
 | `422` | `the source commit must be at most 300 printable characters` (or `the image tag …`) |
 | `422` | `the project slug must be 1 to 64 characters: letters, digits, '.', '_' or '-', starting with a letter or a digit` |
 | `422` | `the SBOM is not valid JSON: …` |
-| `422` | `the SBOM must be a CycloneDX JSON document (bomFormat "CycloneDX")` |
-| `422` | `unsupported CycloneDX version "1.2"; supported versions are …` |
+| `422` | `XML SBOMs are not supported: generate the SBOM as CycloneDX JSON or SPDX JSON` |
+| `422` | `SPDX tag-value documents are not supported: generate the SBOM as SPDX JSON (SPDX 2.2 or 2.3) or CycloneDX JSON` |
+| `422` | `SPDX RDF documents are not supported: generate the SBOM as SPDX JSON (SPDX 2.2 or 2.3) or CycloneDX JSON` |
+| `422` | `the SBOM must be a CycloneDX JSON document (bomFormat "CycloneDX") or an SPDX JSON document (spdxVersion "SPDX-2.3")` |
+| `422` | `unsupported CycloneDX version "1.2"; supported versions are 1.3, 1.4, 1.5, 1.6, 1.7` |
+| `422` | `unsupported SPDX version "SPDX-3.0.1"; supported versions are SPDX-2.2, SPDX-2.3, in JSON` |
 | `422` | `invalid CycloneDX document: …` |
+| `422` | `invalid SPDX document: …` |
 | `503` | `the evaluation did not complete` |
 
 ## Dependency-Track API
@@ -225,7 +274,7 @@ organization is the token's.
 | `projectName` | text | The project slug: trimmed and folded to lower case, then 1 to 64 characters among letters, digits, `.`, `_` and `-`, starting with a letter or a digit. Required |
 | `projectVersion` | text, up to 300 characters | Recorded as the upload's image tag (`image_tag`) |
 | `autoCreate` | `true` or `false` (default) | Create the project if it does not exist (organization tokens only). Without it, a missing project is a `404` |
-| `bom` | base64 text (`PUT`), file or text part (`POST`) | The CycloneDX JSON document. In `PUT`, line breaks in the base64 text are ignored. A UTF-8 byte order mark is removed. In `POST`, only the first `bom` part is read |
+| `bom` | base64 text (`PUT`), file or text part (`POST`) | The CycloneDX or SPDX JSON [document](#the-document). In `PUT`, line breaks in the base64 text are ignored. A UTF-8 byte order mark is removed. In `POST`, only the first `bom` part is read |
 | `project` | UUID | Refused with a `400` when `projectName` is missing; ignored otherwise |
 | `projectTags`, `parentUUID`, `parentName`, `parentVersion`, `isLatest`, `isActive` | | Accepted and ignored |
 
@@ -270,7 +319,7 @@ problems (`Content-Type: application/problem+json`):
 | --- | --- | --- |
 | `200` | The SBOM replaced the project's components | `{"token": …}` |
 | `400` | No `projectName` (`projectName is required`), a project given by UUID only (`nanobom cannot find projects by UUID: send projectName (the nanobom project slug) instead of project`), a `projectName` that cannot be a slug (`projectName "…" cannot be a nanobom project slug: …`), a `projectVersion` too long, a request that is not JSON (`invalid upload request: …`), `bom` not base64 (`The BOM must be Base64 encoded`), no SBOM (`No BOM file provided.`) | Plain text |
-| `400` | An invalid document: XML (`nanobom accepts CycloneDX JSON only, not XML: generate the SBOM in JSON`), or any [document error](#error-messages) of the native API | Problem |
+| `400` | An invalid document: any [document error](#error-messages) of the native API, XML and SPDX tag-value included | Problem |
 | `401` | No `X-Api-Key`, or a token that is unknown or revoked | `a valid nanobom upload token is required in the X-Api-Key header` |
 | `403` | A project token used for another existing project | `Access to the specified project is forbidden` |
 | `404` | A missing project without `autoCreate`, or with a project token | `The project could not be found.` |

@@ -49,11 +49,14 @@ The `error` field says what is wrong; the
 [upload API reference](../reference/upload-api.md#status-codes) lists the messages. The usual
 ones:
 
-- `the SBOM must be a CycloneDX JSON document` - an SPDX document, an XML CycloneDX document, or
-  the generator's default format: ask for CycloneDX JSON explicitly (Syft:
-  `-o cyclonedx-json=sbom.json`);
+- `the SBOM must be a CycloneDX JSON document (…) or an SPDX JSON document` - the generator's
+  default format, or another JSON file: ask for CycloneDX JSON or SPDX JSON explicitly (Syft:
+  `-o cyclonedx-json=sbom.json` or `-o spdx-json=sbom.json`);
+- `XML SBOMs are not supported`, `SPDX tag-value documents are not supported`, `SPDX RDF
+  documents are not supported` - the same SBOM in another serialization: switch the generator
+  to JSON (Syft `-o spdx` and Trivy `--format spdx` write tag-value; use `spdx-json`);
 - `unsupported CycloneDX version` - the generator writes a version older than 1.3, or newer
-  than 1.7;
+  than 1.7; `unsupported SPDX version` - SPDX older than 2.2, or SPDX 3.0;
 - `the project slug must be …` - the project name in the URL contains spaces, slashes or other
   characters. `${GITHUB_REPOSITORY#*/}` and `$CI_PROJECT_NAME` are usually fine; a repository
   name with a dot at the start or with upper-case letters is folded or refused;
