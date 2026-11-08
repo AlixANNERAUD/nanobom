@@ -5,6 +5,7 @@ pub use sea_orm_migration::prelude::*;
 
 mod m20261107_000001_initial_schema;
 mod m20261108_000001_prioritization;
+mod m20261108_000002_webhook_deliveries;
 
 pub struct Migrator;
 
@@ -14,6 +15,7 @@ impl MigratorTrait for Migrator {
         vec![
             Box::new(m20261107_000001_initial_schema::Migration),
             Box::new(m20261108_000001_prioritization::Migration),
+            Box::new(m20261108_000002_webhook_deliveries::Migration),
         ]
     }
 }

@@ -15,3 +15,4 @@ pub use super::upload_tokens::Entity as UploadTokens;
 pub use super::user_identities::Entity as UserIdentities;
 pub use super::users::Entity as Users;
 pub use super::vulnerabilities::Entity as Vulnerabilities;
+pub use super::webhook_deliveries::Entity as WebhookDeliveries;

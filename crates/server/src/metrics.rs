@@ -5,7 +5,7 @@ use std::{sync::OnceLock, time::Duration};
 
 use metrics::{counter, describe_counter, describe_gauge, describe_histogram, gauge, histogram};
 use metrics_exporter_prometheus::{Matcher, PrometheusBuilder, PrometheusHandle};
-use nanobom_domain::{evaluation::RunOutcome, exploitation, findings, staleness};
+use nanobom_domain::{deliveries, evaluation::RunOutcome, exploitation, findings, staleness};
 use nanobom_entity::runs;
 use nanobom_osv::Severity;
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder};
@@ -67,6 +67,11 @@ fn describe() {
     describe_counter!("nanobom_runs_total", "Runs, by status");
     describe_counter!("nanobom_run_failures_total", "Runs that could not complete");
     describe_counter!(
+        "nanobom_webhook_deliveries_total",
+        "Webhook delivery attempts, by outcome: delivered, retried (failed, another attempt is \
+         scheduled) or abandoned (failed for good)"
+    );
+    describe_counter!(
         "nanobom_osv_request_errors_total",
         "Failed requests to OSV, by kind, retries included"
     );
@@ -90,6 +95,14 @@ pub fn record_failed_run() {
     handle();
     counter!("nanobom_runs_total", "status" => "failed").increment(1);
     counter!("nanobom_run_failures_total").increment(1);
+}
+
+/// Counts the outcomes of webhook delivery attempts.
+pub fn record_deliveries(outcomes: &[deliveries::Outcome]) {
+    handle();
+    for outcome in outcomes {
+        counter!("nanobom_webhook_deliveries_total", "outcome" => outcome.as_str()).increment(1);
+    }
 }
 
 /// Counts a failed refresh of exploitation data.

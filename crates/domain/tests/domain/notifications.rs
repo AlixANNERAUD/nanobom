@@ -3,6 +3,7 @@
 use nanobom_domain::{
     Error,
     access::{Actor, Role},
+    deliveries::{self, Outcome, State},
     evaluation::{NewFinding, RunOutcome, Scope, Trigger},
     memberships, notifications, organizations, testing,
     users::{self, NewUser},
@@ -220,30 +221,30 @@ async fn new_findings_are_grouped_per_organization_and_filtered_by_severity() {
         "https://nanobom.example.org/findings/7"
     );
 
-    notifications::Notifier::new()
+    let outcomes = notifications::Notifier::new()
         .unwrap()
         .deliver(&database, deliveries)
         .await
         .unwrap();
+    assert_eq!(outcomes, [Outcome::Delivered]);
     let requests = server.received_requests().await.unwrap();
     let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
     assert_eq!(body["event"], "findings.new");
     assert_eq!(body["findings"][0]["vulnerability"], "GHSA-1");
     assert_eq!(body["findings"][0]["severity"], "critical");
     assert_eq!(body["run"]["trigger"], "scheduled");
-    let webhook = notifications::get(&database, &owner, acme.id)
+    let recent = deliveries::recent(&database, &owner, acme.id, 10)
         .await
-        .unwrap()
         .unwrap();
-    assert!(webhook.last_delivery_at.is_some());
-    assert_eq!(
-        webhook.last_delivery_status.as_deref(),
-        Some("204 No Content")
-    );
+    assert_eq!(recent.len(), 1);
+    assert_eq!(recent[0].event, "findings.new");
+    assert_eq!(recent[0].state, State::Delivered);
+    assert_eq!(recent[0].attempts, 1);
+    assert_eq!(recent[0].last_status.as_deref(), Some("204 No Content"));
 }
 
 #[tokio::test]
-async fn failed_deliveries_are_recorded() {
+async fn failed_deliveries_are_recorded_for_a_retry() {
     let database = testing::database().await;
     let owner = actor(&database, "owner").await;
     let acme = organizations::create(&database, &owner, "acme", "Acme")
@@ -271,16 +272,21 @@ async fn failed_deliveries_are_recorded() {
     )
     .await
     .unwrap();
-    notifications::Notifier::new()
+    let before = chrono::Utc::now();
+    let outcomes = notifications::Notifier::new()
         .unwrap()
         .deliver(&database, deliveries)
         .await
         .unwrap();
-    let webhook = notifications::get(&database, &owner, acme.id)
+    assert_eq!(outcomes, [Outcome::Retried]);
+    let recent = deliveries::recent(&database, &owner, acme.id, 10)
         .await
-        .unwrap()
         .unwrap();
-    assert!(webhook.last_delivery_status.unwrap().starts_with("failed"));
+    assert_eq!(recent[0].state, State::Pending);
+    assert_eq!(recent[0].attempts, 1);
+    assert!(recent[0].last_status.is_some());
+    let next = recent[0].next_attempt_at.unwrap();
+    assert!(next >= before + deliveries::RETRY_DELAYS[0]);
 }
 
 #[test]

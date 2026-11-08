@@ -22,7 +22,7 @@ use sea_orm::DatabaseConnection;
 use crate::{
     api, authentication,
     command_line::ServeOptions,
-    http, metrics, operations,
+    deliveries, http, metrics, operations,
     runner::{self, NotificationSettings, RunRequest, Runner},
     state::AppState,
 };
@@ -123,10 +123,16 @@ pub async fn run(
         tracing::info!("exploitation data is off");
         None
     };
+    let notifier = Notifier::new()?;
+    deliveries::start(
+        database.clone(),
+        notifier.clone(),
+        deliveries::RETRY_INTERVAL,
+    );
     let runner = Runner::start(
         database.clone(),
         evaluator,
-        Notifier::new()?,
+        notifier,
         NotificationSettings {
             public_url: options.public_url.clone(),
             failure_webhook: options.failure_webhook_url.clone(),

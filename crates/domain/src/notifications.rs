@@ -1,12 +1,15 @@
 //! Webhooks: each organization can send its new findings to a URL as JSON, grouped per run,
 //! and the instance can report failed runs to another URL.
 //!
-//! Payloads (documented in the README):
+//! Payloads (documented in the guide's webhook reference):
 //!
 //! - `findings.new`: new and reopened findings of one organization, at or above the webhook's
 //!   minimum severity, and open findings that became known exploited since the last run
 //!   (whatever their severity);
+//! - `projects.stale`: projects of one organization whose SBOM stopped coming;
 //! - `run.failed`: a run that could not complete, sent to the instance's failure webhook.
+//!
+//! Deliveries go through the queue of [`crate::deliveries`], which retries failed ones.
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
@@ -14,7 +17,9 @@ use std::{
 };
 
 use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
-use nanobom_entity::{findings, organization_webhooks, organizations, projects};
+use nanobom_entity::{
+    findings, organization_webhooks, organizations, projects, webhook_deliveries,
+};
 use nanobom_osv::Severity;
 use reqwest::Url;
 use sea_orm::{
@@ -25,6 +30,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     access::{Actor, Permission},
+    deliveries::{self, Attempt, Outcome},
     error::{Error, Result},
     evaluation::{RunOutcome, Scope},
     exploitation::{self, Exploitation, QUERY_CHUNK},
@@ -38,8 +44,6 @@ pub struct Webhook {
     pub url: String,
     pub minimum_severity: Severity,
     pub enabled: bool,
-    pub last_delivery_at: Option<DateTime<FixedOffset>>,
-    pub last_delivery_status: Option<String>,
     /// Deliver only known exploited findings.
     pub exploited_only: bool,
 }
@@ -49,8 +53,6 @@ fn view(model: organization_webhooks::Model) -> Webhook {
         url: model.url,
         minimum_severity: model.minimum_severity.parse().unwrap_or(Severity::Unknown),
         enabled: model.enabled,
-        last_delivery_at: model.last_delivery_at,
-        last_delivery_status: model.last_delivery_status,
         exploited_only: model.exploited_only,
     }
 }
@@ -114,8 +116,6 @@ pub async fn set(
                 url: Set(url.to_string()),
                 minimum_severity: Set(minimum_severity.as_str().to_owned()),
                 enabled: Set(enabled),
-                last_delivery_at: Set(None),
-                last_delivery_status: Set(None),
                 exploited_only: Set(exploited_only),
             }
             .insert(database)
@@ -125,7 +125,7 @@ pub async fn set(
     Ok(view(model))
 }
 
-/// Removes the webhook of an organization.
+/// Removes the webhook of an organization and abandons its pending deliveries.
 pub async fn delete(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -140,6 +140,7 @@ pub async fn delete(
     {
         model.delete(database).await?;
     }
+    deliveries::cancel_pending(database, organization_id).await?;
     Ok(())
 }
 
@@ -230,10 +231,35 @@ pub fn link(public_url: &Url, path: &str) -> String {
         .map_or_else(|_| public_url.to_string(), |url| url.to_string())
 }
 
+/// A document sent to a webhook.
+pub trait Payload: Serialize {
+    /// The `event` field: `findings.new`, `projects.stale` or `run.failed`.
+    fn event(&self) -> &str;
+}
+
+impl Payload for NewFindingsPayload {
+    fn event(&self) -> &str {
+        &self.event
+    }
+}
+
+impl Payload for StaleProjectsPayload {
+    fn event(&self) -> &str {
+        &self.event
+    }
+}
+
+impl Payload for RunFailedPayload {
+    fn event(&self) -> &str {
+        &self.event
+    }
+}
+
 /// A webhook delivery to make.
 #[derive(Debug, Clone)]
 pub struct Delivery<T> {
-    pub organization_id: i64,
+    /// `None` for the instance's failure webhook.
+    pub organization_id: Option<i64>,
     pub url: String,
     pub payload: T,
 }
@@ -510,7 +536,7 @@ pub async fn new_findings_deliveries(
                 .collect(),
         };
         deliveries.push(Delivery {
-            organization_id,
+            organization_id: Some(organization_id),
             url: webhook.url,
             payload,
         });
@@ -545,7 +571,7 @@ pub async fn stale_deliveries(
         };
         notified.extend(projects.iter().map(|project| project.id));
         deliveries.push(Delivery {
-            organization_id,
+            organization_id: Some(organization_id),
             url: webhook.url,
             payload: StaleProjectsPayload {
                 event: "projects.stale".to_owned(),
@@ -587,7 +613,7 @@ pub fn run_failed_payload(outcome: &RunOutcome, public_url: &Url) -> Option<RunF
     })
 }
 
-/// Sends webhook payloads.
+/// Sends webhook payloads through the delivery queue.
 #[derive(Debug, Clone)]
 pub struct Notifier {
     http: reqwest::Client,
@@ -603,52 +629,92 @@ impl Notifier {
         })
     }
 
-    /// Posts a payload; returns a short description of the outcome.
-    pub async fn post<T: Serialize>(
-        &self,
-        url: &str,
-        payload: &T,
-    ) -> std::result::Result<String, String> {
-        match self.http.post(url).json(payload).send().await {
-            Ok(response) if response.status().is_success() => Ok(response.status().to_string()),
-            Ok(response) => Err(response.status().to_string()),
-            Err(error) => Err(error.without_url().to_string()),
+    /// Posts a JSON document once.
+    async fn post(&self, url: &str, body: String) -> Attempt {
+        let request = self
+            .http
+            .post(url)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(body);
+        match request.send().await {
+            Ok(response) => Attempt::Answered {
+                status: response.status().as_u16(),
+                description: response.status().to_string(),
+            },
+            Err(error) => Attempt::Unreachable(error.without_url().to_string()),
         }
     }
 
-    /// Delivers payloads (`findings.new`, `projects.stale`) and records the outcome on each
-    /// webhook.
-    pub async fn deliver<T: Serialize>(
+    /// Records deliveries in the queue, then makes their first attempt. Failed attempts are left
+    /// to [`Notifier::retry_due`].
+    pub async fn deliver<T: Payload>(
         &self,
         database: &impl ConnectionTrait,
         deliveries: Vec<Delivery<T>>,
-    ) -> Result<()> {
+    ) -> Result<Vec<Outcome>> {
+        let mut outcomes = Vec::new();
         for delivery in deliveries {
-            let result = self.post(&delivery.url, &delivery.payload).await;
-            let status = match &result {
-                Ok(status) => status.clone(),
-                Err(error) => format!("failed: {error}"),
-            };
-            match &result {
-                Ok(_) => {
-                    tracing::info!(organization = delivery.organization_id, "webhook delivered")
-                }
-                Err(error) => tracing::warn!(
-                    organization = delivery.organization_id,
-                    %error,
-                    "webhook delivery failed"
-                ),
-            }
-            if let Some(model) = organization_webhooks::Entity::find_by_id(delivery.organization_id)
-                .one(database)
-                .await?
-            {
-                let mut active: organization_webhooks::ActiveModel = model.into();
-                active.last_delivery_at = Set(Some(Utc::now().fixed_offset()));
-                active.last_delivery_status = Set(Some(status));
-                active.update(database).await?;
-            }
+            let now = Utc::now().fixed_offset();
+            let row = deliveries::enqueue(
+                database,
+                delivery.organization_id,
+                &delivery.url,
+                delivery.payload.event(),
+                &delivery.payload,
+                now,
+            )
+            .await?;
+            outcomes.extend(self.attempt(database, row.id).await?);
         }
-        Ok(())
+        Ok(outcomes)
+    }
+
+    /// Attempts the deliveries that are due, at most `limit` of them.
+    pub async fn retry_due(
+        &self,
+        database: &impl ConnectionTrait,
+        limit: u64,
+    ) -> Result<Vec<Outcome>> {
+        let mut outcomes = Vec::new();
+        for row in deliveries::due(database, Utc::now().fixed_offset(), limit).await? {
+            outcomes.extend(self.attempt(database, row.id).await?);
+        }
+        Ok(outcomes)
+    }
+
+    /// Claims a delivery, posts it and records the result; `None` when another attempt holds
+    /// it or it is not due.
+    async fn attempt(&self, database: &impl ConnectionTrait, id: i64) -> Result<Option<Outcome>> {
+        let Some(row) = deliveries::claim(database, id, Utc::now().fixed_offset()).await? else {
+            return Ok(None);
+        };
+        let attempt = self.post(&row.url, row.payload.clone()).await;
+        log(&row, &attempt);
+        let outcome =
+            deliveries::record(database, row, &attempt, Utc::now().fixed_offset()).await?;
+        Ok(Some(outcome))
+    }
+}
+
+fn log(row: &webhook_deliveries::Model, attempt: &Attempt) {
+    let number = row.attempts + 1;
+    if attempt.succeeded() {
+        tracing::info!(
+            delivery = row.id,
+            organization = row.organization_id,
+            event = row.event,
+            attempt = number,
+            "webhook delivered"
+        );
+    } else {
+        let status = attempt.description();
+        tracing::warn!(
+            delivery = row.id,
+            organization = row.organization_id,
+            event = row.event,
+            attempt = number,
+            status,
+            "webhook delivery failed"
+        );
     }
 }

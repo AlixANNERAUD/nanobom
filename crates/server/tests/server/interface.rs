@@ -6,6 +6,7 @@ use axum::{
     http::{Request, Response, StatusCode, header},
 };
 use nanobom_domain::{
+    deliveries::{self, Attempt},
     findings::{self, Filter, Status},
     notifications, organizations, projects, tokens,
 };
@@ -468,6 +469,46 @@ async fn the_webhook_form_saves_the_exploited_only_option() {
         .unwrap()
         .expect("a webhook");
     assert!(!webhook.exploited_only);
+}
+
+#[tokio::test]
+async fn the_webhook_settings_list_recent_deliveries() {
+    let server = server(&[]).await;
+    let owner = local_user(&server.database, "alice", PASSWORD).await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let alice = Browser::sign_in(&server, "alice").await;
+    let page = "/organizations/acme/settings";
+    assert!(!alice.page(page).await.contains("Recent deliveries"));
+
+    let now = chrono::Utc::now().fixed_offset();
+    let delivery = deliveries::enqueue(
+        &server.database,
+        Some(organization.id),
+        "https://example.org/hook",
+        "findings.new",
+        &json!({"event": "findings.new"}),
+        now,
+    )
+    .await
+    .unwrap();
+    let claimed = deliveries::claim(&server.database, delivery.id, now)
+        .await
+        .unwrap()
+        .unwrap();
+    let attempt = Attempt::Answered {
+        status: 502,
+        description: "502 Bad Gateway".to_owned(),
+    };
+    deliveries::record(&server.database, claimed, &attempt, now)
+        .await
+        .unwrap();
+    let html = alice.page(page).await;
+    assert!(html.contains("Recent deliveries"), "{html}");
+    assert!(html.contains("findings.new"));
+    assert!(html.contains("Retrying"));
+    assert!(html.contains("502 Bad Gateway"));
 }
 
 #[tokio::test]

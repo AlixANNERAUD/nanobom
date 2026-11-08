@@ -9,15 +9,16 @@ use axum::{
 };
 use chrono::Utc;
 use nanobom::{
-    healthcheck,
+    deliveries, healthcheck,
     runner::{RunRequest, Waited},
 };
 use nanobom_domain::{
     evaluation::{Scope, Trigger},
     findings::{self, Filter},
-    notifications, organizations, projects, tokens,
+    notifications::{self, Notifier},
+    organizations, projects, tokens,
 };
-use nanobom_entity::exploitation;
+use nanobom_entity::{exploitation, webhook_deliveries};
 use nanobom_osv::Severity;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, PaginatorTrait};
 use serde_json::json;
@@ -188,6 +189,86 @@ async fn failed_runs_call_the_failure_webhook() {
     assert_eq!(payload["event"], "run.failed");
     assert_eq!(payload["scope"], "all");
     assert!(payload["error"].as_str().unwrap().contains("unreachable"));
+}
+
+#[tokio::test]
+async fn failed_webhook_deliveries_are_retried() {
+    let receiver = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/failures"))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(1)
+        .mount(&receiver)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/failures"))
+        .respond_with(ResponseTemplate::new(200))
+        .mount(&receiver)
+        .await;
+    let failure_webhook = format!("{}/failures", receiver.uri());
+    let server = server(&["--failure-webhook-url", &failure_webhook]).await;
+    server.source.set_failing(true);
+    server.runner.request(RunRequest {
+        trigger: Trigger::Scheduled,
+        scope: Scope::All,
+        triggered_by: None,
+    });
+    server.runner.wait_until_idle().await;
+    assert_eq!(receiver.received_requests().await.unwrap().len(), 1);
+    let pending = webhook_deliveries::Entity::find()
+        .one(&server.database)
+        .await
+        .unwrap()
+        .expect("the delivery is recorded");
+    assert_eq!(pending.organization_id, None);
+    assert_eq!(pending.event, "run.failed");
+    assert_eq!(pending.attempts, 1);
+    assert_eq!(
+        pending.last_status.as_deref(),
+        Some("503 Service Unavailable")
+    );
+
+    // Skip the backoff rather than wait a minute.
+    let mut active: webhook_deliveries::ActiveModel = pending.into();
+    active.next_attempt_at = Set(Some(Utc::now().fixed_offset()));
+    active.update(&server.database).await.unwrap();
+    let retries = deliveries::start(
+        server.database.clone(),
+        Notifier::new().unwrap(),
+        Duration::from_millis(20),
+    );
+    let delivered = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let delivery = webhook_deliveries::Entity::find()
+                .one(&server.database)
+                .await
+                .unwrap()
+                .unwrap();
+            if delivery.delivered_at.is_some() {
+                return delivery;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the delivery is retried");
+    retries.abort();
+    assert_eq!(delivered.attempts, 2);
+    assert_eq!(delivered.next_attempt_at, None);
+    let requests = receiver.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].body, requests[1].body);
+
+    let response = server
+        .send(Request::get("/metrics").body(Body::empty()).unwrap())
+        .await;
+    let text = body_text(response).await;
+    for line in [
+        "nanobom_webhook_deliveries_total{outcome=\"retried\"} 1",
+        "nanobom_webhook_deliveries_total{outcome=\"delivered\"} 1",
+    ] {
+        assert!(text.contains(line), "{line} is missing from:\n{text}");
+    }
 }
 
 #[tokio::test]

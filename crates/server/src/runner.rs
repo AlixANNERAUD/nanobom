@@ -15,7 +15,7 @@ use croner::Cron;
 use nanobom_domain::{
     evaluation::{Evaluator, RunOutcome, Scope, Trigger},
     exploitation::{self, Feeds},
-    notifications::{self, Notifier},
+    notifications::{self, Delivery, Notifier, Payload},
 };
 use nanobom_osv::VulnerabilitySource;
 use reqwest::Url;
@@ -308,11 +308,7 @@ async fn notify(
     if outcome.succeeded() {
         match notifications::new_findings_deliveries(database, outcome, &settings.public_url).await
         {
-            Ok(deliveries) => {
-                if let Err(error) = notifier.deliver(database, deliveries).await {
-                    tracing::error!(%error, "recording webhook deliveries failed");
-                }
-            }
+            Ok(deliveries) => deliver(database, notifier, deliveries).await,
             Err(error) => tracing::error!(%error, "preparing webhook deliveries failed"),
         }
         if outcome.trigger == Trigger::Scheduled {
@@ -323,11 +319,7 @@ async fn notify(
             )
             .await
             {
-                Ok(deliveries) => {
-                    if let Err(error) = notifier.deliver(database, deliveries).await {
-                        tracing::error!(%error, "recording webhook deliveries failed");
-                    }
-                }
+                Ok(deliveries) => deliver(database, notifier, deliveries).await,
                 Err(error) => tracing::error!(%error, "preparing stale project deliveries failed"),
             }
         }
@@ -335,10 +327,24 @@ async fn notify(
         &settings.failure_webhook,
         notifications::run_failed_payload(outcome, &settings.public_url),
     ) {
-        match notifier.post(url.as_str(), &payload).await {
-            Ok(_) => tracing::info!(run = outcome.run_id, "failure webhook delivered"),
-            Err(error) => tracing::error!(%error, "failure webhook delivery failed"),
-        }
+        let delivery = Delivery {
+            organization_id: None,
+            url: url.to_string(),
+            payload,
+        };
+        deliver(database, notifier, vec![delivery]).await;
+    }
+}
+
+/// Queues deliveries and makes their first attempt; the retry loop takes over failed ones.
+async fn deliver<T: Payload>(
+    database: &DatabaseConnection,
+    notifier: &Notifier,
+    deliveries: Vec<Delivery<T>>,
+) {
+    match notifier.deliver(database, deliveries).await {
+        Ok(outcomes) => metrics::record_deliveries(&outcomes),
+        Err(error) => tracing::error!(%error, "recording webhook deliveries failed"),
     }
 }
 

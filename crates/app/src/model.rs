@@ -359,8 +359,40 @@ pub struct Webhook {
     pub minimum_severity: Severity,
     pub enabled: bool,
     pub exploited_only: bool,
-    pub last_delivery_at: Option<DateTime<FixedOffset>>,
-    pub last_delivery_status: Option<String>,
+}
+
+/// Where a webhook delivery stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DeliveryState {
+    /// Another attempt is scheduled.
+    Pending,
+    Delivered,
+    /// Refused by the receiver, or every retry failed.
+    Failed,
+}
+
+impl DeliveryState {
+    /// The name shown in the interface, in the request's language.
+    pub fn label(self) -> &'static str {
+        match self {
+            DeliveryState::Pending => t!("settings.delivery_pending"),
+            DeliveryState::Delivered => t!("settings.delivery_delivered"),
+            DeliveryState::Failed => t!("settings.delivery_failed"),
+        }
+    }
+}
+
+/// A recent delivery to the organization's webhook.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WebhookDelivery {
+    pub id: i64,
+    pub event: String,
+    pub state: DeliveryState,
+    pub attempts: i64,
+    pub created_at: DateTime<FixedOffset>,
+    pub last_attempt_at: Option<DateTime<FixedOffset>>,
+    pub last_status: Option<String>,
+    pub next_attempt_at: Option<DateTime<FixedOffset>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -371,6 +403,8 @@ pub struct SettingsData {
     pub tokens: Vec<UploadToken>,
     pub projects: Vec<String>,
     pub webhook: Option<Webhook>,
+    /// The latest deliveries to the webhook, the newest first.
+    pub deliveries: Vec<WebhookDelivery>,
     /// A token created just before, shown once.
     pub new_token: Option<String>,
 }

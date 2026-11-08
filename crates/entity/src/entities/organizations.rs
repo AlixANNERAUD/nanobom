@@ -27,6 +27,8 @@ pub enum Relation {
     Runs,
     #[sea_orm(has_many = "super::upload_tokens::Entity")]
     UploadTokens,
+    #[sea_orm(has_many = "super::webhook_deliveries::Entity")]
+    WebhookDeliveries,
 }
 
 impl Related<super::memberships::Entity> for Entity {
@@ -56,6 +58,12 @@ impl Related<super::runs::Entity> for Entity {
 impl Related<super::upload_tokens::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::UploadTokens.def()
+    }
+}
+
+impl Related<super::webhook_deliveries::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::WebhookDeliveries.def()
     }
 }
 
