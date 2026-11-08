@@ -263,6 +263,27 @@ pub struct FindingRow {
     pub ignore_reason: Option<String>,
     pub ignore_expires_at: Option<DateTime<FixedOffset>>,
     pub exploitation: Exploitation,
+    /// The project's direct dependencies that lead to the component, sorted by name; empty
+    /// when the SBOM's dependency graph does not say.
+    pub introduced_via: Vec<DependencyComponent>,
+}
+
+/// A component of a dependency path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DependencyComponent {
+    pub purl: String,
+    pub name: String,
+    pub version: Option<String>,
+}
+
+/// How the project pulls in a finding's component.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DependencyPaths {
+    /// From a direct dependency to the component, shortest first; empty when the graph does not
+    /// link the component to the project.
+    pub paths: Vec<Vec<DependencyComponent>>,
+    /// Direct dependencies leading to the component beyond those of `paths`.
+    pub more: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -341,6 +362,9 @@ pub struct FindingData {
     /// Other findings filed under the same identifier, in organizations the viewer can see.
     pub affected_components: Vec<AffectedComponent>,
     pub events: Vec<FindingEvent>,
+    /// `None` when the latest SBOM did not say which components the project depends on
+    /// directly.
+    pub dependency_paths: Option<DependencyPaths>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

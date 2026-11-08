@@ -340,6 +340,21 @@ pub fn finding(value: nanobom_domain::findings::Finding) -> model::FindingRow {
             epss_percentile: value.exploitation.epss_percentile,
             epss_date: value.exploitation.epss_date,
         },
+        introduced_via: value
+            .introduced_via
+            .into_iter()
+            .map(dependency_component)
+            .collect(),
+    }
+}
+
+pub fn dependency_component(
+    value: nanobom_domain::dependencies::ComponentRef,
+) -> model::DependencyComponent {
+    model::DependencyComponent {
+        purl: value.purl,
+        name: value.name,
+        version: value.version,
     }
 }
 

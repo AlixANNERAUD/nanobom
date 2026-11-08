@@ -135,6 +135,7 @@ pub struct NewFinding {
     pub finding_id: i64,
     pub organization_id: i64,
     pub organization_slug: String,
+    pub project_id: i64,
     pub project_slug: String,
     pub purl: String,
     /// The identifier the finding is filed under.
@@ -804,6 +805,7 @@ async fn update_project(
                 finding_id,
                 organization_id: organization.id,
                 organization_slug: organization.slug.clone(),
+                project_id: project.id,
                 project_slug: project.slug.clone(),
                 purl: target.purl.clone(),
                 vulnerability_id: vulnerability_id.clone(),

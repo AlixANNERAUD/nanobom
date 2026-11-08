@@ -26,7 +26,9 @@
 //! - An **organization** ([`organizations`]) owns **projects** ([`projects`]); users belong to
 //!   organizations through **memberships** ([`memberships`]) that carry a role.
 //! - CI uploads a CycloneDX SBOM with an **upload token** ([`tokens`]); the upload replaces the
-//!   project's **components** ([`inventory`]).
+//!   project's **components** ([`inventory`]) and their **dependency graph**
+//!   ([`dependencies`]), which tells which direct dependency of the project pulls in a
+//!   vulnerable component.
 //! - A **run** ([`evaluation`]) matches components against a
 //!   [`VulnerabilitySource`](nanobom_osv::VulnerabilitySource) and opens, fixes and reopens
 //!   **findings** ([`findings`]); members can ignore findings, with a reason and an optional
@@ -57,6 +59,7 @@
 pub mod access;
 pub mod database;
 pub mod deliveries;
+pub mod dependencies;
 pub mod error;
 pub mod evaluation;
 pub mod exploitation;

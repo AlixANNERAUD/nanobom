@@ -10,18 +10,27 @@
 //! Components without a valid purl are counted and reported back to CI as skipped; files and
 //! the operating system entry are ignored altogether. Two components with the same purl are
 //! stored once.
+//!
+//! The SBOM's dependency graph is kept with the components, between the components stored: see
+//! [`crate::dependencies`] for what is derived from it and how incomplete graphs are handled.
 
-use std::{collections::BTreeMap, str::FromStr};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    str::FromStr,
+};
 
 use chrono::Utc;
 use cyclonedx_bom::{
     models::{
         bom::SpecVersion,
         component::{Classification, Component},
+        dependency::Dependency,
     },
     prelude::Bom,
 };
-use nanobom_entity::{components, organizations, projects, sbom_uploads, upload_tokens};
+use nanobom_entity::{
+    component_dependencies, components, organizations, projects, sbom_uploads, upload_tokens,
+};
 use packageurl::PackageUrl;
 use sea_orm::{
     ActiveModelTrait,
@@ -78,6 +87,18 @@ pub struct ParsedSbom {
     pub skipped_count: usize,
     /// The first skipped components, for the upload's response.
     pub skipped: Vec<SkippedComponent>,
+    /// The edges of the SBOM's dependency graph between the components kept, sorted and
+    /// without duplicates. Edges to or from a component that is not kept are dropped.
+    pub dependencies: Vec<DependencyEdge>,
+}
+
+/// An edge of an SBOM's dependency graph, between package URLs in canonical form.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DependencyEdge {
+    /// The component that depends on `child`; `None` for the project itself (the SBOM's
+    /// `metadata.component`).
+    pub parent: Option<String>,
+    pub child: String,
 }
 
 #[derive(Deserialize)]
@@ -94,6 +115,9 @@ struct Header {
 /// Errors are [`Error::Invalid`] with a problem that tells CI what is wrong: not JSON, not
 /// CycloneDX, a specification version outside [`SUPPORTED_SPECIFICATION_VERSIONS`], or a
 /// document that does not follow it. Nested components are flattened.
+///
+/// The dependency graph is read from `dependencies`, whose references are the `bom-ref` of
+/// components; a reference to `metadata.component` is the project.
 pub fn parse(document: &[u8]) -> Result<ParsedSbom> {
     let header: Header = serde_json::from_slice(document).map_err(|error| {
         Error::invalid(Problem::SbomNotJson {
@@ -126,18 +150,66 @@ pub fn parse(document: &[u8]) -> Result<ParsedSbom> {
         components: Vec::new(),
         skipped_count: 0,
         skipped: Vec::new(),
+        dependencies: Vec::new(),
     };
     let mut by_purl = BTreeMap::new();
+    let mut references = HashMap::new();
     if let Some(components) = &bom.components {
-        collect(&components.0, &mut by_purl, &mut parsed);
+        collect(&components.0, &mut by_purl, &mut references, &mut parsed);
     }
     parsed.components = by_purl.into_values().collect();
+    let project = bom
+        .metadata
+        .as_ref()
+        .and_then(|metadata| metadata.component.as_ref())
+        .and_then(|component| component.bom_ref.as_ref())
+        .map(String::as_str);
+    if let Some(dependencies) = &bom.dependencies {
+        parsed.dependencies = dependency_edges(&dependencies.0, project, &references);
+    }
     Ok(parsed)
+}
+
+/// The edges between known components, `references` mapping each kept component's `bom-ref`
+/// to its package URL and `project` being the `bom-ref` of the project.
+fn dependency_edges(
+    dependencies: &[Dependency],
+    project: Option<&str>,
+    references: &HashMap<String, String>,
+) -> Vec<DependencyEdge> {
+    let mut edges = BTreeSet::new();
+    for dependency in dependencies {
+        let parent = if Some(dependency.dependency_ref.as_str()) == project {
+            None
+        } else {
+            match references.get(&dependency.dependency_ref) {
+                Some(purl) => Some(purl.clone()),
+                None => continue,
+            }
+        };
+        for child in &dependency.dependencies {
+            if Some(child.as_str()) == project {
+                continue;
+            }
+            let Some(child) = references.get(child) else {
+                continue;
+            };
+            // Two references can share a package URL, and a package can list itself.
+            if parent.as_ref() != Some(child) {
+                edges.insert(DependencyEdge {
+                    parent: parent.clone(),
+                    child: child.clone(),
+                });
+            }
+        }
+    }
+    edges.into_iter().collect()
 }
 
 fn collect(
     components: &[Component],
     by_purl: &mut BTreeMap<String, InventoryComponent>,
+    references: &mut HashMap<String, String>,
     parsed: &mut ParsedSbom,
 ) {
     for component in components {
@@ -149,6 +221,9 @@ fn collect(
         if is_package {
             match inventory_component(component) {
                 Ok(inventory) => {
+                    if let Some(reference) = &component.bom_ref {
+                        references.insert(reference.clone(), inventory.purl.clone());
+                    }
                     by_purl.entry(inventory.purl.clone()).or_insert(inventory);
                 }
                 Err(reason) => {
@@ -164,7 +239,7 @@ fn collect(
             }
         }
         if let Some(children) = &component.components {
-            collect(&children.0, by_purl, parsed);
+            collect(&children.0, by_purl, references, parsed);
         }
     }
 }
@@ -322,6 +397,11 @@ async fn store(
     };
 
     let now = Utc::now().fixed_offset();
+    // Before the components, which the edges reference.
+    component_dependencies::Entity::delete_many()
+        .filter(component_dependencies::Column::ProjectId.eq(project.id))
+        .exec(&transaction)
+        .await?;
     components::Entity::delete_many()
         .filter(components::Column::ProjectId.eq(project.id))
         .exec(&transaction)
@@ -346,6 +426,7 @@ async fn store(
             .exec(&transaction)
             .await?;
     }
+    store_dependencies(&transaction, project.id, &sbom.dependencies).await?;
     let upload = sbom_uploads::ActiveModel {
         project_id: Set(project.id),
         upload_token_id: Set(Some(token.id)),
@@ -382,6 +463,47 @@ async fn store(
         components_without_purl: sbom.skipped_count,
         skipped: sbom.skipped,
     })
+}
+
+/// Stores the dependency graph of a project whose components were just inserted.
+async fn store_dependencies(
+    database: &impl ConnectionTrait,
+    project_id: i64,
+    dependencies: &[DependencyEdge],
+) -> Result<()> {
+    if dependencies.is_empty() {
+        return Ok(());
+    }
+    // Multi-row inserts do not return every identifier on all databases: read them back.
+    let identifiers: HashMap<String, i64> = components::Entity::find()
+        .filter(components::Column::ProjectId.eq(project_id))
+        .all(database)
+        .await?
+        .into_iter()
+        .map(|component| (component.purl, component.id))
+        .collect();
+    let rows: Vec<component_dependencies::ActiveModel> = dependencies
+        .iter()
+        .filter_map(|edge| {
+            let child = *identifiers.get(&edge.child)?;
+            let parent = match &edge.parent {
+                Some(purl) => Some(*identifiers.get(purl)?),
+                None => None,
+            };
+            Some(component_dependencies::ActiveModel {
+                project_id: Set(project_id),
+                parent_component_id: Set(parent),
+                child_component_id: Set(child),
+                ..Default::default()
+            })
+        })
+        .collect();
+    for batch in rows.chunks(1000) {
+        component_dependencies::Entity::insert_many(batch.to_vec())
+            .exec(database)
+            .await?;
+    }
+    Ok(())
 }
 
 /// The upload history of a project, newest first. Requires [`Permission::View`].

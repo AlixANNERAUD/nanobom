@@ -168,6 +168,79 @@ async fn organizations_are_listed_created_and_isolated() {
 }
 
 #[tokio::test]
+async fn findings_show_the_direct_dependency_that_introduces_them() {
+    let server = server(&[]).await;
+    server.source.publish(
+        json!({
+            "id": "GHSA-35jh-r3h4-6jhm",
+            "modified": "2024-01-01T00:00:00Z",
+            "summary": "Command Injection in lodash",
+            "database_specific": {"severity": "HIGH"}
+        }),
+        &["pkg:npm/lodash@4.17.20"],
+    );
+    let owner = local_user(&server.database, "alice", PASSWORD).await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let secret = tokens::create(&server.database, &owner, organization.id, None, "CI")
+        .await
+        .unwrap()
+        .secret;
+    let mut document = json!({
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.6",
+        "version": 1,
+        "metadata": {"component": {"type": "application", "name": "shop", "bom-ref": "shop"}},
+        "components": [
+            {"type": "library", "name": "web-framework", "version": "2.1.0", "bom-ref": "framework",
+                "purl": "pkg:npm/web-framework@2.1.0"},
+            {"type": "library", "name": "template-engine", "version": "0.9.0", "bom-ref": "engine",
+                "purl": "pkg:npm/template-engine@0.9.0"},
+            {"type": "library", "name": "lodash", "version": "4.17.20", "bom-ref": "lodash",
+                "purl": "pkg:npm/lodash@4.17.20"}
+        ],
+        "dependencies": [
+            {"ref": "shop", "dependsOn": ["framework"]},
+            {"ref": "framework", "dependsOn": ["engine"]},
+            {"ref": "engine", "dependsOn": ["lodash"]}
+        ]
+    });
+    let upload = |document: &serde_json::Value| {
+        Request::put("/api/organizations/acme/projects/shop/sbom")
+            .header(header::AUTHORIZATION, format!("Bearer {secret}"))
+            .body(Body::from(document.to_string()))
+            .unwrap()
+    };
+    server.send(upload(&document)).await;
+    server.runner.wait_until_idle().await;
+    let alice = Browser::sign_in(&server, "alice").await;
+
+    let html = alice.page("/organizations/acme/projects/shop").await;
+    assert!(html.contains("Introduced via"));
+    assert!(html.contains("web-framework"));
+    let project = projects::find(&server.database, &owner, organization.id, "shop")
+        .await
+        .unwrap();
+    let finding = findings::list(&server.database, &owner, project.id, &Filter::default())
+        .await
+        .unwrap()[0]
+        .id;
+    let page = format!("/findings/{finding}");
+    let html = alice.page(&page).await;
+    assert!(
+        html.contains("web-framework 2.1.0 → template-engine 0.9.0 → lodash 4.17.20"),
+        "{html}"
+    );
+
+    document.as_object_mut().unwrap().remove("dependencies");
+    server.send(upload(&document)).await;
+    server.runner.wait_until_idle().await;
+    let html = alice.page(&page).await;
+    assert!(html.contains("does not say which components the project depends on directly"));
+}
+
+#[tokio::test]
 async fn findings_are_shown_and_ignored_from_the_interface() {
     let server = server(&[]).await;
     server.source.publish(

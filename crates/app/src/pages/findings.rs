@@ -14,7 +14,8 @@ use crate::{
         search_components,
     },
     model::{
-        ComponentMatch, FindingData, FindingFilter, FindingRow, ProjectData, Severity, Status,
+        ComponentMatch, DependencyComponent, DependencyPaths, FindingData, FindingFilter,
+        FindingRow, ProjectData, Severity, Status,
     },
     t, tf, tp,
 };
@@ -24,6 +25,29 @@ fn percent(fraction: f64) -> String {
     #[allow(clippy::cast_possible_truncation)]
     let value = (fraction * 100.0).round() as i64;
     tf!("finding.percent", value = value)
+}
+
+/// The direct dependencies that lead to a finding's component, for the project's table: the
+/// first two by name, then how many more; all of them in the tooltip.
+fn introduced_via(finding: &FindingRow) -> impl IntoView + use<> {
+    let via = &finding.introduced_via;
+    if via.len() == 1 && via[0].purl == finding.purl {
+        return view! { <span class="text-muted-foreground">{t!("project.direct")}</span> }
+            .into_any();
+    }
+    let names: Vec<&str> = via
+        .iter()
+        .map(|component| component.name.as_str())
+        .collect();
+    let mut shown = names.iter().take(2).copied().collect::<Vec<_>>().join(", ");
+    if names.len() > 2 {
+        shown = format!(
+            "{shown} {}",
+            tf!("project.via_more", count = names.len() - 2)
+        );
+    }
+    let title = (!names.is_empty()).then(|| tf!("project.via_title", names = names.join(", ")));
+    view! { <span title=title>{shown}</span> }.into_any()
 }
 
 fn finding_rows(findings: Vec<FindingRow>) -> impl IntoView {
@@ -48,6 +72,7 @@ fn finding_rows(findings: Vec<FindingRow>) -> impl IntoView {
                 .epss_percentile
                 .map(percent)
                 .unwrap_or_default();
+            let via = introduced_via(&finding);
             view! {
                 <tr class=TABLE_ROW>
                     <td class=TABLE_CELL>
@@ -78,6 +103,7 @@ fn finding_rows(findings: Vec<FindingRow>) -> impl IntoView {
                             {finding.ecosystem.clone()}
                         </span>
                     </td>
+                    <td class=format!("{TABLE_CELL} text-sm")>{via}</td>
                     <td class=format!("{TABLE_CELL} text-right tabular-nums")>{epss}</td>
                     <td class=TABLE_CELL>
                         <StatusBadge status=finding.status />
@@ -257,6 +283,7 @@ pub fn ProjectPage() -> impl IntoView {
                                         <th scope="col" class=TABLE_HEAD>{t!("project.severity")}</th>
                                         <th scope="col" class=TABLE_HEAD>{t!("project.vulnerability")}</th>
                                         <th scope="col" class=TABLE_HEAD>{t!("project.component")}</th>
+                                        <th scope="col" class=TABLE_HEAD>{t!("project.via")}</th>
                                         <th scope="col" class=format!("{TABLE_HEAD} text-right")>{t!("project.epss")}</th>
                                         <th scope="col" class=TABLE_HEAD>{t!("project.status")}</th>
                                         <th scope="col" class=TABLE_HEAD>{t!("project.since")}</th>
@@ -364,6 +391,53 @@ fn event_label(kind: &str) -> &'static str {
         "ignore_expired" => t!("finding.event_ignore_expired"),
         _ => t!("finding.event_changed"),
     }
+}
+
+/// A component of a dependency path, with its version.
+fn path_component(component: &DependencyComponent) -> String {
+    match &component.version {
+        Some(version) => format!("{} {version}", component.name),
+        None => component.name.clone(),
+    }
+}
+
+/// The paths from the project's direct dependencies to a finding's component, or why there is
+/// none.
+fn dependency_paths(paths: Option<DependencyPaths>) -> impl IntoView {
+    let Some(paths) = paths else {
+        return view! { <p class="text-muted-foreground text-sm">{t!("finding.no_dependency_graph")}</p> }
+            .into_any();
+    };
+    if paths.paths.is_empty() {
+        return view! { <p class="text-muted-foreground text-sm">{t!("finding.not_linked")}</p> }
+            .into_any();
+    }
+    let more = (paths.more > 0).then(|| {
+        view! { <p class="text-muted-foreground mt-2 text-sm">{tp!("finding.more_paths", paths.more)}</p> }
+    });
+    let items = paths
+        .paths
+        .into_iter()
+        .map(|path| {
+            let direct = (path.len() == 1).then(|| {
+                view! {
+                    <span class="text-muted-foreground">" (" {t!("finding.direct_dependency")} ")"</span>
+                }
+            });
+            let text = path.iter().map(path_component).collect::<Vec<_>>().join(" → ");
+            view! {
+                <li class="break-words">
+                    {text}
+                    {direct}
+                </li>
+            }
+        })
+        .collect_view();
+    view! {
+        <ul class="grid gap-2 text-sm">{items}</ul>
+        {more}
+    }
+    .into_any()
 }
 
 #[component]
@@ -619,6 +693,13 @@ pub fn FindingPage() -> impl IntoView {
                                             {ignored}
                                         </dl>
                                     </CardContent>
+                                </Card>
+                                <Card>
+                                    <CardHeader>
+                                        <CardTitle>{t!("finding.introduced_via")}</CardTitle>
+                                        <CardDescription>{t!("finding.introduced_via_description")}</CardDescription>
+                                    </CardHeader>
+                                    <CardContent>{dependency_paths(page.dependency_paths.clone())}</CardContent>
                                 </Card>
                                 <Card>
                                     <CardHeader>
