@@ -74,7 +74,10 @@ NANOBOM_SCHEDULE = "off"
 
 [tasks.dev-admin]
 description = "Create an administrator in the development database (asks for the password)"
-run = "cargo run --quiet --package nanobom -- create-administrator --username admin"
+run = [
+  "mkdir -p target/dev",
+  "cargo run --quiet --package nanobom -- create-administrator --username admin",
+]
 
 [tasks.dev-admin.env]
 NANOBOM_DATABASE_URL = "sqlite://target/dev/nanobom.db?mode=rwc"
