@@ -14,6 +14,7 @@ pub struct Model {
     pub enabled: bool,
     pub last_delivery_at: Option<DateTimeWithTimeZone>,
     pub last_delivery_status: Option<String>,
+    pub exploited_only: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

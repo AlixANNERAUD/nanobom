@@ -89,6 +89,9 @@
     "check_now": "Vérifier maintenant",
     "settings": "Paramètres",
     "never": "jamais",
+    "stale": "Obsolète",
+    "stale_title": "Dernier envoi : {date}",
+    "stale_never_title": "Aucun SBOM reçu",
     "no_project_title": "Aucun projet pour l’instant",
     "no_project_text": "Les projets apparaissent avec leur premier envoi de SBOM. Créez un jeton d’envoi dans les paramètres, puis suivez les exemples d’intégration continue du README.",
     "projects_caption": "Projets et leurs vulnérabilités ouvertes par gravité",
@@ -114,7 +117,8 @@
     "trigger_upload": "envoi",
     "scope_all": "toutes les organisations",
     "scope_organization": "organisation",
-    "scope_project": "projet"
+    "scope_project": "projet",
+    "known_exploited": "Exploitées connues"
   },
   "project": {
     "title": "Projet",
@@ -123,6 +127,8 @@
       "other": "{count} composants"
     },
     "last_upload": "dernier envoi {time}",
+    "stale_alert": "Aucun SBOM reçu depuis le {date} : vérifiez le job d’intégration continue qui l’envoie.",
+    "stale_never_alert": "Aucun SBOM reçu depuis la création du projet le {date} : vérifiez le job d’intégration continue qui l’envoie.",
     "without_purl_title": "Certains composants ne peuvent pas être vérifiés",
     "without_purl_text": {
       "one": "{count} composant du dernier SBOM n’a pas d’URL de paquet : OSV ne peut donc pas le reconnaître. Vérifiez les paramètres du générateur.",
@@ -151,7 +157,11 @@
     "filter_open_and_ignored": "Ouvertes et ignorées",
     "filter_all": "Tous",
     "filter_ecosystem": "Écosystème",
-    "filter": "Filtrer"
+    "filter": "Filtrer",
+    "known_exploited": "Exploitée connue",
+    "known_exploited_due": "Échéance CISA : {date}",
+    "epss": "EPSS",
+    "filter_exploited": "Uniquement les vulnérabilités exploitées connues"
   },
   "finding": {
     "title": "Vulnérabilité",
@@ -189,7 +199,19 @@
     "also_affected": "Également touchés",
     "also_affected_description": "Dans les organisations que vous pouvez voir.",
     "no_other_component": "Aucun autre composant.",
-    "references": "Références"
+    "references": "Références",
+    "exploitation": "Exploitation",
+    "exploitation_none": "Aucune exploitation n’est connue pour cette vulnérabilité.",
+    "kev_added": "Ajoutée au catalogue de la CISA",
+    "kev_due": "Échéance CISA",
+    "ransomware": "Campagnes de rançongiciel",
+    "yes": "Connues",
+    "no": "Inconnues",
+    "epss_score": "Score EPSS",
+    "epss_value": "{score} (percentile {percentile}, {date})",
+    "percent": "{value} %",
+    "kev_link": "Catalogue des vulnérabilités exploitées connues de la CISA",
+    "epss_link": "À propos d’EPSS"
   },
   "search": {
     "title": "Recherche",
@@ -251,7 +273,8 @@
     "rename": "Renommer",
     "delete_title": "Supprimer cette organisation",
     "delete_description": "Ses projets, vulnérabilités, jetons et membres sont définitivement supprimés.",
-    "delete": "Supprimer l’organisation"
+    "delete": "Supprimer l’organisation",
+    "exploited_only": "Uniquement les vulnérabilités exploitées connues"
   },
   "administration": {
     "title": "Administration",

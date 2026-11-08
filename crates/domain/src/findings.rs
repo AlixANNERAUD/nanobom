@@ -4,7 +4,9 @@
 use std::{collections::HashMap, str::FromStr};
 
 use chrono::{DateTime, FixedOffset, Utc};
-use nanobom_entity::{finding_events, findings, organizations, projects, users, vulnerabilities};
+use nanobom_entity::{
+    finding_events, findings, organizations, projects, upload_tokens, users, vulnerabilities,
+};
 use nanobom_osv::{Severity, Vulnerability, schema::Reference};
 use packageurl::PackageUrl;
 use sea_orm::{
@@ -17,6 +19,7 @@ use crate::{
     access::{Actor, Permission},
     error::{Error, Result},
     evaluation::record_event,
+    exploitation::{self, Exploitation},
     problem::Problem,
 };
 
@@ -118,6 +121,7 @@ pub struct Finding {
     pub fixed_at: Option<DateTime<FixedOffset>>,
     pub ignore_reason: Option<String>,
     pub ignore_expires_at: Option<DateTime<FixedOffset>>,
+    pub exploitation: Exploitation,
 }
 
 /// Which findings to list. Empty lists mean "any".
@@ -126,6 +130,8 @@ pub struct Filter {
     pub severities: Vec<Severity>,
     pub statuses: Vec<Status>,
     pub ecosystem: Option<String>,
+    /// Only findings with a known exploited CVE.
+    pub exploited_only: bool,
 }
 
 fn component_name_and_version(purl: &str) -> (String, Option<String>) {
@@ -170,10 +176,12 @@ fn view(
         fixed_at: finding.fixed_at,
         ignore_reason: finding.ignore_reason,
         ignore_expires_at: finding.ignore_expires_at,
+        exploitation: Exploitation::default(),
     }
 }
 
-/// The findings of a project, most severe first.
+/// The findings of a project: known exploited first, then most severe first, then by EPSS
+/// score (findings without one last).
 pub async fn list(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -181,6 +189,45 @@ pub async fn list(
     filter: &Filter,
 ) -> Result<Vec<Finding>> {
     let project = crate::projects::authorize(database, actor, project_id, Permission::View).await?;
+    project_findings(database, project, filter).await
+}
+
+/// The open findings of a project an upload token covers, most severe first (then as `list`
+/// orders them), for the evaluation returned to CI after an upload.
+pub async fn open_for_upload_token(
+    database: &impl ConnectionTrait,
+    token: &upload_tokens::Model,
+    project_id: i64,
+) -> Result<Vec<Finding>> {
+    // The same check as `inventory::ingest`: the token's organization, and its project when
+    // the token is limited to one.
+    let project = projects::Entity::find_by_id(project_id)
+        .one(database)
+        .await?
+        .filter(|project| {
+            project.organization_id == token.organization_id
+                && token.project_id.is_none_or(|allowed| allowed == project.id)
+        })
+        .ok_or(Error::NotFound)?;
+    let filter = Filter {
+        statuses: vec![Status::Open],
+        ..Filter::default()
+    };
+    let mut findings = project_findings(database, project, &filter).await?;
+    // Stable: findings of the same severity keep the order of `list`.
+    findings.sort_by_key(|finding| std::cmp::Reverse(finding.severity));
+    Ok(findings)
+}
+
+/// The findings of a project, without authorization: known exploited first, then most severe
+/// first, then by EPSS score (findings without one last), then by CVSS score, component and
+/// vulnerability.
+async fn project_findings(
+    database: &impl ConnectionTrait,
+    project: projects::Model,
+    filter: &Filter,
+) -> Result<Vec<Finding>> {
+    let project_id = project.id;
     let mut query = findings::Entity::find().filter(findings::Column::ProjectId.eq(project_id));
     if !filter.severities.is_empty() {
         query = query.filter(
@@ -204,16 +251,41 @@ pub async fn list(
         .into_iter()
         .map(|(finding, vulnerability)| view(finding, project.slug.clone(), vulnerability.as_ref()))
         .collect();
+    let keys: Vec<(i64, Vec<String>)> = findings
+        .iter()
+        .map(|finding| {
+            (
+                finding.id,
+                exploitation::cve_ids(&finding.vulnerability_id, &finding.aliases),
+            )
+        })
+        .collect();
+    let mut exploitations = exploitation::for_findings(database, &keys).await?;
+    for finding in &mut findings {
+        finding.exploitation = exploitations.remove(&finding.id).unwrap_or_default();
+    }
+    if filter.exploited_only {
+        findings.retain(|finding| finding.exploitation.known_exploited);
+    }
     findings.sort_by(|left, right| {
         right
-            .severity
-            .cmp(&left.severity)
+            .exploitation
+            .known_exploited
+            .cmp(&left.exploitation.known_exploited)
+            .then(right.severity.cmp(&left.severity))
             .then(
+                right
+                    .exploitation
+                    .epss_score
+                    .unwrap_or(-1.0)
+                    .total_cmp(&left.exploitation.epss_score.unwrap_or(-1.0)),
+            )
+            .then_with(|| {
                 right
                     .cvss_score
                     .unwrap_or(-1.0)
-                    .total_cmp(&left.cvss_score.unwrap_or(-1.0)),
-            )
+                    .total_cmp(&left.cvss_score.unwrap_or(-1.0))
+            })
             .then(left.component_name.cmp(&right.component_name))
             .then(left.vulnerability_id.cmp(&right.vulnerability_id))
     });
@@ -410,7 +482,15 @@ pub async fn detail(
             })
             .collect(),
         affected_components,
-        finding: view(finding, project.slug, Some(&vulnerability)),
+        finding: {
+            let mut view = view(finding, project.slug, Some(&vulnerability));
+            view.exploitation = exploitation::for_cves(
+                database,
+                &exploitation::cve_ids(&view.vulnerability_id, &view.aliases),
+            )
+            .await?;
+            view
+        },
     })
 }
 
@@ -549,14 +629,21 @@ pub struct ProjectOverview {
     pub last_upload_at: Option<DateTime<FixedOffset>>,
     pub open: SeverityCounts,
     pub ignored: u64,
+    /// Open findings with a known exploited CVE.
+    pub known_exploited: i64,
+    /// No SBOM received for longer than the stale threshold.
+    pub stale: bool,
 }
 
-/// The projects of an organization with their open findings by severity.
+/// The projects of an organization with their open findings by severity; `stale_after_days`
+/// is the stale threshold (0: never stale).
 pub async fn overview(
     database: &impl ConnectionTrait,
     actor: &Actor,
     organization_id: i64,
+    stale_after_days: u32,
 ) -> Result<Vec<ProjectOverview>> {
+    let now = chrono::Utc::now().fixed_offset();
     let projects = crate::projects::list(database, actor, organization_id).await?;
     let mut overviews: Vec<ProjectOverview> = projects
         .iter()
@@ -567,6 +654,13 @@ pub async fn overview(
             last_upload_at: project.last_upload_at,
             open: SeverityCounts::default(),
             ignored: 0,
+            known_exploited: 0,
+            stale: crate::staleness::is_stale(
+                project.created_at,
+                project.last_upload_at,
+                now,
+                stale_after_days,
+            ),
         })
         .collect();
     let index: HashMap<i64, usize> = overviews
@@ -576,18 +670,38 @@ pub async fn overview(
         .collect();
     let identifiers: Vec<i64> = projects.iter().map(|project| project.id).collect();
     for chunk in identifiers.chunks(500) {
-        for finding in findings::Entity::find()
+        let rows = findings::Entity::find()
             .filter(findings::Column::ProjectId.is_in(chunk.iter().copied()))
             .filter(findings::Column::Status.ne(Status::Fixed.as_str()))
+            .find_also_related(vulnerabilities::Entity)
             .all(database)
-            .await?
-        {
+            .await?;
+        let keys: Vec<(i64, Vec<String>)> = rows
+            .iter()
+            .map(|(finding, vulnerability)| {
+                let aliases = vulnerability.as_ref().map(aliases).unwrap_or_default();
+                (
+                    finding.id,
+                    exploitation::cve_ids(&finding.vulnerability_id, &aliases),
+                )
+            })
+            .collect();
+        let exploitations = exploitation::for_findings(database, &keys).await?;
+        for (finding, _) in rows {
             let overview = &mut overviews[index[&finding.project_id]];
             match Status::parse(&finding.status) {
                 Status::Ignored => overview.ignored += 1,
-                _ => overview
-                    .open
-                    .add(finding.severity.parse().unwrap_or(Severity::Unknown)),
+                _ => {
+                    overview
+                        .open
+                        .add(finding.severity.parse().unwrap_or(Severity::Unknown));
+                    if exploitations
+                        .get(&finding.id)
+                        .is_some_and(|value| value.known_exploited)
+                    {
+                        overview.known_exploited += 1;
+                    }
+                }
             }
         }
     }

@@ -7,7 +7,9 @@ use nanobom_domain::{
     memberships, notifications, organizations, testing,
     users::{self, NewUser},
 };
+use nanobom_entity::{exploitation, findings, vulnerabilities};
 use nanobom_osv::Severity;
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection, EntityTrait};
 use serde_json::Value;
 use wiremock::{
     Mock, MockServer, ResponseTemplate,
@@ -79,14 +81,24 @@ async fn only_admins_configure_webhooks_and_urls_are_checked() {
             organization,
             "https://example.org/hook",
             Severity::High,
-            true
+            true,
+            false
         )
         .await,
         Err(Error::Forbidden)
     ));
     for url in ["ftp://example.org/hook", "not a url", "https://"] {
         assert!(matches!(
-            notifications::set(&database, &owner, organization, url, Severity::High, true).await,
+            notifications::set(
+                &database,
+                &owner,
+                organization,
+                url,
+                Severity::High,
+                true,
+                false
+            )
+            .await,
             Err(Error::Invalid(_))
         ));
     }
@@ -97,6 +109,7 @@ async fn only_admins_configure_webhooks_and_urls_are_checked() {
         "https://hooks.example.org/nanobom",
         Severity::High,
         true,
+        false,
     )
     .await
     .unwrap();
@@ -107,6 +120,7 @@ async fn only_admins_configure_webhooks_and_urls_are_checked() {
         organization,
         "https://hooks.example.org/other",
         Severity::Critical,
+        false,
         false,
     )
     .await
@@ -158,6 +172,7 @@ async fn new_findings_are_grouped_per_organization_and_filtered_by_severity() {
         &format!("{}/acme", server.uri()),
         Severity::High,
         true,
+        false,
     )
     .await
     .unwrap();
@@ -168,6 +183,7 @@ async fn new_findings_are_grouped_per_organization_and_filtered_by_severity() {
         &format!("{}/quiet", server.uri()),
         Severity::Critical,
         true,
+        false,
     )
     .await
     .unwrap();
@@ -240,6 +256,7 @@ async fn failed_deliveries_are_recorded() {
         "http://127.0.0.1:9/hook",
         Severity::Unknown,
         true,
+        false,
     )
     .await
     .unwrap();
@@ -279,4 +296,288 @@ fn failed_runs_have_a_failure_payload() {
     assert_eq!(payload.scope, "all");
     assert_eq!(payload.run.id, 42);
     assert!(payload.error.contains("timeout"));
+}
+
+/// An organization with a project, an enabled webhook and a CVE in the catalog.
+struct Exploited {
+    database: DatabaseConnection,
+    owner: Actor,
+    organization: i64,
+    project: i64,
+}
+
+impl Exploited {
+    async fn new(minimum: Severity, exploited_only: bool) -> Self {
+        let database = testing::database().await;
+        let owner = actor(&database, "owner").await;
+        let organization = organizations::create(&database, &owner, "acme", "Acme")
+            .await
+            .unwrap()
+            .id;
+        let project =
+            nanobom_domain::projects::create(&database, &owner, organization, "web", "Web")
+                .await
+                .unwrap()
+                .id;
+        notifications::set(
+            &database,
+            &owner,
+            organization,
+            "http://127.0.0.1:9/hook",
+            minimum,
+            true,
+            exploited_only,
+        )
+        .await
+        .unwrap();
+        exploitation::ActiveModel {
+            cve_id: Set("CVE-2021-23337".to_owned()),
+            known_exploited: Set(true),
+            kev_date_added: Set(Some("2022-03-01".to_owned())),
+            kev_due_date: Set(Some("2022-03-22".to_owned())),
+            kev_ransomware: Set(false),
+            epss_score: Set(Some(0.75)),
+            epss_percentile: Set(Some(0.98)),
+            ..Default::default()
+        }
+        .insert(&database)
+        .await
+        .unwrap();
+        Self {
+            database,
+            owner,
+            organization,
+            project,
+        }
+    }
+
+    /// A finding of the vulnerability `id` (with the aliases given) and its status.
+    async fn finding(&self, id: &str, aliases: &[&str], severity: &str, status: &str) -> i64 {
+        vulnerabilities::ActiveModel {
+            id: Set(id.to_owned()),
+            modified: Set(chrono::Utc::now().fixed_offset()),
+            summary: Set(Some(format!("About {id}"))),
+            aliases: Set(serde_json::to_string(aliases).unwrap()),
+            severity: Set(severity.to_owned()),
+            cvss_score: Set(Some(5.0)),
+            record: Set("{}".to_owned()),
+            fetched_at: Set(chrono::Utc::now().fixed_offset()),
+            ..Default::default()
+        }
+        .insert(&self.database)
+        .await
+        .unwrap();
+        findings::ActiveModel {
+            project_id: Set(self.project),
+            purl: Set(format!("pkg:npm/{id}@1.0.0")),
+            ecosystem: Set("npm".to_owned()),
+            vulnerability_id: Set(id.to_owned()),
+            status: Set(status.to_owned()),
+            severity: Set(severity.to_owned()),
+            first_seen_at: Set(chrono::Utc::now().fixed_offset()),
+            last_seen_at: Set(chrono::Utc::now().fixed_offset()),
+            ..Default::default()
+        }
+        .insert(&self.database)
+        .await
+        .unwrap()
+        .id
+    }
+
+    async fn notified(&self, id: i64) -> bool {
+        findings::Entity::find_by_id(id)
+            .one(&self.database)
+            .await
+            .unwrap()
+            .unwrap()
+            .exploited_notified_at
+            .is_some()
+    }
+
+    async fn deliveries(
+        &self,
+        new_findings: Vec<nanobom_domain::evaluation::NewFinding>,
+    ) -> Vec<notifications::Delivery<notifications::NewFindingsPayload>> {
+        notifications::new_findings_deliveries(
+            &self.database,
+            &outcome(new_findings, None),
+            &"https://nanobom.example.org/".parse().unwrap(),
+        )
+        .await
+        .unwrap()
+    }
+
+    fn new_finding(
+        &self,
+        id: i64,
+        vulnerability: &str,
+        aliases: &[&str],
+        severity: Severity,
+    ) -> NewFinding {
+        NewFinding {
+            finding_id: id,
+            organization_id: self.organization,
+            organization_slug: "acme".to_owned(),
+            project_slug: "web".to_owned(),
+            purl: format!("pkg:npm/{vulnerability}@1.0.0"),
+            vulnerability_id: vulnerability.to_owned(),
+            aliases: aliases.iter().map(|alias| (*alias).to_owned()).collect(),
+            summary: None,
+            severity,
+            cvss_score: None,
+            reopened: false,
+        }
+    }
+}
+
+#[tokio::test]
+async fn known_exploited_findings_pass_the_minimum_severity() {
+    let fixture = Exploited::new(Severity::Critical, false).await;
+    let low = fixture
+        .finding("GHSA-low", &["CVE-2021-23337"], "low", "open")
+        .await;
+    let high = fixture.finding("GHSA-high", &[], "high", "open").await;
+    let deliveries = fixture
+        .deliveries(vec![
+            fixture.new_finding(low, "GHSA-low", &["CVE-2021-23337"], Severity::Low),
+            fixture.new_finding(high, "GHSA-high", &[], Severity::High),
+        ])
+        .await;
+    assert_eq!(deliveries.len(), 1);
+    let payload = &deliveries[0].payload;
+    assert_eq!(payload.count, 1, "the high one is below the minimum");
+    assert_eq!(payload.known_exploited_count, 1);
+    assert_eq!(payload.findings[0].vulnerability, "GHSA-low");
+    assert_eq!(payload.findings[0].reason, "new");
+    assert!(
+        fixture.notified(low).await,
+        "not notified again as exploited"
+    );
+    assert!(!fixture.notified(high).await);
+}
+
+#[tokio::test]
+async fn exploited_only_webhooks_deliver_known_exploited_findings_only() {
+    let fixture = Exploited::new(Severity::Unknown, true).await;
+    let exploited = fixture
+        .finding("CVE-2021-23337", &[], "medium", "open")
+        .await;
+    let other = fixture.finding("GHSA-other", &[], "critical", "open").await;
+    let mut reopened = fixture.new_finding(exploited, "CVE-2021-23337", &[], Severity::Medium);
+    reopened.reopened = true;
+    let deliveries = fixture
+        .deliveries(vec![
+            reopened,
+            fixture.new_finding(other, "GHSA-other", &[], Severity::Critical),
+        ])
+        .await;
+    let payload = &deliveries[0].payload;
+    assert_eq!(payload.count, 1);
+    assert_eq!(payload.findings[0].vulnerability, "CVE-2021-23337");
+    assert_eq!(payload.findings[0].reason, "reopened");
+    assert!(payload.findings[0].reopened);
+
+    // Nothing exploited: nothing delivered, although a critical finding is new.
+    let fixture = Exploited::new(Severity::Unknown, true).await;
+    let other = fixture.finding("GHSA-other", &[], "critical", "open").await;
+    assert!(
+        fixture
+            .deliveries(vec![fixture.new_finding(
+                other,
+                "GHSA-other",
+                &[],
+                Severity::Critical
+            )])
+            .await
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+async fn an_open_finding_newly_exploited_is_notified_once() {
+    let fixture = Exploited::new(Severity::Critical, false).await;
+    let existing = fixture
+        .finding("GHSA-old", &["CVE-2021-23337"], "low", "open")
+        .await;
+    let ignored = fixture
+        .finding("GHSA-ignored", &["CVE-2021-23337"], "low", "ignored")
+        .await;
+    let fixed = fixture
+        .finding("GHSA-fixed", &["CVE-2021-23337"], "low", "fixed")
+        .await;
+
+    let deliveries = fixture.deliveries(vec![]).await;
+    assert_eq!(deliveries.len(), 1);
+    let payload = &deliveries[0].payload;
+    assert_eq!(payload.count, 1);
+    let delivered = &payload.findings[0];
+    assert_eq!(delivered.vulnerability, "GHSA-old");
+    assert_eq!(delivered.reason, "exploited");
+    assert!(!delivered.reopened && delivered.known_exploited);
+    assert_eq!(delivered.component, "pkg:npm/GHSA-old@1.0.0");
+    assert_eq!(delivered.summary.as_deref(), Some("About GHSA-old"));
+    assert_eq!(
+        delivered.url,
+        format!("https://nanobom.example.org/findings/{existing}")
+    );
+    assert!(fixture.notified(existing).await);
+    assert!(!fixture.notified(ignored).await);
+    assert!(!fixture.notified(fixed).await);
+
+    assert!(fixture.deliveries(vec![]).await.is_empty(), "only once");
+}
+
+#[tokio::test]
+async fn exploited_findings_are_marked_even_without_a_webhook() {
+    let fixture = Exploited::new(Severity::Unknown, false).await;
+    notifications::delete(&fixture.database, &fixture.owner, fixture.organization)
+        .await
+        .unwrap();
+    let existing = fixture
+        .finding("GHSA-old", &["CVE-2021-23337"], "low", "open")
+        .await;
+    assert!(fixture.deliveries(vec![]).await.is_empty());
+    assert!(fixture.notified(existing).await);
+
+    // A webhook enabled afterwards does not replay it.
+    notifications::set(
+        &fixture.database,
+        &fixture.owner,
+        fixture.organization,
+        "http://127.0.0.1:9/hook",
+        Severity::Unknown,
+        true,
+        false,
+    )
+    .await
+    .unwrap();
+    assert!(fixture.deliveries(vec![]).await.is_empty());
+}
+
+#[tokio::test]
+async fn payloads_carry_exploitation_data() {
+    let fixture = Exploited::new(Severity::Unknown, false).await;
+    let exploited = fixture
+        .finding("GHSA-old", &["CVE-2021-23337"], "high", "open")
+        .await;
+    let plain = fixture.finding("GHSA-plain", &[], "high", "open").await;
+    let deliveries = fixture
+        .deliveries(vec![
+            fixture.new_finding(exploited, "GHSA-old", &["CVE-2021-23337"], Severity::High),
+            fixture.new_finding(plain, "GHSA-plain", &[], Severity::High),
+        ])
+        .await;
+    let body = serde_json::to_value(&deliveries[0].payload).unwrap();
+    assert_eq!(body["count"], 2);
+    assert_eq!(body["known_exploited_count"], 1);
+    let first = &body["findings"][0];
+    assert_eq!(first["reason"], "new");
+    assert_eq!(first["known_exploited"], true);
+    assert_eq!(first["kev_due_date"], "2022-03-22");
+    assert_eq!(first["epss"], 0.75);
+    assert_eq!(first["epss_percentile"], 0.98);
+    let second = &body["findings"][1];
+    assert_eq!(second["known_exploited"], false);
+    assert!(second["kev_due_date"].is_null());
+    assert!(second["epss"].is_null() && second["epss_percentile"].is_null());
 }

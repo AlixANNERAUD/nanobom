@@ -15,8 +15,13 @@ about new ones through a webhook.
 - **Findings with a lifecycle**: opened, fixed when the component goes away, reopened when it
   comes back, ignored with a reason and an optional expiry. OSV aliases (GHSA, CVE, …) of one
   vulnerability are merged into one finding.
-- **Webhooks** per organization for new findings above a severity, and an instance-wide webhook
-  when a run fails.
+- **Exploitation signals**: findings are matched against CISA's Known Exploited Vulnerabilities
+  catalog and FIRST's EPSS scores, and listed with known exploited ones first.
+- **A CI gate**: an upload can wait for its evaluation and fail the pipeline when open findings
+  reach a severity, or are known exploited.
+- **Webhooks** per organization for new findings above a severity (and for known exploited ones
+  at any severity), for projects whose SBOM stopped coming, and an instance-wide webhook when a
+  run fails.
 - **Works without JavaScript**, in English and French, light and dark.
 - **Operations**: `/healthz`, Prometheus `/metrics`, JSON logs, online backups.
 
@@ -66,7 +71,8 @@ curl --fail-with-body -X PUT \
 | Formats | CycloneDX JSON, specification 1.3 to 1.7 |
 | Tokens | Organization tokens may create projects; project tokens upload to their project only |
 | Metadata | `source_commit` and `image_tag` query parameters, both optional, shown in the history |
-| Responses | `201` project created, `200` updated, `401` no valid token, `403` token of another project, `404` unknown organization, `413` too large (`NANOBOM_MAXIMUM_SBOM_SIZE`), `422` invalid document; errors are `{"error": "…"}` |
+| Gate | `wait=true` waits for the project's evaluation and returns it; `fail_on=critical`, `high`, `medium`, `low` or `exploited` (case-insensitive) implies `wait` and fails the upload when it is met |
+| Responses | `201` project created, `200` updated, `401` no valid token, `403` token of another project, `404` unknown organization, `409` open findings reach `fail_on`, `413` too large (`NANOBOM_MAXIMUM_SBOM_SIZE`), `422` invalid document or parameter, `503` evaluation did not complete (with `fail_on`); errors are `{"error": "…"}` |
 
 The response lists the components without a package URL, which OSV cannot match: most often a
 generator setting. Generators that work well:
@@ -78,7 +84,76 @@ generator setting. Generators that work well:
 | Python | `cyclonedx-py environment --output-file sbom.json` |
 | Container images, anything else | `syft <image or directory> -o cyclonedx-json=sbom.json` ([Syft](https://github.com/anchore/syft)) |
 
-Complete pipelines: [GitHub Actions](examples/github-actions.yml),
+### Failing a pipeline on findings
+
+With `wait` or `fail_on`, the request returns once the project has been evaluated, or after
+`NANOBOM_UPLOAD_WAIT_SECONDS`. The SBOM is stored in any case. The evaluation is added to the
+response:
+
+```sh
+curl --fail-with-body -X PUT \
+  -H "Authorization: Bearer $NANOBOM_TOKEN" \
+  --data-binary @sbom.json \
+  "https://nanobom.example.org/api/organizations/acme/projects/web/sbom?fail_on=high"
+```
+
+```json
+{
+  "error": "2 open findings at or above high",
+  "organization": "acme",
+  "project": "web",
+  "project_id": 3,
+  "project_created": false,
+  "upload_id": 58,
+  "component_count": 212,
+  "components_without_purl": 0,
+  "skipped": [],
+  "evaluation": {
+    "status": "succeeded",
+    "run_id": 42,
+    "open": { "critical": 0, "high": 2, "medium": 5, "low": 1, "unknown": 0 },
+    "known_exploited": 1,
+    "findings": [
+      {
+        "vulnerability": "GHSA-35jh-r3h4-6jhm",
+        "component": "pkg:npm/lodash@4.17.20",
+        "severity": "high",
+        "known_exploited": true,
+        "url": "https://nanobom.example.org/findings/17"
+      }
+    ]
+  }
+}
+```
+
+`evaluation.status` is `succeeded`, `failed` (OSV was unreachable) or `timed_out`, in which case
+`run_id` is `null` and the run still finishes in the background. `open` counts the project's open
+findings, ignored ones excluded; `findings` lists the most severe first (known exploited ones
+first among equals), at most 100; `known_exploited` counts all of them. `error` is present only
+when the upload fails:
+
+| Status | Meaning |
+| --- | --- |
+| `409` | The evaluation succeeded and open findings reach `fail_on`: at or above that severity, or known exploited for `exploited` |
+| `503` | With `fail_on`, the evaluation failed or timed out, so the findings are not up to date; the gate does not pass |
+
+Without `fail_on`, `wait=true` only adds the evaluation, and the status stays `200` or `201`.
+A project is evaluated when waiting even if `NANOBOM_RUN_AFTER_UPLOAD` is `false`. `fail_on` is
+trimmed and case-insensitive. Invalid parameters are refused with a `422` before anything is
+stored, with one of these errors:
+
+- `wait must be true or false`;
+- `fail_on must be critical, high, medium, low or exploited`;
+- `fail_on=exploited needs exploitation data (NANOBOM_EXPLOITATION_DATA)`, when
+  `NANOBOM_EXPLOITATION_DATA` is `false`: no finding could ever be known exploited.
+
+To stop gating a pipeline, remove `fail_on` from the URL.
+
+A reverse proxy in front of nanobom must let the request wait: with nginx, set
+`proxy_read_timeout` above `NANOBOM_UPLOAD_WAIT_SECONDS` (300 seconds by default), or lower the
+setting.
+
+Complete pipelines, both failing on high findings: [GitHub Actions](examples/github-actions.yml),
 [GitLab CI](examples/gitlab-ci.yml). Upload tokens can also be managed from the command line:
 `nanobom token create --organization acme --name CI [--project web]`, `token list`,
 `token revoke --id N`.
@@ -98,10 +173,43 @@ Severity is the highest of the group: CVSS 4.0, then 3.1, 3.0 and 2.0 base score
 severity the advisory database gives, else unknown. A run that cannot reach OSV changes nothing
 and calls the failure webhook. Runs are serialized: one at a time.
 
+### Exploitation signals
+
+Severity says how bad a vulnerability could be, not whether anyone uses it. After each
+successful run, nanobom downloads, for the CVEs of the scope's open and ignored findings (the
+CVEs among a finding's identifier and aliases):
+
+- the [CISA Known Exploited Vulnerabilities](https://www.cisa.gov/known-exploited-vulnerabilities-catalog)
+  (KEV) catalog: a finding with a CVE in it is **known exploited**, with the date CISA added it,
+  its remediation due date and whether ransomware campaigns use it. The catalog is kept in
+  memory for 12 hours;
+- the [EPSS](https://www.first.org/epss/) score and percentile from FIRST: the estimated
+  probability of exploitation in the next 30 days, refreshed when older than 24 hours.
+
+A finding with several CVEs takes the most alarming of each signal. Findings are ordered known
+exploited first, then by severity, then by EPSS score within a severity (findings without one
+last) and by CVSS score; the findings list can be limited to known exploited ones. The refresh
+runs before uploads waiting for the run are answered, so `fail_on=exploited` sees the CVEs the
+run found, and is abandoned after 60 seconds. If a download fails or the refresh is abandoned,
+the previous exploitation data is kept, the run is not affected and
+`nanobom_exploitation_refresh_failures_total` increases; after a failed download of the KEV
+catalog, refreshes fail at once for 5 minutes instead of retrying it.
+`NANOBOM_EXPLOITATION_DATA=false` turns this off, for instances that cannot reach those services
+(open findings are then never known exploited, and `fail_on=exploited` is refused).
+
+### Stale projects
+
+A project whose last upload (or creation, if it never received an SBOM) is older than
+`NANOBOM_STALE_AFTER_DAYS` is flagged **stale** in the interface and counted by
+`nanobom_stale_projects`: its CI job probably stopped. Its organization's webhook is notified
+once per stale period, after a scheduled run (see below). `0` turns the feature off.
+
 ## Webhooks
 
-Each organization can set one webhook (Settings → Webhook) and a minimum severity. After a run
-with new or reopened findings at or above it, nanobom POSTs:
+Each organization can set one webhook (Settings → Webhook), a minimum severity, and whether to
+deliver only known exploited findings. After a successful run, nanobom POSTs `findings.new`
+for the findings that are new or reopened at or above the minimum severity, and for known
+exploited ones at any severity:
 
 ```json
 {
@@ -109,7 +217,8 @@ with new or reopened findings at or above it, nanobom POSTs:
   "organization": { "slug": "acme", "name": "Acme", "url": "https://nanobom.example.org/organizations/acme" },
   "run": { "id": 42, "trigger": "scheduled", "started_at": "2026-11-08T03:00:00Z" },
   "count": 1,
-  "highest_severity": "critical",
+  "highest_severity": "high",
+  "known_exploited_count": 1,
   "findings": [
     {
       "project": "web",
@@ -120,16 +229,48 @@ with new or reopened findings at or above it, nanobom POSTs:
       "cvss_score": 7.2,
       "summary": "Command Injection in lodash",
       "reopened": false,
+      "reason": "new",
+      "known_exploited": true,
+      "kev_due_date": "2026-11-29",
+      "epss": 0.0149,
+      "epss_percentile": 0.78,
       "url": "https://nanobom.example.org/findings/17"
     }
   ]
 }
 ```
 
+`reason` is `new`, `reopened` (`reopened` is true then) or `exploited`: an open finding that
+became known exploited after it was reported, delivered once. `kev_due_date`, `epss` and
+`epss_percentile` are `null` when unknown. With the exploited-only option, only known exploited
+findings are delivered. After an upgrade to the version that added exploitation signals, the first
+run delivers every open known exploited finding of its scope once with the `exploited` reason, as
+none had been notified as such.
+
+After a scheduled run, projects that became stale (see above) are sent as `projects.stale`,
+whatever the minimum severity and the exploited-only option:
+
+```json
+{
+  "event": "projects.stale",
+  "organization": { "slug": "acme", "name": "Acme", "url": "https://nanobom.example.org/organizations/acme" },
+  "projects": [
+    {
+      "project": "web",
+      "last_upload_at": "2026-09-30T14:21:07Z",
+      "url": "https://nanobom.example.org/organizations/acme/projects/web"
+    }
+  ]
+}
+```
+
+`last_upload_at` is `null` for a project that never received an SBOM. A project is notified
+again only if it uploads an SBOM and later becomes stale again.
+
 `NANOBOM_FAILURE_WEBHOOK_URL` receives `{"event": "run.failed", "instance_url", "run", "scope",
 "error"}` when a run fails. Severities are `critical`, `high`, `medium`, `low` and `unknown`.
 [`examples/home-assistant.yaml`](examples/home-assistant.yaml) turns new findings into phone
-notifications with Home Assistant.
+notifications with Home Assistant, flagging the known exploited ones.
 
 ## Sign-in
 
@@ -164,7 +305,12 @@ Every option is an environment variable (or a command-line flag, see `nanobom se
 | `NANOBOM_SITE_ROOT` | `site` | The web interface's assets (`/app/site` in the image) |
 | `NANOBOM_SCHEDULE` | `0 3 * * *` | When everything is re-evaluated: cron in UTC, or `off` |
 | `NANOBOM_RUN_AFTER_UPLOAD` | `true` | Evaluate a project right after each upload |
+| `NANOBOM_UPLOAD_WAIT_SECONDS` | `300` | Longest an upload with `wait` or `fail_on` waits for its evaluation |
 | `NANOBOM_OSV_URL` | `https://api.osv.dev/` | OSV API |
+| `NANOBOM_EXPLOITATION_DATA` | `true` | Download exploitation data (CISA KEV, FIRST EPSS) after each run |
+| `NANOBOM_KEV_URL` | `https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json` | CISA Known Exploited Vulnerabilities catalog (JSON) |
+| `NANOBOM_EPSS_URL` | `https://api.first.org/data/v1/epss` | FIRST EPSS API |
+| `NANOBOM_STALE_AFTER_DAYS` | `30` | Days without an SBOM after which a project is stale; `0` disables the feature |
 | `NANOBOM_MAXIMUM_SBOM_SIZE` | `16` | Largest SBOM, in MiB |
 | `NANOBOM_FAILURE_WEBHOOK_URL` | | Called when a run fails |
 | `NANOBOM_LOCAL_ACCOUNTS` | `true` | Sign-in with username or email address and password |
@@ -186,9 +332,12 @@ Every option is an environment variable (or a command-line flag, see `nanobom se
 - **Health**: `GET /healthz` answers 200 when the database does, 503 otherwise. The image's
   health check runs `nanobom healthcheck`, which asks it over loopback.
 - **Metrics**: `GET /metrics` in the Prometheus format: `nanobom_open_findings{severity}`,
+  `nanobom_open_findings_known_exploited`, `nanobom_stale_projects`,
   `nanobom_runs_total{status}`, `nanobom_run_failures_total`, `nanobom_run_duration_seconds`,
-  `nanobom_last_successful_run_timestamp_seconds` and `nanobom_osv_request_errors_total`. Labels
-  are instance-wide, so their number stays small. Alert on the last successful run getting old.
+  `nanobom_last_successful_run_timestamp_seconds`, `nanobom_osv_request_errors_total` and
+  `nanobom_exploitation_refresh_failures_total`. Labels are instance-wide, so their number stays
+  small. Alert on the last successful run getting old, on open known exploited findings, and on
+  stale projects.
 - **Logs**: one JSON object per line on standard output, one line per request (paths without
   query strings; probes and assets at debug level).
 - **Backups**: `nanobom backup /data/backups/nanobom-$(date +%F).db` writes a consistent copy of

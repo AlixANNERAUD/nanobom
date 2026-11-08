@@ -41,10 +41,12 @@ pub async fn database() -> DatabaseConnection {
 }
 
 /// An in-memory vulnerability source: records are attached to package URLs and can change
-/// between runs, and the source can be told to fail.
+/// between runs, and the source can be told to fail or to hold queries until resumed.
 #[derive(Default)]
 pub struct FakeSource {
     state: std::sync::Mutex<FakeState>,
+    resumed: tokio::sync::Notify,
+    query_started: tokio::sync::Notify,
 }
 
 #[derive(Default)]
@@ -52,6 +54,7 @@ struct FakeState {
     affected: std::collections::BTreeMap<String, Vec<String>>,
     records: std::collections::BTreeMap<String, nanobom_osv::Vulnerability>,
     failing: bool,
+    paused: bool,
     fetches: Vec<String>,
 }
 
@@ -82,6 +85,22 @@ impl FakeSource {
         self.state.lock().expect("not poisoned").failing = failing;
     }
 
+    /// Holds queries until `resume`, keeping runs in progress.
+    pub fn pause(&self) {
+        self.state.lock().expect("not poisoned").paused = true;
+    }
+
+    /// Releases held queries.
+    pub fn resume(&self) {
+        self.state.lock().expect("not poisoned").paused = false;
+        self.resumed.notify_waiters();
+    }
+
+    /// Waits until a query has started (since the previous call).
+    pub async fn query_started(&self) {
+        self.query_started.notified().await;
+    }
+
     /// The identifiers whose details were fetched, in order.
     pub fn fetches(&self) -> Vec<String> {
         self.state.lock().expect("not poisoned").fetches.clone()
@@ -93,6 +112,14 @@ impl nanobom_osv::VulnerabilitySource for FakeSource {
         &self,
         purls: &[String],
     ) -> Result<Vec<Vec<nanobom_osv::VulnerabilityReference>>, nanobom_osv::SourceError> {
+        self.query_started.notify_one();
+        loop {
+            let resumed = self.resumed.notified();
+            if !self.state.lock().expect("not poisoned").paused {
+                break;
+            }
+            resumed.await;
+        }
         let state = self.state.lock().expect("not poisoned");
         if state.failing {
             return Err(nanobom_osv::SourceError::InvalidResponse {

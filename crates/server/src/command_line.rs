@@ -170,9 +170,39 @@ pub struct ServeOptions {
     #[arg(long, env = "NANOBOM_RUN_AFTER_UPLOAD", default_value_t = true, action = ArgAction::Set)]
     pub run_after_upload: bool,
 
+    /// Longest time an upload with `wait` or `fail_on` waits for its project's evaluation, in
+    /// seconds.
+    #[arg(long, env = "NANOBOM_UPLOAD_WAIT_SECONDS", default_value_t = 300)]
+    pub upload_wait_seconds: u64,
+
     /// Address of the OSV API.
     #[arg(long, env = "NANOBOM_OSV_URL", default_value = "https://api.osv.dev/")]
     pub osv_url: reqwest::Url,
+
+    /// Download exploitation data (CISA KEV, FIRST EPSS) after each run.
+    #[arg(long, env = "NANOBOM_EXPLOITATION_DATA", default_value_t = true, action = ArgAction::Set)]
+    pub exploitation_data: bool,
+
+    /// Days without an SBOM after which a project is flagged stale and its organization's
+    /// webhook notified (0 disables the feature).
+    #[arg(long, env = "NANOBOM_STALE_AFTER_DAYS", default_value_t = 30)]
+    pub stale_after_days: u32,
+
+    /// Address of CISA's Known Exploited Vulnerabilities catalog (JSON).
+    #[arg(
+        long,
+        env = "NANOBOM_KEV_URL",
+        default_value = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+    )]
+    pub kev_url: reqwest::Url,
+
+    /// Address of the FIRST EPSS API.
+    #[arg(
+        long,
+        env = "NANOBOM_EPSS_URL",
+        default_value = "https://api.first.org/data/v1/epss"
+    )]
+    pub epss_url: reqwest::Url,
 
     /// Webhook receiving a JSON payload when a run fails (OSV unreachable, for example).
     #[arg(long, env = "NANOBOM_FAILURE_WEBHOOK_URL")]

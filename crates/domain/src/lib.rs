@@ -7,6 +7,7 @@ pub mod access;
 pub mod database;
 pub mod error;
 pub mod evaluation;
+pub mod exploitation;
 pub mod findings;
 pub mod inventory;
 pub mod memberships;
@@ -16,6 +17,7 @@ pub mod organizations;
 pub mod passwords;
 pub mod problem;
 pub mod projects;
+pub mod staleness;
 pub mod tokens;
 pub mod users;
 

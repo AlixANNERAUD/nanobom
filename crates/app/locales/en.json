@@ -89,6 +89,9 @@
     "check_now": "Check now",
     "settings": "Settings",
     "never": "never",
+    "stale": "Stale",
+    "stale_title": "Last upload: {date}",
+    "stale_never_title": "No SBOM received yet",
     "no_project_title": "No project yet",
     "no_project_text": "Projects appear with their first SBOM upload. Create an upload token in the settings, then follow the README's CI examples.",
     "projects_caption": "Projects with their open findings by severity",
@@ -114,7 +117,8 @@
     "trigger_upload": "upload",
     "scope_all": "all organizations",
     "scope_organization": "organization",
-    "scope_project": "project"
+    "scope_project": "project",
+    "known_exploited": "Known exploited"
   },
   "project": {
     "title": "Project",
@@ -123,6 +127,8 @@
       "other": "{count} components"
     },
     "last_upload": "last upload {time}",
+    "stale_alert": "No SBOM received since {date}: check the CI job uploading it.",
+    "stale_never_alert": "No SBOM received since this project was created on {date}: check the CI job uploading it.",
     "without_purl_title": "Some components cannot be checked",
     "without_purl_text": {
       "one": "{count} component of the last SBOM has no package URL, so OSV cannot match it. Check the generator's settings.",
@@ -151,7 +157,11 @@
     "filter_open_and_ignored": "Open and ignored",
     "filter_all": "All",
     "filter_ecosystem": "Ecosystem",
-    "filter": "Filter"
+    "filter": "Filter",
+    "known_exploited": "Known exploited",
+    "known_exploited_due": "CISA due date: {date}",
+    "epss": "EPSS",
+    "filter_exploited": "Only known exploited vulnerabilities"
   },
   "finding": {
     "title": "Finding",
@@ -189,7 +199,19 @@
     "also_affected": "Also affected",
     "also_affected_description": "In the organizations you can see.",
     "no_other_component": "No other component.",
-    "references": "References"
+    "references": "References",
+    "exploitation": "Exploitation",
+    "exploitation_none": "No exploitation is known for this vulnerability.",
+    "kev_added": "Added to the CISA catalog",
+    "kev_due": "CISA due date",
+    "ransomware": "Ransomware campaigns",
+    "yes": "Known",
+    "no": "Unknown",
+    "epss_score": "EPSS score",
+    "epss_value": "{score} (percentile {percentile}, {date})",
+    "percent": "{value}%",
+    "kev_link": "CISA Known Exploited Vulnerabilities catalog",
+    "epss_link": "About EPSS"
   },
   "search": {
     "title": "Search",
@@ -251,7 +273,8 @@
     "rename": "Rename",
     "delete_title": "Delete this organization",
     "delete_description": "Its projects, findings, tokens and memberships are deleted for good.",
-    "delete": "Delete organization"
+    "delete": "Delete organization",
+    "exploited_only": "Only known exploited vulnerabilities"
   },
   "administration": {
     "title": "Administration",

@@ -10,7 +10,7 @@ use crate::{
         CreateOrganization, TriggerRun, load_organization, load_organizations, load_sign_in_options,
     },
     model::{Organization, OrganizationData, Run, Severity, SeverityCounts, SignInOptions},
-    t, tp,
+    t, tf, tp,
 };
 
 fn sign_in_error(code: &str) -> &'static str {
@@ -304,18 +304,36 @@ pub fn OrganizationPage() -> impl IntoView {
                             let href = format!("/organizations/{}/projects/{}", slug, project.slug);
                             let cells = severity_cells(project.open);
                             let ignored = project.ignored;
+                            let known_exploited = project.known_exploited;
                             let name = project.name.clone();
                             let last_upload = project
                                 .last_upload_at
                                 .map_or_else(|| t!("organization.never").to_owned(), format_time);
+                            let stale_badge = project.stale.then(|| {
+                                let title = match project.last_upload_at {
+                                    Some(time) => {
+                                        tf!("organization.stale_title", date = format_time(time))
+                                    }
+                                    None => t!("organization.stale_never_title").to_owned(),
+                                };
+                                view! {
+                                    <Badge variant=BadgeVariant::Outline title=title>
+                                        {t!("organization.stale")}
+                                    </Badge>
+                                }
+                            });
                             view! {
                                 <tr class=TABLE_ROW>
                                     <th scope="row" class=format!("{TABLE_CELL} text-left font-medium")>
                                         <a class="underline-offset-4 hover:underline" href=href>
                                             {name}
                                         </a>
+                                        {stale_badge}
                                     </th>
                                     {cells}
+                                    <td class=format!("{TABLE_CELL} text-right tabular-nums")>
+                                        {known_exploited}
+                                    </td>
                                     <td class=format!("{TABLE_CELL} text-right tabular-nums text-muted-foreground")>
                                         {ignored}
                                     </td>
@@ -350,6 +368,7 @@ pub fn OrganizationPage() -> impl IntoView {
                                     <tr class=TABLE_HEAD_ROW>
                                         <th scope="col" class=TABLE_HEAD>{t!("organization.project")}</th>
                                         {headers}
+                                        <th scope="col" class=format!("{TABLE_HEAD} text-right")>{t!("organization.known_exploited")}</th>
                                         <th scope="col" class=format!("{TABLE_HEAD} text-right")>{t!("organization.ignored")}</th>
                                         <th scope="col" class=TABLE_HEAD>{t!("organization.last_upload")}</th>
                                     </tr>

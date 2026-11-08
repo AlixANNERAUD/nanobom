@@ -15,6 +15,7 @@ pub struct Model {
     pub name: String,
     pub created_at: DateTimeWithTimeZone,
     pub last_upload_at: Option<DateTimeWithTimeZone>,
+    pub stale_notified_at: Option<DateTimeWithTimeZone>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

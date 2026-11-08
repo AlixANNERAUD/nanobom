@@ -3,6 +3,7 @@
 pub mod prelude;
 
 pub mod components;
+pub mod exploitation;
 pub mod finding_events;
 pub mod findings;
 pub mod memberships;

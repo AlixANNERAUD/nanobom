@@ -7,20 +7,21 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, Response},
 };
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use axum::extract::ConnectInfo;
 
 use clap::Parser;
 use nanobom::{
     command_line::ServeOptions,
-    runner::{NotificationSettings, Runner},
+    runner::{self, NotificationSettings, Runner},
     serve,
     state::AppState,
 };
 use nanobom_domain::{
     access::Actor,
     evaluation::Evaluator,
+    exploitation::{FeedSettings, Feeds},
     notifications::Notifier,
     testing::{self, FakeSource},
     users::{self, NewUser},
@@ -48,9 +49,37 @@ pub struct TestServer {
 
 /// A server on a fresh database, with an in-memory vulnerability source.
 pub async fn server(arguments: &[&str]) -> TestServer {
+    build(arguments, false, runner::EXPLOITATION_REFRESH_TIMEOUT).await
+}
+
+/// Like `server`, downloading exploitation data from the `--kev-url` and `--epss-url` given.
+pub async fn server_with_exploitation(arguments: &[&str]) -> TestServer {
+    build(arguments, true, runner::EXPLOITATION_REFRESH_TIMEOUT).await
+}
+
+/// Like `server_with_exploitation`, abandoning refreshes of exploitation data after `timeout`.
+pub async fn server_with_exploitation_timeout(arguments: &[&str], timeout: Duration) -> TestServer {
+    build(arguments, true, timeout).await
+}
+
+async fn build(
+    arguments: &[&str],
+    exploitation: bool,
+    exploitation_refresh_timeout: Duration,
+) -> TestServer {
     let database = testing::database().await;
     let options = options(arguments);
     let source = Arc::new(FakeSource::default());
+    let feeds = exploitation.then(|| {
+        Arc::new(
+            Feeds::new(FeedSettings {
+                kev_url: options.kev_url.clone(),
+                epss_url: options.epss_url.clone(),
+            })
+            .expect("an HTTP client")
+            .with_retry_delay(Duration::ZERO),
+        )
+    });
     let runner = Runner::start(
         database.clone(),
         Arc::new(Evaluator::new(database.clone(), Arc::clone(&source))),
@@ -58,7 +87,10 @@ pub async fn server(arguments: &[&str]) -> TestServer {
         NotificationSettings {
             public_url: options.public_url.clone(),
             failure_webhook: options.failure_webhook_url.clone(),
+            stale_after_days: options.stale_after_days,
+            exploitation_refresh_timeout,
         },
+        feeds,
     );
     let leptos_options = serve::leptos_options(&options);
     let openid = nanobom::authentication::openid(&options).expect("valid OpenID Connect options");

@@ -51,3 +51,32 @@ async fn backup_writes_a_usable_copy() {
     ));
     std::fs::remove_dir_all(&directory).ok();
 }
+
+#[tokio::test]
+async fn migrations_create_the_exploitation_table() {
+    use nanobom_entity::exploitation;
+    use sea_orm::{ActiveModelTrait, EntityTrait, Set};
+
+    let connection = testing::database().await;
+    exploitation::ActiveModel {
+        cve_id: Set("CVE-2024-0001".to_owned()),
+        known_exploited: Set(true),
+        kev_date_added: Set(Some("2024-01-02".to_owned())),
+        epss_score: Set(Some(0.5)),
+        ..Default::default()
+    }
+    .insert(&connection)
+    .await
+    .expect("insert an exploitation row");
+
+    let row = exploitation::Entity::find_by_id("CVE-2024-0001")
+        .one(&connection)
+        .await
+        .expect("read the row")
+        .expect("the row exists");
+    assert!(row.known_exploited);
+    assert!(!row.kev_ransomware);
+    assert_eq!(row.kev_date_added.as_deref(), Some("2024-01-02"));
+    assert_eq!(row.epss_score, Some(0.5));
+    assert_eq!(row.kev_due_date, None);
+}
