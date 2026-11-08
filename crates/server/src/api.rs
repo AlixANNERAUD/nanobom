@@ -277,6 +277,13 @@ async fn upload_sbom(
         .as_deref()
         .map(Threshold::parse)
         .transpose()?;
+    // Without exploitation data no finding is known exploited: the gate would always pass.
+    if threshold == Some(Threshold::Exploited) && !state.options.exploitation_data {
+        return Err(ApiError::new(
+            StatusCode::UNPROCESSABLE_ENTITY,
+            "fail_on=exploited needs exploitation data (NANOBOM_EXPLOITATION_DATA)",
+        ));
+    }
     let wait = parse_wait(parameters.wait.as_deref())? || threshold.is_some();
 
     let sbom = {

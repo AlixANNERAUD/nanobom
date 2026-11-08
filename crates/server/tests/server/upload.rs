@@ -343,6 +343,28 @@ async fn invalid_wait_parameters_are_refused_before_storing_anything() {
 }
 
 #[tokio::test]
+async fn fail_on_exploited_is_refused_without_exploitation_data() {
+    let server = server(&["--exploitation-data", "false"]).await;
+    let token = acme_token(&server).await;
+    let (status, body) = upload_web(&server, &token, "?fail_on=Exploited").await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(
+        body,
+        json!({"error": "fail_on=exploited needs exploitation data (NANOBOM_EXPLOITATION_DATA)"})
+    );
+    assert_eq!(
+        nanobom_entity::sbom_uploads::Entity::find()
+            .count(&server.database)
+            .await
+            .unwrap(),
+        0
+    );
+    // Severity thresholds do not need it.
+    let (status, body) = upload_web(&server, &token, "?fail_on=high").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+}
+
+#[tokio::test]
 async fn failed_evaluations_fail_only_uploads_with_fail_on() {
     let server = server(&[]).await;
     server.source.set_failing(true);
