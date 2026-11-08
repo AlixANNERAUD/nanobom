@@ -52,8 +52,16 @@ jobs:
           ls -l target/release/nanobom target/site/pkg
 
   image:
-    name: Container image
-    runs-on: ubuntu-24.04
+    name: Container image (${{ matrix.architecture }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: amd64
+            runner: ubuntu-24.04
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
@@ -62,8 +70,9 @@ jobs:
           context: .
           load: true
           tags: nanobom:ci
-          cache-from: type=gha,scope=image-amd64
-          cache-to: type=gha,scope=image-amd64,mode=max
+          platforms: linux/${{ matrix.architecture }}
+          cache-from: type=gha,scope=image-${{ matrix.architecture }}
+          cache-to: type=gha,scope=image-${{ matrix.architecture }},mode=max
       - name: Start the image and wait until it reports healthy
         run: |
           docker run --detach --name nanobom --publish 8080:8080 nanobom:ci
