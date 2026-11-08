@@ -41,7 +41,8 @@ pub async fn database() -> DatabaseConnection {
 }
 
 /// An in-memory vulnerability source: records are attached to package URLs and can change
-/// between runs, and the source can be told to fail or to hold queries until resumed.
+/// between runs, and the source can be told to fail, to panic once or to hold queries until
+/// resumed.
 #[derive(Default)]
 pub struct FakeSource {
     state: std::sync::Mutex<FakeState>,
@@ -54,6 +55,7 @@ struct FakeState {
     affected: std::collections::BTreeMap<String, Vec<String>>,
     records: std::collections::BTreeMap<String, nanobom_osv::Vulnerability>,
     failing: bool,
+    panicking: bool,
     paused: bool,
     fetches: Vec<String>,
 }
@@ -83,6 +85,11 @@ impl FakeSource {
 
     pub fn set_failing(&self, failing: bool) {
         self.state.lock().expect("not poisoned").failing = failing;
+    }
+
+    /// Makes the next query panic, as a bug in a run would.
+    pub fn panic_once(&self) {
+        self.state.lock().expect("not poisoned").panicking = true;
     }
 
     /// Holds queries until `resume`, keeping runs in progress.
@@ -120,7 +127,12 @@ impl nanobom_osv::VulnerabilitySource for FakeSource {
             }
             resumed.await;
         }
-        let state = self.state.lock().expect("not poisoned");
+        let mut state = self.state.lock().expect("not poisoned");
+        if std::mem::take(&mut state.panicking) {
+            // Released first, so that the panic does not poison the state.
+            drop(state);
+            panic!("the fake source panics");
+        }
         if state.failing {
             return Err(nanobom_osv::SourceError::InvalidResponse {
                 url: "fake".to_owned(),

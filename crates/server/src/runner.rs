@@ -79,6 +79,13 @@ impl Runner {
     ) -> Self {
         let runner = Self::default();
         let shared = Arc::clone(&runner.shared);
+        let worker = Arc::new(Worker {
+            database,
+            evaluator,
+            notifier,
+            settings,
+            feeds,
+        });
         tokio::spawn(async move {
             loop {
                 let next = shared.queue.lock().expect("not poisoned").pop_front();
@@ -86,27 +93,7 @@ impl Runner {
                     shared.wake.notified().await;
                     continue;
                 };
-                match evaluator
-                    .run(request.trigger, request.scope, request.triggered_by)
-                    .await
-                {
-                    Ok(outcome) => {
-                        // The exploitation data comes before the waiters: an upload waiting
-                        // with `fail_on=exploited` needs the CVEs first seen in this run.
-                        record(&database, &settings, feeds.as_deref(), &outcome).await;
-                        for waiter in waiters {
-                            // A waiter that gave up has dropped its receiver.
-                            let _ = waiter.send(outcome.clone());
-                        }
-                        // Gauges and webhooks can be slow; nobody waits for them.
-                        notify(&database, &notifier, &settings, &outcome).await;
-                    }
-                    // Dropping the waiters releases them without an outcome.
-                    Err(error) => {
-                        tracing::error!(%error, "the run could not be recorded");
-                        metrics::record_failed_run();
-                    }
-                }
+                Arc::clone(&worker).perform(request, waiters).await;
                 if shared.pending.fetch_sub(1, Ordering::SeqCst) == 1 {
                     shared.idle.notify_waiters();
                 }
@@ -177,6 +164,112 @@ impl Runner {
     }
 }
 
+/// What the worker needs to perform runs.
+struct Worker<S> {
+    database: DatabaseConnection,
+    evaluator: Arc<Evaluator<S>>,
+    notifier: Notifier,
+    settings: NotificationSettings,
+    feeds: Option<Arc<Feeds>>,
+}
+
+impl<S: VulnerabilitySource + 'static> Worker<S> {
+    /// Performs a run and answers its waiters. Each stage runs in a task of its own, so that a
+    /// panic ends that stage only and the worker goes on with the next request. A waiter dropped
+    /// without an outcome learns that the run did not complete.
+    async fn perform(
+        self: Arc<Self>,
+        request: RunRequest,
+        waiters: Vec<oneshot::Sender<RunOutcome>>,
+    ) {
+        let worker = Arc::clone(&self);
+        let run = isolated("the run", async move {
+            worker
+                .evaluator
+                .run(request.trigger, request.scope, request.triggered_by)
+                .await
+        })
+        .await;
+        let outcome = match run {
+            Some(Ok(outcome)) => outcome,
+            Some(Err(error)) => {
+                tracing::error!(%error, "the run could not be recorded");
+                metrics::record_failed_run();
+                return;
+            }
+            None => {
+                metrics::record_failed_run();
+                return;
+            }
+        };
+        metrics::record_run(&outcome);
+
+        // The exploitation data comes before the waiters: an upload waiting with
+        // `fail_on=exploited` needs the CVEs first seen in this run.
+        let (worker, refreshed) = (Arc::clone(&self), outcome.clone());
+        if isolated("refreshing exploitation data", async move {
+            worker.refresh_exploitation(&refreshed).await;
+        })
+        .await
+        .is_none()
+        {
+            metrics::record_exploitation_refresh_failure();
+        }
+        for waiter in waiters {
+            // A waiter that gave up has dropped its receiver.
+            let _ = waiter.send(outcome.clone());
+        }
+
+        // Gauges and webhooks can be slow; nobody waits for them.
+        isolated("notifications after a run", async move {
+            notify(&self.database, &self.notifier, &self.settings, &outcome).await;
+        })
+        .await;
+    }
+
+    /// Refreshes the exploitation data of a successful run's scope, within
+    /// `settings.exploitation_refresh_timeout`.
+    async fn refresh_exploitation(&self, outcome: &RunOutcome) {
+        let Some(feeds) = self.feeds.as_deref().filter(|_| outcome.succeeded()) else {
+            return;
+        };
+        let refresh = exploitation::refresh(&self.database, feeds, outcome.scope);
+        let timeout = self.settings.exploitation_refresh_timeout;
+        match tokio::time::timeout(timeout, refresh).await {
+            Ok(Ok(summary)) => tracing::info!(
+                cves = summary.cves,
+                known_exploited = summary.known_exploited,
+                "exploitation data refreshed"
+            ),
+            Ok(Err(error)) => {
+                tracing::warn!(%error, "refreshing exploitation data failed");
+                metrics::record_exploitation_refresh_failure();
+            }
+            Err(_) => {
+                tracing::warn!(
+                    seconds = timeout.as_secs(),
+                    "refreshing exploitation data took too long; the previous data is kept"
+                );
+                metrics::record_exploitation_refresh_failure();
+            }
+        }
+    }
+}
+
+/// Runs `work` in a task of its own and returns its output, or `None`, logged, when it panicked.
+async fn isolated<T: Send + 'static>(
+    stage: &'static str,
+    work: impl Future<Output = T> + Send + 'static,
+) -> Option<T> {
+    match tokio::spawn(work).await {
+        Ok(output) => Some(output),
+        Err(error) => {
+            tracing::error!(%error, stage, "a stage of a run panicked; the worker continues");
+            None
+        }
+    }
+}
+
 /// Merges a request into a waiting request of the same scope, returned, if there is one. A
 /// scheduled request makes the waiting one scheduled, so that the notifications only scheduled
 /// runs send (stale projects) are not lost to a manual request queued just before.
@@ -189,39 +282,6 @@ fn merge(queue: &mut VecDeque<Queued>, request: RunRequest) -> Option<&mut Queue
         queued.request.triggered_by = None;
     }
     Some(queued)
-}
-
-/// What a waiting upload needs after a run: the run's metric and, when the run succeeded, the
-/// exploitation data of its scope, refreshed within `settings.exploitation_refresh_timeout`.
-async fn record(
-    database: &DatabaseConnection,
-    settings: &NotificationSettings,
-    feeds: Option<&Feeds>,
-    outcome: &RunOutcome,
-) {
-    metrics::record_run(outcome);
-    let Some(feeds) = feeds.filter(|_| outcome.succeeded()) else {
-        return;
-    };
-    let refresh = exploitation::refresh(database, feeds, outcome.scope);
-    match tokio::time::timeout(settings.exploitation_refresh_timeout, refresh).await {
-        Ok(Ok(summary)) => tracing::info!(
-            cves = summary.cves,
-            known_exploited = summary.known_exploited,
-            "exploitation data refreshed"
-        ),
-        Ok(Err(error)) => {
-            tracing::warn!(%error, "refreshing exploitation data failed");
-            metrics::record_exploitation_refresh_failure();
-        }
-        Err(_) => {
-            tracing::warn!(
-                seconds = settings.exploitation_refresh_timeout.as_secs(),
-                "refreshing exploitation data took too long; the previous data is kept"
-            );
-            metrics::record_exploitation_refresh_failure();
-        }
-    }
 }
 
 /// Instance-wide gauges and notifications after a run, once its waiters are answered.

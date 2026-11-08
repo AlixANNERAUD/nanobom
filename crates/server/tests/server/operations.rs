@@ -419,6 +419,62 @@ async fn waiting_requests_wait_for_a_run_that_starts_after_them() {
 }
 
 #[tokio::test]
+async fn a_panic_in_a_run_does_not_stop_the_worker() {
+    let server = server(&["--run-after-upload", "false"]).await;
+    server
+        .source
+        .publish(lodash_advisory(), &["pkg:npm/lodash@4.17.20"]);
+    let owner = user(&server.database, "owner").await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let token = tokens::create(&server.database, &owner, organization.id, None, "CI")
+        .await
+        .unwrap()
+        .secret;
+    let response = server
+        .send(
+            Request::put("/api/organizations/acme/projects/web/sbom")
+                .header(header::AUTHORIZATION, format!("Bearer {token}"))
+                .body(Body::from(sbom_document("cyclonedx-npm.json")))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::CREATED);
+    let project = projects::find(&server.database, &owner, organization.id, "web")
+        .await
+        .unwrap();
+    let request = RunRequest {
+        trigger: Trigger::Manual,
+        scope: Scope::Project(project.id),
+        triggered_by: None,
+    };
+    let timeout = Duration::from_secs(30);
+
+    // The waiter is released without an outcome, well before the timeout.
+    server.source.panic_once();
+    let started = std::time::Instant::now();
+    assert!(
+        server
+            .runner
+            .request_and_wait(request, timeout)
+            .await
+            .is_none()
+    );
+    assert!(started.elapsed() < timeout);
+    server.runner.wait_until_idle().await;
+
+    let outcome = server
+        .runner
+        .request_and_wait(request, timeout)
+        .await
+        .expect("a later run finishes");
+    assert!(outcome.succeeded());
+    assert_eq!(outcome.new_findings.len(), 1);
+    server.runner.wait_until_idle().await;
+}
+
+#[tokio::test]
 async fn health_and_metrics_are_served() {
     let server = server(&[]).await;
     let response = server
