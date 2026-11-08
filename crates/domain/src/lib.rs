@@ -5,6 +5,7 @@
 
 pub mod access;
 pub mod database;
+pub mod deliveries;
 pub mod error;
 pub mod evaluation;
 pub mod exploitation;

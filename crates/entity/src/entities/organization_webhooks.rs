@@ -12,8 +12,6 @@ pub struct Model {
     pub url: String,
     pub minimum_severity: String,
     pub enabled: bool,
-    pub last_delivery_at: Option<DateTimeWithTimeZone>,
-    pub last_delivery_status: Option<String>,
     pub exploited_only: bool,
 }
 

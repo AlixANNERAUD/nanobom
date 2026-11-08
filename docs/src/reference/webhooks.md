@@ -15,13 +15,39 @@ known exploited vulnerabilities, enabled); see [Get notified](../how-to/notifica
 
 - One `POST` per document, `Content-Type: application/json`, with the `User-Agent`
   `nanobom/<version>`.
-- Any `2xx` answer is a success. There is no retry: a failed delivery is logged (`webhook delivery
-  failed`, or `failure webhook delivery failed`) and shown in the organization's settings, with
-  the time and outcome of the last delivery; the findings stay visible in the interface.
-- A delivery that takes more than 15 seconds fails.
+- Each document is recorded in the database before it is sent, then posted right away. All the
+  documents of a run are recorded before the first is posted, so a receiver that hangs delays
+  the others but a restart meanwhile loses none. Deliveries happen after uploads waiting for the
+  run have been answered, so they never slow CI down.
+- An attempt that takes more than 15 seconds fails.
+- How the receiver's answer is handled:
+
+  | Answer | Outcome |
+  | --- | --- |
+  | `2xx` | Delivered |
+  | `4xx`, except `408` and `429` | Failed for good: the receiver refuses the document and would refuse it again, so it is not retried |
+  | `408`, `429`, `5xx`, any other status, a network error or a timeout | Retried |
+
+- Retries come 1 minute after the first attempt, then 10 minutes after the first retry, then
+  1 hour after the second; when the third retry fails, the delivery is abandoned. Due retries are
+  looked for every 30 seconds, so one can come up to 30 seconds late. The schedule survives a
+  restart; an attempt cut short by a restart is retried 2 minutes later.
+- Every attempt that fails is logged (`webhook delivery failed`, with the delivery, its event,
+  the attempt number and the status) and counted by `nanobom_webhook_deliveries_total`
+  ([metrics](metrics.md)). The latest deliveries to an organization's webhook are listed in its
+  settings.
+- Removing an organization's webhook, disabling it or changing its URL abandons its deliveries
+  still waiting for a retry, including one whose attempt is in progress: they never go to an
+  address the admins replaced or turned off. In the same way, the `run.failed` deliveries still
+  waiting for a retry are abandoned at startup when `NANOBOM_FAILURE_WEBHOOK_URL` changed or was
+  removed.
+- Delivered and abandoned deliveries are deleted after 30 days.
+- A document can arrive more than once, when the receiver accepted it but its answer was lost or
+  came after 15 seconds. The `event`, with the run's `id` for `findings.new` and `run.failed`,
+  identifies it.
+- The document is the one prepared after the run: a retry sends it unchanged, even if the
+  findings changed since.
 - Requests are not signed.
-- Deliveries happen after uploads waiting for the run have been answered, so they never slow
-  CI down.
 - New fields may be added to the documents in later versions.
 
 ## `findings.new`
@@ -91,7 +117,9 @@ Nothing is sent when nothing remains after filtering. Ignored findings are never
 | `findings[].url` | The finding's page |
 
 Every known exploited open finding of a run's scope is marked as notified once that run is over,
-whether a webhook received it or not: enabling a webhook later does not replay old findings.
+whether a webhook received it or not: enabling a webhook later does not replay old findings. A
+finding notified to a receiver that is down is not lost: its delivery is retried (see
+[Delivery](#delivery)), and never prepared a second time.
 
 ## `projects.stale`
 
@@ -132,7 +160,9 @@ so enabling one sends the currently stale projects after the next scheduled run.
 ## `run.failed`
 
 Sent to `NANOBOM_FAILURE_WEBHOOK_URL` for every failed run of the instance, whatever its
-organization:
+organization, including a run that stopped unexpectedly (a bug, or nanobom stopped while it
+was running: such a run is closed at the next start, and its document is sent by the retry loop
+within 30 seconds, so an unreachable receiver does not delay the startup):
 
 ```json
 {
@@ -149,4 +179,4 @@ organization:
 | `instance_url` | `NANOBOM_PUBLIC_URL` |
 | `run` | Identifier, `trigger` (`upload`, `scheduled` or `manual`) and start time |
 | `scope` | `all` (the scheduled run), `organization` or `project` |
-| `error` | Why the run failed; it may name the packages of any organization |
+| `error` | Why the run failed; it may name the packages of any organization. `the run stopped unexpectedly` for a run that did not end normally |

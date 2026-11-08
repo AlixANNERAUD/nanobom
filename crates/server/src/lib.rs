@@ -4,6 +4,7 @@ pub mod administration;
 pub mod api;
 pub mod authentication;
 pub mod command_line;
+pub mod deliveries;
 pub mod healthcheck;
 pub mod http;
 pub mod logging;

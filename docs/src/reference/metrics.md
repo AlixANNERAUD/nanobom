@@ -23,6 +23,7 @@ about a particular organization.
 | `nanobom_run_duration_seconds` | histogram | Duration of runs |
 | `nanobom_osv_request_errors_total{kind}` | counter | Failed requests to OSV, retries included; `kind` is `status` (an error status) or `request` (network error or unreadable answer) |
 | `nanobom_exploitation_refresh_failures_total` | counter | Refreshes of exploitation data that failed or were abandoned |
+| `nanobom_webhook_deliveries_total{outcome}` | counter | Webhook delivery attempts, by outcome: `delivered`, `retried` (the attempt failed and another is scheduled) or `abandoned` (the attempt failed and no retry follows: refused by the receiver, or the last retry) |
 
 Gauges are computed from the database at startup and after each run;
 `nanobom_last_successful_run_timestamp_seconds` only appears after the first successful run.
@@ -49,8 +50,9 @@ detail from nanobom's own crates.
 | --- | --- | --- |
 | `run failed; findings left unchanged` | error | A run could not complete; `error` says why |
 | `OSV request failed, retrying` | warn | A request to OSV failed and is retried |
-| `webhook delivery failed` | warn | An organization's webhook did not answer with a `2xx` |
-| `failure webhook delivery failed` | error | The failure webhook itself could not be reached |
+| `webhook delivery failed` | warn | A webhook (an organization's, or the failure webhook) did not answer with a `2xx`; `attempt` and `status` say which attempt and why. See [Delivery](webhooks.md#delivery) for retries |
+| `a stage of a run panicked; the worker continues` | error | A bug stopped a run, or the work after it; the run is recorded as failed |
+| `a run interrupted by a restart is recorded as failed` | warn | nanobom was stopped during a run; the run is closed at startup and sent to the failure webhook |
 | `refreshing exploitation data failed` | warn | KEV or EPSS could not be downloaded |
 | `cross-site request refused` | warn | A form submission came from another origin, often a wrong `NANOBOM_PUBLIC_URL` |
 | `OpenID Connect sign-in refused` | warn | A single sign-on attempt failed; `error` says why |

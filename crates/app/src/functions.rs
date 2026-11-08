@@ -292,6 +292,9 @@ pub async fn load_settings(organization: String) -> Result<SettingsData, ServerF
     let webhook = notifications::get(database, &actor, found.id)
         .await
         .map_err(failure)?;
+    let deliveries = nanobom_domain::deliveries::recent(database, &actor, found.id, 10)
+        .await
+        .map_err(failure)?;
     let session = crate::server::session().await?.session;
     let new_token: Option<String> = session.remove(NEW_TOKEN).await.ok().flatten();
     Ok(SettingsData {
@@ -327,9 +330,20 @@ pub async fn load_settings(organization: String) -> Result<SettingsData, ServerF
             minimum_severity: crate::server::severity(webhook.minimum_severity),
             enabled: webhook.enabled,
             exploited_only: webhook.exploited_only,
-            last_delivery_at: webhook.last_delivery_at,
-            last_delivery_status: webhook.last_delivery_status,
         }),
+        deliveries: deliveries
+            .into_iter()
+            .map(|delivery| WebhookDelivery {
+                id: delivery.id,
+                event: delivery.event,
+                state: crate::server::delivery_state(delivery.state),
+                attempts: delivery.attempts,
+                created_at: delivery.created_at,
+                last_attempt_at: delivery.last_attempt_at,
+                last_status: delivery.last_status,
+                next_attempt_at: delivery.next_attempt_at,
+            })
+            .collect(),
         new_token,
     })
 }

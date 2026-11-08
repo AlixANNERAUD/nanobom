@@ -19,14 +19,16 @@ use std::{
     time::Instant,
 };
 
-use chrono::{DateTime, FixedOffset, Utc};
+use chrono::{DateTime, FixedOffset, TimeDelta, Utc};
 use nanobom_entity::{
     components, finding_events, findings, organizations, projects, runs, vulnerabilities,
 };
 use nanobom_osv::{Severity, Vulnerability, VulnerabilityReference, VulnerabilitySource, assess};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseConnection,
-    EntityTrait, QueryFilter, TransactionTrait, sea_query::OnConflict,
+    ActiveModelTrait,
+    ActiveValue::Set,
+    ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter, TransactionTrait,
+    sea_query::{Expr, OnConflict},
 };
 use serde::{Deserialize, Serialize};
 use tokio::{sync::Mutex, task::JoinSet};
@@ -39,6 +41,10 @@ use crate::{
 
 /// Vulnerability details fetched concurrently.
 const CONCURRENT_DETAIL_REQUESTS: usize = 8;
+
+/// The error of a run that stopped before it could record its end: it panicked, or the server
+/// stopped while it was running.
+pub const STOPPED_UNEXPECTEDLY: &str = "the run stopped unexpectedly";
 
 /// What a run covers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -57,6 +63,15 @@ impl Scope {
             Scope::Project(_) => "project",
         }
     }
+
+    /// The scope a run row records.
+    fn of(run: &runs::Model) -> Self {
+        match (run.scope.as_str(), run.organization_id, run.project_id) {
+            ("project", _, Some(project_id)) => Scope::Project(project_id),
+            ("organization", Some(organization_id), _) => Scope::Organization(organization_id),
+            _ => Scope::All,
+        }
+    }
 }
 
 /// Why a run started.
@@ -73,6 +88,14 @@ impl Trigger {
             Trigger::Scheduled => "scheduled",
             Trigger::Manual => "manual",
             Trigger::Upload => "upload",
+        }
+    }
+
+    fn parse(value: &str) -> Self {
+        match value {
+            "manual" => Trigger::Manual,
+            "upload" => Trigger::Upload,
+            _ => Trigger::Scheduled,
         }
     }
 }
@@ -136,6 +159,10 @@ pub struct Evaluator<S> {
     database: DatabaseConnection,
     source: Arc<S>,
     running: Mutex<()>,
+    /// The run whose row says `running`: set once the row exists, cleared once its end is
+    /// recorded. A run that panics or fails to record its end leaves it set, for
+    /// [`Evaluator::take_unfinished_run`].
+    unfinished: std::sync::Mutex<Option<i64>>,
 }
 
 /// A component to evaluate.
@@ -152,7 +179,24 @@ impl<S: VulnerabilitySource + 'static> Evaluator<S> {
             database,
             source,
             running: Mutex::new(()),
+            unfinished: std::sync::Mutex::new(None),
         }
+    }
+
+    /// The run that started but did not record its end (it panicked, or a database error
+    /// stopped it), to be closed with [`fail_unfinished`]. Call it once the run's task is over.
+    pub fn take_unfinished_run(&self) -> Option<i64> {
+        self.unfinished
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+    }
+
+    fn set_unfinished(&self, run_id: Option<i64>) {
+        *self
+            .unfinished
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = run_id;
     }
 
     /// Runs an evaluation; concurrent calls wait for the current run to finish. Errors are
@@ -192,6 +236,7 @@ impl<S: VulnerabilitySource + 'static> Evaluator<S> {
         }
         .insert(&self.database)
         .await?;
+        self.set_unfinished(Some(run.id));
 
         let mut outcome = RunOutcome {
             run_id: run.id,
@@ -223,6 +268,7 @@ impl<S: VulnerabilitySource + 'static> Evaluator<S> {
         finished.new_findings = Set(count(outcome.new_findings.len()));
         finished.fixed_findings = Set(count(outcome.fixed_findings));
         finished.update(&self.database).await?;
+        self.set_unfinished(None);
 
         match &outcome.error {
             None => tracing::info!(
@@ -736,6 +782,59 @@ async fn update_project(
     }
     transaction.commit().await?;
     Ok(changes)
+}
+
+/// Marks a run that is still `running` as failed with [`STOPPED_UNEXPECTEDLY`], and returns
+/// its outcome for the failure webhook; `None` when the run is gone or already finished.
+pub async fn fail_unfinished(
+    database: &impl ConnectionTrait,
+    run_id: i64,
+) -> Result<Option<RunOutcome>> {
+    let now = Utc::now().fixed_offset();
+    let updated = runs::Entity::update_many()
+        .col_expr(runs::Column::Status, Expr::value("failed"))
+        .col_expr(runs::Column::FinishedAt, Expr::value(now))
+        .col_expr(runs::Column::Error, Expr::value(STOPPED_UNEXPECTEDLY))
+        .filter(runs::Column::Id.eq(run_id))
+        .filter(runs::Column::Status.eq("running"))
+        .exec(database)
+        .await?;
+    if updated.rows_affected == 0 {
+        return Ok(None);
+    }
+    let Some(run) = runs::Entity::find_by_id(run_id).one(database).await? else {
+        return Ok(None);
+    };
+    let duration = run
+        .finished_at
+        .map_or(TimeDelta::zero(), |finished| finished - run.started_at);
+    Ok(Some(RunOutcome {
+        run_id: run.id,
+        scope: Scope::of(&run),
+        trigger: Trigger::parse(&run.trigger),
+        started_at: run.started_at,
+        #[allow(clippy::cast_precision_loss)]
+        duration_seconds: duration.num_milliseconds() as f64 / 1000.0,
+        error: Some(STOPPED_UNEXPECTEDLY.to_owned()),
+        component_count: 0,
+        vulnerability_count: 0,
+        new_findings: Vec::new(),
+        fixed_findings: 0,
+    }))
+}
+
+/// Marks every run still `running` as failed, as [`fail_unfinished`] does. Called at startup,
+/// before any run starts: such rows were left by a crash or a restart.
+pub async fn fail_interrupted(database: &impl ConnectionTrait) -> Result<Vec<RunOutcome>> {
+    let running = runs::Entity::find()
+        .filter(runs::Column::Status.eq("running"))
+        .all(database)
+        .await?;
+    let mut outcomes = Vec::new();
+    for run in running {
+        outcomes.extend(fail_unfinished(database, run.id).await?);
+    }
+    Ok(outcomes)
 }
 
 /// A run as shown in the interface.

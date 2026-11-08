@@ -17,3 +17,4 @@ pub mod upload_tokens;
 pub mod user_identities;
 pub mod users;
 pub mod vulnerabilities;
+pub mod webhook_deliveries;

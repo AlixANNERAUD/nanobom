@@ -240,6 +240,16 @@ pub fn domain_severity(value: model::Severity) -> nanobom_osv::Severity {
     }
 }
 
+pub fn delivery_state(value: nanobom_domain::deliveries::State) -> model::DeliveryState {
+    use nanobom_domain::deliveries::State;
+    match value {
+        State::Sending => model::DeliveryState::Sending,
+        State::Pending => model::DeliveryState::Pending,
+        State::Delivered => model::DeliveryState::Delivered,
+        State::Failed => model::DeliveryState::Failed,
+    }
+}
+
 pub fn role(value: nanobom_domain::access::Role) -> model::Role {
     use nanobom_domain::access::Role;
     match value {

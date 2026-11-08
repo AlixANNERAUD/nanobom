@@ -11,7 +11,7 @@ use crate::{
         RenameOrganization, ResetPassword, RevokeToken, SaveWebhook, SetMemberRole,
         SetUserAdministrator, SetUserDisabled, load_administration, load_settings,
     },
-    model::{AdministrationData, Role, SettingsData, Severity},
+    model::{AdministrationData, DeliveryState, Role, SettingsData, Severity, WebhookDelivery},
     t, tf,
 };
 
@@ -268,16 +268,8 @@ fn WebhookSettings(page: SettingsData) -> impl IntoView {
         .as_ref()
         .map(|webhook| webhook.url.clone())
         .unwrap_or_default();
-    let last_delivery = webhook.as_ref().and_then(|webhook| {
-        let status = webhook.last_delivery_status.clone().unwrap_or_default();
-        webhook.last_delivery_at.map(|date| {
-            view! {
-                <p class="text-muted-foreground text-sm">
-                    {tf!("settings.last_delivery", time = format_time(date), status = status)}
-                </p>
-            }
-        })
-    });
+    let deliveries = (!page.deliveries.is_empty())
+        .then(|| view! { <Deliveries deliveries=page.deliveries.clone() /> });
     let remove = webhook.is_some().then({
         let organization = organization.clone();
         move || {
@@ -297,7 +289,6 @@ fn WebhookSettings(page: SettingsData) -> impl IntoView {
             </CardHeader>
             <CardContent>
                 <div class="grid gap-4">
-                    {last_delivery}
                     <form method="post" action={action::<SaveWebhook>()} class="grid gap-4">
                         <input type="hidden" name="organization" value=organization.clone() />
                         <Field label=t!("settings.webhook_url") input_id="webhook-url">
@@ -338,9 +329,75 @@ fn WebhookSettings(page: SettingsData) -> impl IntoView {
                         </div>
                     </form>
                     {remove}
+                    {deliveries}
                 </div>
             </CardContent>
         </Card>
+    }
+}
+
+/// The latest deliveries to the webhook: their state, attempts and the last answer.
+#[component]
+fn Deliveries(deliveries: Vec<WebhookDelivery>) -> impl IntoView {
+    let rows = deliveries
+        .into_iter()
+        .map(|delivery| {
+            let variant = match delivery.state {
+                DeliveryState::Delivered => BadgeVariant::Secondary,
+                DeliveryState::Sending | DeliveryState::Pending => BadgeVariant::Outline,
+                DeliveryState::Failed => BadgeVariant::Destructive,
+            };
+            let last_attempt = delivery.last_attempt_at.map_or_else(
+                || t!("common.never").to_owned(),
+                |time| match &delivery.last_status {
+                    Some(status) => format!("{} · {status}", format_time(time)),
+                    None => format_time(time),
+                },
+            );
+            // A delivery being sent holds a lease, not a scheduled attempt: no time to show.
+            let next_attempt = (delivery.state == DeliveryState::Pending)
+                .then_some(delivery.next_attempt_at)
+                .flatten()
+                .map(|time| {
+                    view! {
+                        <span class="text-muted-foreground block text-xs">
+                            {tf!("settings.delivery_next_attempt", time = format_time(time))}
+                        </span>
+                    }
+                });
+            view! {
+                <tr class=TABLE_ROW>
+                    <th scope="row" class=format!("{TABLE_CELL} text-left font-medium")>
+                        <span class="font-mono text-xs">{delivery.event.clone()}</span>
+                        <span class="text-muted-foreground block text-xs font-normal">
+                            {format_time(delivery.created_at)}
+                        </span>
+                    </th>
+                    <td class=TABLE_CELL>
+                        <Badge variant=variant>{delivery.state.label()}</Badge>
+                        {next_attempt}
+                    </td>
+                    <td class=format!("{TABLE_CELL} tabular-nums")>{delivery.attempts}</td>
+                    <td class=format!("{TABLE_CELL} text-muted-foreground")>{last_attempt}</td>
+                </tr>
+            }
+        })
+        .collect_view();
+    view! {
+        <section class="grid gap-2">
+            <h3 class="text-sm font-medium">{t!("settings.deliveries_title")}</h3>
+            <Table caption=t!("settings.deliveries_title")>
+                <thead>
+                    <tr class=TABLE_HEAD_ROW>
+                        <th scope="col" class=TABLE_HEAD>{t!("settings.delivery_event")}</th>
+                        <th scope="col" class=TABLE_HEAD>{t!("settings.delivery_state")}</th>
+                        <th scope="col" class=TABLE_HEAD>{t!("settings.delivery_attempts")}</th>
+                        <th scope="col" class=TABLE_HEAD>{t!("settings.delivery_last_attempt")}</th>
+                    </tr>
+                </thead>
+                <tbody>{rows}</tbody>
+            </Table>
+        </section>
     }
 }
 

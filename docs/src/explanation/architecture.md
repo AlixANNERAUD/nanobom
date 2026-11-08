@@ -51,19 +51,28 @@ run request (upload, schedule, manual)
               5. the run is recorded as succeeded or failed (a failure changes no finding)
         └─► if it succeeded: exploitation data (KEV, EPSS) refreshed for the scope (≤ 60 s)
         └─► uploads waiting for this run are answered
-        └─► gauges updated; webhooks sent (findings.new; projects.stale after scheduled
-            runs), or run.failed to the failure webhook
+        └─► gauges updated; webhook documents queued and posted (findings.new;
+            projects.stale after scheduled runs), or run.failed to the failure webhook
+
+webhook retry loop (every 30 s): due deliveries posted again, a few at a time;
+  delivered and abandoned ones deleted after 30 days
 ```
 
 Exploitation data comes before the waiting uploads so that `fail_on=exploited` sees the CVEs of
-this run; notifications come after, so slow webhooks never hold CI. The rules each step applies
-are described in [How findings are kept up to date](findings.md).
+this run; notifications come after, so slow webhooks never hold CI. Webhook documents are stored
+before their first attempt, so a receiver that is down gets them once it is back (see
+[Delivery](../reference/webhooks.md#delivery)). A run that panics, or that a restart interrupts,
+is recorded as failed and notified like any failed run; at startup the failure document is only
+queued, and the retry loop posts it, so the server listens without waiting for the receiver. The
+rules each step applies are described in [How findings are kept up to date](findings.md).
 
 ## One process per database
 
 Runs are serialized inside the process, and the schedule runs in it. Two servers on the same
 database would each run the schedule and send every webhook twice: one instance runs one
-process.
+process. The startup also assumes it: it closes every run still `running` in the database as
+interrupted, so a rolling deploy that starts a new instance while the old one is still running a
+check would record the old instance's live run as failed.
 
 ## Resources
 

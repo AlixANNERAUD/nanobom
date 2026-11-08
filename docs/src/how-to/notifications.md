@@ -12,14 +12,24 @@ An organization's admins configure one webhook in **Settings → Webhook**:
 - **Minimum severity**: findings below it are not sent (known exploited ones always are);
 - **Only known exploited vulnerabilities**: send only known exploited findings, whatever their
   severity;
-- **Enabled**: unchecked, nothing is sent.
+- **Enabled**: unchecked, nothing is sent, and deliveries waiting for a retry are abandoned.
 
-Then **Save webhook**. After the next run that opens findings, the settings page shows the time
-and outcome of the last delivery (the HTTP status, or the error). **Remove webhook** deletes the
-configuration.
+Then **Save webhook**. After the next run that opens findings, **Recent deliveries** on the
+settings page lists the documents sent, newest first: the event, whether it is **Sending** (its
+first attempt is in progress), was **Delivered**, is **Retrying** (with the time of the next
+attempt) or **Failed**, the number of attempts, and the time and answer of the last attempt (the
+HTTP status, or the error). **Remove webhook** deletes the configuration and abandons the
+deliveries still waiting for a retry; disabling the webhook or changing its URL abandons them
+too, so retries never go to the old address.
+
+A receiver that is down for a while misses nothing: failed deliveries are retried after 1 minute,
+10 minutes and 1 hour. A `4xx` answer other than `408` and `429` is not retried, so fix the
+receiver or the URL and wait for the next document. The rules are in the
+[webhook reference](../reference/webhooks.md#delivery).
 
 Requests are not signed: use an unguessable URL (most receivers put a random identifier in the
-path) over `https`, and answer within 15 seconds.
+path) over `https`, and answer within 15 seconds. A document can arrive twice when an answer is
+lost; receivers that must not act twice can remember the run's `id` per event.
 
 ## Receive them in Home Assistant
 
@@ -120,6 +130,8 @@ NANOBOM_FAILURE_WEBHOOK_URL=https://hooks.example.org/nanobom-ops/7f3c9a
 ```
 
 It receives a `run.failed` document for every failed run of the instance, whatever its
-organization. Since the error may name the packages of any organization, send it to the
-operators, not to an organization's channel. Pair it with the
-[alert rules](monitoring.md#add-alert-rules), which also catch a schedule that stopped running.
+organization. Changing or removing the variable abandons, at the next start, the `run.failed`
+deliveries still waiting for a retry to the previous address. Since the error may name the
+packages of any organization, send it to the operators, not to an organization's channel. Pair
+it with the [alert rules](monitoring.md#add-alert-rules), which also catch a schedule that
+stopped running.

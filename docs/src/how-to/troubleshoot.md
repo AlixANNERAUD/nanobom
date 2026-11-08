@@ -143,19 +143,24 @@ differently; nanobom shows the higher. See [Severity](../explanation/findings.md
 
 ### A webhook does not arrive
 
-- **Settings → Webhook** shows the last delivery and its outcome: an HTTP status from your
-  receiver, or a network error.
+- **Settings → Webhook** lists the recent deliveries, their state and the last answer: an HTTP
+  status from your receiver, or a network error. **Sending** means the first attempt is in
+  progress; **Retrying** means the receiver failed and another attempt is scheduled; **Failed**
+  means it refused the document (a `4xx`), every retry failed, or the webhook was removed,
+  disabled or moved to another URL before the delivery succeeded.
 - The webhook must be **Enabled**, and findings must reach the minimum severity (or be known
   exploited). With **Only known exploited vulnerabilities**, nothing else is sent.
 - `findings.new` is only sent for new, reopened or newly exploited findings: a finding that was
   already open is not sent again.
 - `projects.stale` is only sent after **scheduled** runs.
-- Deliveries are not retried, and must be answered within 15 seconds.
+- Deliveries must be answered within 15 seconds. Failed ones are retried after 1 minute,
+  10 minutes and 1 hour, then abandoned.
 
-### A run stays "Running"
+### A run failed with "the run stopped unexpectedly"
 
-nanobom was stopped during that run. It is not resumed; the next run of the same scope does the
-work. The entry stays in the list as it was.
+The run did not end normally: a bug made it panic (look for `a stage of a run panicked` in the
+logs, and report it), or nanobom was stopped or crashed while it was running, in which case it
+was closed at the next start. It is not resumed; the next run of the same scope does the work.
 
 ## Interface
 
