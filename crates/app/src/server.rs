@@ -7,15 +7,15 @@
 //! back to the form's page with a translated notice or error.
 //!
 //! Redirects go to paths: [`back`] uses the `Referer` only when its host is the request's own,
-//! and keeps its path alone. That path is not yet checked against protocol-relative forms such
-//! as `//other.example` (issue #43).
+//! and keeps its path alone, checked like the sign-in `next` parameter so that a path such as
+//! `//other.example` (read by browsers as another site) falls back to the default page.
 
 use std::sync::Arc;
 
 use axum::http::{StatusCode, request::Parts};
 use leptos::prelude::*;
 use leptos_axum::ResponseOptions;
-use nanobom_authentication::AuthenticationSession;
+use nanobom_authentication::{AuthenticationSession, redirect::local_path};
 use nanobom_domain::{
     access::Actor,
     evaluation::{Scope, Trigger},
@@ -181,9 +181,19 @@ fn referer_path() -> Option<String> {
         .to_str()
         .ok()?;
     let host = parts.headers.get(axum::http::header::HOST)?.to_str().ok()?;
+    local_referer_path(referer, host)
+}
+
+/// The path (and query) of `referer` when its authority is `host` and the path is a local one.
+/// The path is what follows the host verbatim, so `https://host//evil.example/x` yields
+/// `//evil.example/x`, which [`local_path`] refuses.
+fn local_referer_path(referer: &str, host: &str) -> Option<String> {
     let after_scheme = referer.split_once("://")?.1;
     let (authority, path) = after_scheme.split_once('/').unwrap_or((after_scheme, ""));
-    (authority == host).then(|| format!("/{path}"))
+    if authority != host {
+        return None;
+    }
+    local_path(&format!("/{path}")).map(str::to_owned)
 }
 
 /// Sends the browser back to the page the form came from, with a notice or an error message
@@ -339,5 +349,53 @@ pub fn counts(value: nanobom_domain::findings::SeverityCounts) -> model::Severit
         medium: value.medium,
         low: value.low,
         unknown: value.unknown,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::local_referer_path;
+
+    const HOST: &str = "nanobom.example";
+
+    #[test]
+    fn keeps_a_local_path_with_its_query_string() {
+        assert_eq!(
+            local_referer_path("https://nanobom.example/projects/3?tab=findings", HOST),
+            Some("/projects/3?tab=findings".to_owned())
+        );
+        assert_eq!(
+            local_referer_path("https://nanobom.example", HOST),
+            Some("/".to_owned())
+        );
+    }
+
+    #[test]
+    fn refuses_a_protocol_relative_path() {
+        assert_eq!(
+            local_referer_path("https://nanobom.example//evil.example/x", HOST),
+            None
+        );
+    }
+
+    #[test]
+    fn refuses_a_backslash_after_the_slash() {
+        assert_eq!(
+            local_referer_path("https://nanobom.example/\\evil.example", HOST),
+            None
+        );
+    }
+
+    #[test]
+    fn refuses_a_control_character() {
+        assert_eq!(
+            local_referer_path("https://nanobom.example/a\tb", HOST),
+            None
+        );
+    }
+
+    #[test]
+    fn refuses_another_host() {
+        assert_eq!(local_referer_path("https://evil.example/x", HOST), None);
     }
 }
