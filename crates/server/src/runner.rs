@@ -13,7 +13,7 @@ use std::{
 use chrono::Utc;
 use croner::Cron;
 use nanobom_domain::{
-    evaluation::{Evaluator, RunOutcome, Scope, Trigger},
+    evaluation::{self, Evaluator, RunOutcome, Scope, Trigger},
     exploitation::{self, Feeds},
     notifications::{self, Delivery, Notifier, Payload},
 };
@@ -52,7 +52,8 @@ pub struct NotificationSettings {
 pub enum Waited {
     /// The run finished, successfully or not.
     Finished(RunOutcome),
-    /// The run could not be recorded (a database error) or panicked.
+    /// The run stopped before it had a row (a database error, or a panic), so it has no
+    /// outcome. A run that stops once its row exists finishes as failed instead.
     NotCompleted,
     /// The wait ran out of time; the run still happens.
     TimedOut,
@@ -186,8 +187,10 @@ struct Worker<S> {
 
 impl<S: VulnerabilitySource + 'static> Worker<S> {
     /// Performs a run and answers its waiters. Each stage runs in a task of its own, so that a
-    /// panic ends that stage only and the worker goes on with the next request. A waiter dropped
-    /// without an outcome learns that the run did not complete.
+    /// panic ends that stage only and the worker goes on with the next request. A run that
+    /// stops after its row exists (a panic, or a database error) is recorded as failed and
+    /// notified like any failed run. A waiter dropped without an outcome learns that the run did
+    /// not complete.
     async fn perform(
         self: Arc<Self>,
         request: RunRequest,
@@ -201,17 +204,17 @@ impl<S: VulnerabilitySource + 'static> Worker<S> {
                 .await
         })
         .await;
-        let outcome = match run {
-            Some(Ok(outcome)) => outcome,
+        let finished = match run {
+            Some(Ok(outcome)) => Some(outcome),
             Some(Err(error)) => {
                 tracing::error!(%error, "the run could not be recorded");
-                metrics::record_failed_run();
-                return;
+                self.close_unfinished_run().await
             }
-            None => {
-                metrics::record_failed_run();
-                return;
-            }
+            None => self.close_unfinished_run().await,
+        };
+        let Some(outcome) = finished else {
+            metrics::record_failed_run();
+            return;
         };
         metrics::record_run(&outcome);
 
@@ -236,6 +239,18 @@ impl<S: VulnerabilitySource + 'static> Worker<S> {
             notify(&self.database, &self.notifier, &self.settings, &outcome).await;
         })
         .await;
+    }
+
+    /// Records the run that stopped before its end as failed, and returns its outcome.
+    async fn close_unfinished_run(&self) -> Option<RunOutcome> {
+        let run_id = self.evaluator.take_unfinished_run()?;
+        match evaluation::fail_unfinished(&self.database, run_id).await {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                tracing::error!(%error, run = run_id, "recording the stopped run as failed failed");
+                None
+            }
+        }
     }
 
     /// Refreshes the exploitation data of a successful run's scope, within
@@ -267,17 +282,43 @@ impl<S: VulnerabilitySource + 'static> Worker<S> {
     }
 }
 
-/// Runs `work` in a task of its own and returns its output, or `None`, logged, when it panicked.
+/// Runs `work` in a task of its own and returns its output, or `None`, logged, when it panicked
+/// or was cancelled (the runtime shutting down).
 async fn isolated<T: Send + 'static>(
     stage: &'static str,
     work: impl Future<Output = T> + Send + 'static,
 ) -> Option<T> {
     match tokio::spawn(work).await {
         Ok(output) => Some(output),
-        Err(error) => {
+        Err(error) if error.is_panic() => {
             tracing::error!(%error, stage, "a stage of a run panicked; the worker continues");
             None
         }
+        Err(error) => {
+            tracing::warn!(%error, stage, "a stage of a run was cancelled");
+            None
+        }
+    }
+}
+
+/// Records the runs left `running` by a crash or a restart as failed, and sends the failure
+/// webhook for each. Call it at startup, before the worker starts.
+pub async fn close_interrupted_runs(
+    database: &DatabaseConnection,
+    notifier: &Notifier,
+    settings: &NotificationSettings,
+) {
+    match evaluation::fail_interrupted(database).await {
+        Ok(outcomes) => {
+            for outcome in outcomes {
+                tracing::warn!(
+                    run = outcome.run_id,
+                    "a run interrupted by a restart is recorded as failed"
+                );
+                notify_failure(database, notifier, settings, &outcome).await;
+            }
+        }
+        Err(error) => tracing::error!(%error, "recording interrupted runs as failed failed"),
     }
 }
 
@@ -323,7 +364,19 @@ async fn notify(
                 Err(error) => tracing::error!(%error, "preparing stale project deliveries failed"),
             }
         }
-    } else if let (Some(url), Some(payload)) = (
+    } else {
+        notify_failure(database, notifier, settings, outcome).await;
+    }
+}
+
+/// Sends a failed run to the instance's failure webhook, if configured.
+async fn notify_failure(
+    database: &DatabaseConnection,
+    notifier: &Notifier,
+    settings: &NotificationSettings,
+    outcome: &RunOutcome,
+) {
+    if let (Some(url), Some(payload)) = (
         &settings.failure_webhook,
         notifications::run_failed_payload(outcome, &settings.public_url),
     ) {

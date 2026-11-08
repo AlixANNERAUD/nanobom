@@ -645,3 +645,114 @@ async fn recent_runs_cover_the_organization_and_hide_instance_errors() {
         .unwrap();
     assert_eq!(runs.len(), 2, "only instance-wide runs");
 }
+
+#[tokio::test]
+async fn a_run_that_panics_can_be_closed_as_failed() {
+    let fixture = Fixture::new().await;
+    let project = fixture.upload(&[LODASH]).await;
+    let evaluator = Arc::new(Evaluator::new(
+        fixture.database.clone(),
+        Arc::clone(&fixture.source),
+    ));
+    fixture.source.panic_once();
+    let run = tokio::spawn({
+        let evaluator = Arc::clone(&evaluator);
+        async move {
+            evaluator
+                .run(Trigger::Upload, Scope::Project(project), None)
+                .await
+        }
+    })
+    .await;
+    assert!(run.unwrap_err().is_panic());
+
+    let run_id = evaluator
+        .take_unfinished_run()
+        .expect("the run's row exists");
+    assert_eq!(evaluator.take_unfinished_run(), None, "taken once");
+    let row = runs::Entity::find_by_id(run_id)
+        .one(&fixture.database)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.status, "running");
+
+    let outcome = evaluation::fail_unfinished(&fixture.database, run_id)
+        .await
+        .unwrap()
+        .expect("the run was running");
+    assert_eq!(outcome.run_id, run_id);
+    assert_eq!(outcome.scope, Scope::Project(project));
+    assert_eq!(outcome.trigger, Trigger::Upload);
+    assert_eq!(
+        outcome.error.as_deref(),
+        Some(evaluation::STOPPED_UNEXPECTEDLY)
+    );
+    let row = runs::Entity::find_by_id(run_id)
+        .one(&fixture.database)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(row.status, "failed");
+    assert!(row.finished_at.is_some());
+    assert_eq!(row.error.as_deref(), Some(evaluation::STOPPED_UNEXPECTEDLY));
+    assert!(
+        evaluation::fail_unfinished(&fixture.database, run_id)
+            .await
+            .unwrap()
+            .is_none(),
+        "a finished run is left alone"
+    );
+
+    // A run that completes leaves nothing to close.
+    evaluator
+        .run(Trigger::Manual, Scope::All, None)
+        .await
+        .unwrap();
+    assert_eq!(evaluator.take_unfinished_run(), None);
+}
+
+#[tokio::test]
+async fn runs_left_running_by_a_restart_are_failed() {
+    let fixture = Fixture::new().await;
+    let finished = fixture.run().await;
+    let started_at = Utc::now().fixed_offset();
+    let interrupted = runs::ActiveModel {
+        trigger: Set("manual".to_owned()),
+        scope: Set("organization".to_owned()),
+        organization_id: Set(Some(fixture.organization)),
+        project_id: Set(None),
+        triggered_by_user_id: Set(None),
+        started_at: Set(started_at),
+        finished_at: Set(None),
+        status: Set("running".to_owned()),
+        error: Set(None),
+        ..Default::default()
+    }
+    .insert(&fixture.database)
+    .await
+    .unwrap();
+
+    let outcomes = evaluation::fail_interrupted(&fixture.database)
+        .await
+        .unwrap();
+    assert_eq!(outcomes.len(), 1);
+    assert_eq!(outcomes[0].run_id, interrupted.id);
+    assert_eq!(outcomes[0].scope, Scope::Organization(fixture.organization));
+    assert_eq!(outcomes[0].trigger, Trigger::Manual);
+    assert!(!outcomes[0].succeeded());
+    let rows = runs::Entity::find().all(&fixture.database).await.unwrap();
+    let interrupted = rows.iter().find(|row| row.id == interrupted.id).unwrap();
+    assert_eq!(interrupted.status, "failed");
+    assert!(interrupted.finished_at.is_some());
+    let finished = rows.iter().find(|row| row.id == finished.run_id).unwrap();
+    assert_eq!(finished.status, "succeeded");
+    assert_eq!(finished.error, None);
+
+    assert!(
+        evaluation::fail_interrupted(&fixture.database)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}

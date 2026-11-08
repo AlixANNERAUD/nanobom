@@ -10,15 +10,15 @@ use axum::{
 use chrono::Utc;
 use nanobom::{
     deliveries, healthcheck,
-    runner::{RunRequest, Waited},
+    runner::{self, NotificationSettings, RunRequest, Waited},
 };
 use nanobom_domain::{
-    evaluation::{Scope, Trigger},
+    evaluation::{self, Scope, Trigger},
     findings::{self, Filter},
     notifications::{self, Notifier},
     organizations, projects, tokens,
 };
-use nanobom_entity::{exploitation, webhook_deliveries};
+use nanobom_entity::{exploitation, runs, webhook_deliveries};
 use nanobom_osv::Severity;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, PaginatorTrait};
 use serde_json::json;
@@ -189,6 +189,108 @@ async fn failed_runs_call_the_failure_webhook() {
     assert_eq!(payload["event"], "run.failed");
     assert_eq!(payload["scope"], "all");
     assert!(payload["error"].as_str().unwrap().contains("unreachable"));
+}
+
+#[tokio::test]
+async fn a_run_that_panics_is_recorded_as_failed_and_notified() {
+    let receiver = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/failures"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&receiver)
+        .await;
+    let failure_webhook = format!("{}/failures", receiver.uri());
+    let server = server(&["--failure-webhook-url", &failure_webhook]).await;
+    let owner = user(&server.database, "owner").await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    server.source.panic_once();
+    let waited = server
+        .runner
+        .request_and_wait(
+            RunRequest {
+                trigger: Trigger::Manual,
+                scope: Scope::Organization(organization.id),
+                triggered_by: Some(owner.user_id),
+            },
+            Duration::from_secs(10),
+        )
+        .await;
+    let Waited::Finished(outcome) = waited else {
+        panic!("the run is closed with an outcome: {waited:?}");
+    };
+    assert_eq!(
+        outcome.error.as_deref(),
+        Some(evaluation::STOPPED_UNEXPECTEDLY)
+    );
+    server.runner.wait_until_idle().await;
+
+    let run = runs::Entity::find_by_id(outcome.run_id)
+        .one(&server.database)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.status, "failed");
+    assert!(run.finished_at.is_some());
+    assert_eq!(run.error.as_deref(), Some(evaluation::STOPPED_UNEXPECTEDLY));
+    let requests = receiver.received_requests().await.unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(payload["event"], "run.failed");
+    assert_eq!(payload["run"]["id"], outcome.run_id);
+    assert_eq!(payload["scope"], "organization");
+    assert_eq!(payload["error"], evaluation::STOPPED_UNEXPECTEDLY);
+}
+
+#[tokio::test]
+async fn runs_interrupted_by_a_restart_are_closed_at_startup() {
+    let receiver = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/failures"))
+        .respond_with(ResponseTemplate::new(200))
+        .expect(1)
+        .mount(&receiver)
+        .await;
+    let failure_webhook = format!("{}/failures", receiver.uri());
+    let server = server(&["--failure-webhook-url", &failure_webhook]).await;
+    let interrupted = runs::ActiveModel {
+        trigger: Set("scheduled".to_owned()),
+        scope: Set("all".to_owned()),
+        organization_id: Set(None),
+        project_id: Set(None),
+        triggered_by_user_id: Set(None),
+        started_at: Set(Utc::now().fixed_offset()),
+        finished_at: Set(None),
+        status: Set("running".to_owned()),
+        error: Set(None),
+        ..Default::default()
+    }
+    .insert(&server.database)
+    .await
+    .unwrap();
+
+    let options = crate::common::options(&["--failure-webhook-url", &failure_webhook]);
+    let settings = NotificationSettings {
+        public_url: options.public_url.clone(),
+        failure_webhook: options.failure_webhook_url.clone(),
+        stale_after_days: options.stale_after_days,
+        exploitation_refresh_timeout: runner::EXPLOITATION_REFRESH_TIMEOUT,
+    };
+    runner::close_interrupted_runs(&server.database, &Notifier::new().unwrap(), &settings).await;
+
+    let run = runs::Entity::find_by_id(interrupted.id)
+        .one(&server.database)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(run.status, "failed");
+    assert!(run.finished_at.is_some());
+    let requests = receiver.received_requests().await.unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(&requests[0].body).unwrap();
+    assert_eq!(payload["event"], "run.failed");
+    assert_eq!(payload["run"]["id"], interrupted.id);
+    assert_eq!(payload["run"]["trigger"], "scheduled");
 }
 
 #[tokio::test]
@@ -543,11 +645,14 @@ async fn a_panic_in_a_run_does_not_stop_the_worker() {
     };
     let timeout = Duration::from_secs(30);
 
-    // The waiter is released without an outcome, well before the timeout.
+    // The waiter learns that the run failed, well before the timeout.
     server.source.panic_once();
     let started = std::time::Instant::now();
     let waited = server.runner.request_and_wait(request, timeout).await;
-    assert!(matches!(waited, Waited::NotCompleted), "{waited:?}");
+    assert!(
+        matches!(&waited, Waited::Finished(outcome) if !outcome.succeeded()),
+        "{waited:?}"
+    );
     assert!(started.elapsed() < timeout);
     server.runner.wait_until_idle().await;
 

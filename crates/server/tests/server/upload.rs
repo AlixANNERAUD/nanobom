@@ -387,19 +387,20 @@ async fn evaluations_that_panic_are_reported_as_failed() {
     let server = server(&[]).await;
     let token = acme_token(&server).await;
 
+    // The run's row exists when it panics: it is recorded as failed, and reported.
     server.source.panic_once();
     let (status, body) = upload_web(&server, &token, "?wait=true").await;
     assert_eq!(status, StatusCode::CREATED);
     assert!(body.get("error").is_none(), "{body}");
     assert_eq!(body["evaluation"]["status"], "failed");
-    assert_eq!(body["evaluation"]["run_id"], serde_json::Value::Null);
+    assert!(body["evaluation"]["run_id"].as_i64().is_some(), "{body}");
 
     server.source.panic_once();
     let (status, body) = upload_web(&server, &token, "?fail_on=high").await;
     assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE);
     assert_eq!(body["error"], "the evaluation did not complete");
     assert_eq!(body["evaluation"]["status"], "failed");
-    assert_eq!(body["evaluation"]["run_id"], serde_json::Value::Null);
+    assert!(body["evaluation"]["run_id"].as_i64().is_some(), "{body}");
 
     let (status, body) = upload_web(&server, &token, "?fail_on=high").await;
     assert_eq!(status, StatusCode::OK, "{body}");

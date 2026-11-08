@@ -124,23 +124,19 @@ pub async fn run(
         None
     };
     let notifier = Notifier::new()?;
+    let settings = NotificationSettings {
+        public_url: options.public_url.clone(),
+        failure_webhook: options.failure_webhook_url.clone(),
+        stale_after_days: options.stale_after_days,
+        exploitation_refresh_timeout: runner::EXPLOITATION_REFRESH_TIMEOUT,
+    };
+    runner::close_interrupted_runs(&database, &notifier, &settings).await;
     deliveries::start(
         database.clone(),
         notifier.clone(),
         deliveries::RETRY_INTERVAL,
     );
-    let runner = Runner::start(
-        database.clone(),
-        evaluator,
-        notifier,
-        NotificationSettings {
-            public_url: options.public_url.clone(),
-            failure_webhook: options.failure_webhook_url.clone(),
-            stale_after_days: options.stale_after_days,
-            exploitation_refresh_timeout: runner::EXPLOITATION_REFRESH_TIMEOUT,
-        },
-        feeds,
-    );
+    let runner = Runner::start(database.clone(), evaluator, notifier, settings, feeds);
     match schedule {
         Some(schedule) => runner::start_schedule(runner.clone(), schedule),
         None => tracing::info!("scheduled runs are off"),
