@@ -24,8 +24,11 @@ reach operators rather than an organization's channel.
   them in logs and repositories.
 - Stored as a SHA-256 digest. A slow password hash is unnecessary for random values of that
   length, and would slow every upload down.
-- Scoped to an organization or one project; they reach the upload API only, never the interface.
-  A project token limits a leak to one project, and cannot create projects.
+- Scoped to an organization or one project; they reach the upload and VEX APIs only, never the
+  interface. A project token limits a leak to one project, and cannot create projects. Through
+  the VEX API, a token can read the findings of the projects it reaches and ignore findings by
+  importing statements: a leaked token can hide vulnerabilities, so treat it like the SBOM
+  pipeline it belongs to.
 - Shown once; revocable; their last use is recorded.
 
 The upload API is not exposed to cross-site request forgery: it is authenticated by the

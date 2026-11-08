@@ -83,6 +83,8 @@ upload to nanobom with a new address and key: see [Dependency-Track clients](htt
 
 **Stop it before it ships**
 - `fail_on` on uploads: fail the build on critical, high, … or known-exploited findings.
+- CycloneDX VEX: export which vulnerabilities do not affect a project, and why, for customers
+  and auditors; import a vendor's statements or your own to ignore findings.
 - Webhooks per organization for new and newly exploited vulnerabilities, and for projects whose
   SBOM stopped coming, as JSON or as messages posted straight to Slack and Microsoft Teams; a
   Home Assistant example turns them into phone notifications.
