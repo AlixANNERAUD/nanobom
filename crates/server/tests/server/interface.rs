@@ -503,12 +503,34 @@ async fn the_webhook_settings_list_recent_deliveries() {
     };
     deliveries::record(&server.database, claimed, &attempt, now)
         .await
+        .unwrap()
+        .expect("the claim still holds");
+    // A first attempt in progress: its lease is not a scheduled retry.
+    let in_flight = deliveries::enqueue(
+        &server.database,
+        Some(organization.id),
+        "https://example.org/hook",
+        "projects.stale",
+        &json!({"event": "projects.stale"}),
+        now,
+    )
+    .await
+    .unwrap();
+    deliveries::claim(&server.database, in_flight.id, now)
+        .await
+        .unwrap()
         .unwrap();
     let html = alice.page(page).await;
     assert!(html.contains("Recent deliveries"), "{html}");
     assert!(html.contains("findings.new"));
     assert!(html.contains("Retrying"));
     assert!(html.contains("502 Bad Gateway"));
+    assert!(html.contains("Sending"), "{html}");
+    assert_eq!(
+        html.matches("Next attempt").count(),
+        1,
+        "only the retried delivery has a next attempt: {html}"
+    );
 }
 
 #[tokio::test]

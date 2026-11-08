@@ -322,6 +322,7 @@ async fn only_webhook_managers_see_their_organization_deliveries() {
     assert_eq!(ids, [second.id, first.id], "the newest first");
     assert_eq!(recent[0].state, State::Pending);
     assert_eq!(recent[0].attempts, 1);
+    assert_eq!(recent[1].state, State::Sending, "never attempted");
     assert_eq!(recent[1].attempts, 0);
 }
 

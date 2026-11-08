@@ -51,6 +51,8 @@ pub const RETENTION: TimeDelta = TimeDelta::days(30);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum State {
+    /// Not attempted yet: the first attempt is about to be made or in progress.
+    Sending,
     /// Not delivered yet; another attempt is scheduled.
     Pending,
     Delivered,
@@ -62,7 +64,11 @@ fn state(model: &webhook_deliveries::Model) -> State {
     if model.delivered_at.is_some() {
         State::Delivered
     } else if model.next_attempt_at.is_some() {
-        State::Pending
+        if model.attempts == 0 {
+            State::Sending
+        } else {
+            State::Pending
+        }
     } else {
         State::Failed
     }

@@ -344,7 +344,7 @@ fn Deliveries(deliveries: Vec<WebhookDelivery>) -> impl IntoView {
         .map(|delivery| {
             let variant = match delivery.state {
                 DeliveryState::Delivered => BadgeVariant::Secondary,
-                DeliveryState::Pending => BadgeVariant::Outline,
+                DeliveryState::Sending | DeliveryState::Pending => BadgeVariant::Outline,
                 DeliveryState::Failed => BadgeVariant::Destructive,
             };
             let last_attempt = delivery.last_attempt_at.map_or_else(
@@ -354,6 +354,7 @@ fn Deliveries(deliveries: Vec<WebhookDelivery>) -> impl IntoView {
                     None => format_time(time),
                 },
             );
+            // A delivery being sent holds a lease, not a scheduled attempt: no time to show.
             let next_attempt = (delivery.state == DeliveryState::Pending)
                 .then_some(delivery.next_attempt_at)
                 .flatten()

@@ -364,6 +364,8 @@ pub struct Webhook {
 /// Where a webhook delivery stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DeliveryState {
+    /// The first attempt is about to be made or in progress.
+    Sending,
     /// Another attempt is scheduled.
     Pending,
     Delivered,
@@ -375,6 +377,7 @@ impl DeliveryState {
     /// The name shown in the interface, in the request's language.
     pub fn label(self) -> &'static str {
         match self {
+            DeliveryState::Sending => t!("settings.delivery_sending"),
             DeliveryState::Pending => t!("settings.delivery_pending"),
             DeliveryState::Delivered => t!("settings.delivery_delivered"),
             DeliveryState::Failed => t!("settings.delivery_failed"),

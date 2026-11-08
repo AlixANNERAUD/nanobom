@@ -15,10 +15,12 @@ An organization's admins configure one webhook in **Settings → Webhook**:
 - **Enabled**: unchecked, nothing is sent, and deliveries waiting for a retry are abandoned.
 
 Then **Save webhook**. After the next run that opens findings, **Recent deliveries** on the
-settings page lists the documents sent, newest first: the event, whether it was **Delivered**,
-is **Retrying** (with the time of the next attempt) or **Failed**, the number of attempts, and
-the time and answer of the last attempt (the HTTP status, or the error). **Remove webhook**
-deletes the configuration and abandons the deliveries still waiting for a retry.
+settings page lists the documents sent, newest first: the event, whether it is **Sending** (its
+first attempt is in progress), was **Delivered**, is **Retrying** (with the time of the next
+attempt) or **Failed**, the number of attempts, and the time and answer of the last attempt (the
+HTTP status, or the error). **Remove webhook** deletes the configuration and abandons the
+deliveries still waiting for a retry; disabling the webhook or changing its URL abandons them
+too, so retries never go to the old address.
 
 A receiver that is down for a while misses nothing: failed deliveries are retried after 1 minute,
 10 minutes and 1 hour. A `4xx` answer other than `408` and `429` is not retried, so fix the

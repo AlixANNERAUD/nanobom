@@ -266,6 +266,7 @@
     "delivery_attempts": "Tentatives",
     "delivery_last_attempt": "Dernière tentative",
     "delivery_delivered": "Envoyé",
+    "delivery_sending": "Envoi en cours",
     "delivery_pending": "Nouvel essai prévu",
     "delivery_failed": "Échec",
     "delivery_next_attempt": "Prochaine tentative {time}",

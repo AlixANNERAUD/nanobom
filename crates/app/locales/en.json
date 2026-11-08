@@ -266,6 +266,7 @@
     "delivery_attempts": "Attempts",
     "delivery_last_attempt": "Last attempt",
     "delivery_delivered": "Delivered",
+    "delivery_sending": "Sending",
     "delivery_pending": "Retrying",
     "delivery_failed": "Failed",
     "delivery_next_attempt": "Next attempt {time}",

@@ -144,9 +144,10 @@ differently; nanobom shows the higher. See [Severity](../explanation/findings.md
 ### A webhook does not arrive
 
 - **Settings → Webhook** lists the recent deliveries, their state and the last answer: an HTTP
-  status from your receiver, or a network error. **Retrying** means the receiver failed and
-  another attempt is scheduled; **Failed** means it refused the document (a `4xx`) or every
-  retry failed.
+  status from your receiver, or a network error. **Sending** means the first attempt is in
+  progress; **Retrying** means the receiver failed and another attempt is scheduled; **Failed**
+  means it refused the document (a `4xx`), every retry failed, or the webhook was removed,
+  disabled or moved to another URL before the delivery succeeded.
 - The webhook must be **Enabled**, and findings must reach the minimum severity (or be known
   exploited). With **Only known exploited vulnerabilities**, nothing else is sent.
 - `findings.new` is only sent for new, reopened or newly exploited findings: a finding that was
