@@ -13,6 +13,26 @@ Findings that do not apply (vulnerable code not reachable, feature not compiled 
 risk) are ignored with a reason, ideally with an expiry date so the decision is revisited.
 Ignoring and restoring need the member role or above ([roles](../reference/accounts.md#organization-roles)).
 
+## Choose what to upgrade
+
+The vulnerable component is often not one your manifest names. On the finding's page,
+**Introduced via** lists the paths from the project's direct dependencies to it, such as
+`web-framework 2.1.0 → template-engine 0.9.0 → lodash 4.17.20`:
+
+1. A component marked *direct dependency* is yours: upgrade it to a version listed under
+   **Fixed in**.
+2. Otherwise, upgrade the direct dependency that starts the path to a release that requires a
+   fixed version of the component; its changelog, or the diff of your lock file, tells.
+3. When no such release exists yet, force the transitive version with your package manager
+   (npm `overrides`, Yarn `resolutions`, a Cargo `[patch]` section, Maven
+   `<dependencyManagement>`), or ignore the finding with a reason and an expiry.
+
+Each listed path needs the fix: a component reached through two direct dependencies stays until
+both require a fixed version. The **Introduced via** column of the project page shows the direct
+dependencies of every finding at a glance; findings that share one are often fixed by a single
+upgrade. When the page says the SBOM does not tell the project's direct dependencies, its
+generator left the graph out ([Dependency paths](../explanation/dependency-paths.md#limits)).
+
 ## Ignore a finding
 
 On the finding's page, under **Triage**:

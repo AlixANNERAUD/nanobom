@@ -40,7 +40,10 @@ nanobom reads **CycloneDX JSON**, specification versions **1.3 to 1.7**. XML, SP
 newer CycloneDX versions are refused with a `422`.
 
 - Only `components` count (nested components included). The `metadata.component`, which
-  describes the project itself, is ignored.
+  describes the project itself, is not a component.
+- The dependency graph (`dependencies`) is kept between the components stored; the entry of
+  `metadata.component` gives the project's direct dependencies. It is optional: without it,
+  findings show no path ([Dependency paths](../explanation/dependency-paths.md)).
 - Components of type `file` and `operating-system` are skipped silently: they describe what was
   scanned, not packages.
 - Components are identified by their package URL (purl), such as `pkg:npm/lodash@4.17.20`.
@@ -124,6 +127,7 @@ A successful upload returns `201 Created` when it created the project, `200 OK` 
         "component": "pkg:npm/lodash@4.17.20",
         "severity": "high",
         "known_exploited": true,
+        "introduced_via": ["web-framework"],
         "url": "https://nanobom.example.org/findings/17"
       }
     ]
@@ -150,7 +154,8 @@ A successful upload returns `201 Created` when it created the project, `200 OK` 
 | `run_id` | The run's identifier, `null` when timed out |
 | `open` | The project's **open** findings by severity (`critical`, `high`, `medium`, `low`, `unknown`); ignored findings are not counted |
 | `known_exploited` | How many open findings are known exploited |
-| `findings` | The open findings, most severe first, known exploited first within a severity, then by EPSS score; at most 100, so a long list drops the least severe. Each has `vulnerability`, `component` (package URL), `severity`, `known_exploited` and `url` (the finding's page) |
+| `findings` | The open findings, most severe first, known exploited first within a severity, then by EPSS score; at most 100, so a long list drops the least severe. Each has `vulnerability`, `component` (package URL), `severity`, `known_exploited`, `introduced_via` and `url` (the finding's page) |
+| `findings[].introduced_via` | The names of the project's direct dependencies that lead to the component, sorted; the component's own name when it is one; empty when the SBOM's dependency graph does not say ([Dependency paths](../explanation/dependency-paths.md)) |
 
 `open` and `findings` describe the project's findings as they are when the response is written.
 After a `failed` or `timed_out` evaluation, they are the findings of the previous successful run,

@@ -76,6 +76,8 @@ upload to nanobom with a new address and key: see [Dependency-Track clients](htt
 **Fix what matters first**
 - Known-exploited vulnerabilities (CISA KEV) flagged, with their remediation due date.
 - EPSS exploitation probability to order what is left; severity from CVSS 4.0 down to 2.0.
+- The direct dependency that pulls in each vulnerable component, from the SBOM's dependency
+  graph: what to upgrade.
 - Search across every project: "which of our services ship `openssl 3.0`?"
 
 **Stop it before it ships**
@@ -113,6 +115,7 @@ The full guide lives at **<https://alixanneraud.github.io/nanobom/>**:
 - **Explanation** - [concepts](https://alixanneraud.github.io/nanobom/explanation/concepts.html),
   [how findings stay up to date](https://alixanneraud.github.io/nanobom/explanation/findings.html),
   [prioritization](https://alixanneraud.github.io/nanobom/explanation/prioritization.html),
+  [dependency paths](https://alixanneraud.github.io/nanobom/explanation/dependency-paths.html),
   [security model](https://alixanneraud.github.io/nanobom/explanation/security.html),
   [architecture](https://alixanneraud.github.io/nanobom/explanation/architecture.html).
 

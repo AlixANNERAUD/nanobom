@@ -93,6 +93,7 @@ Nothing is sent when nothing remains after filtering. Ignored findings are never
       "kev_due_date": "2026-11-29",
       "epss": 0.0149,
       "epss_percentile": 0.78,
+      "introduced_via": ["web-framework"],
       "url": "https://nanobom.example.org/findings/17"
     }
   ]
@@ -117,6 +118,7 @@ Nothing is sent when nothing remains after filtering. Ignored findings are never
 | `findings[].known_exploited` | In CISA's KEV catalog |
 | `findings[].kev_due_date` | CISA's due date, or `null` |
 | `findings[].epss`, `epss_percentile` | EPSS score and percentile, from 0 to 1, or `null` |
+| `findings[].introduced_via` | The names of the project's direct dependencies that lead to the component, sorted; the component's own name when it is one; empty when the SBOM's dependency graph does not say ([Dependency paths](../explanation/dependency-paths.md)) |
 | `findings[].url` | The finding's page |
 
 Every known exploited open finding of a run's scope is marked as notified once that run is over,

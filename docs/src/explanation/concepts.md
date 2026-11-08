@@ -36,7 +36,9 @@ component missing from the new SBOM is gone, and its findings are fixed at the n
 one SBOM per project and build, describing everything the project ships.
 
 Components are identified by their package URL. Components without one are counted and listed
-in the upload's response but cannot be checked.
+in the upload's response but cannot be checked. The SBOM's dependency graph, when it has one, is
+kept with the components and tells which direct dependency of the project pulls in each one
+([Dependency paths](dependency-paths.md)).
 
 ## Runs
 
