@@ -5,3 +5,4 @@
 /data
 .env
 mise.local.toml
+lcov.info

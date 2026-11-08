@@ -5,12 +5,15 @@ on:
     branches: ["**"]
     tags-ignore: ["**"]
   pull_request:
+    # `edited` re-checks the title when it changes; only the title check runs then.
+    types: [opened, edited, reopened, synchronize]
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # Title edits get their own group, so they never cancel a build in progress.
+  group: ci-${{ github.ref }}-${{ github.event.action == 'edited' && 'title' || 'build' }}
   cancel-in-progress: true
 
 env:
@@ -19,7 +22,27 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
+  # Pull requests are squash-merged, so the title becomes the commit on main, from which
+  # release-plz derives the version bump and the changelog (see RELEASING.md).
+  pr-title:
+    name: Pull request title
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check that the title follows Conventional Commits
+        run: |
+          pattern='^(feat|fix|perf|refactor|docs|test|ci|build|chore|style|revert)(\([a-z0-9_-]+\))?!?: [^ ].*$'
+          if printf '%s' "$TITLE" | grep -Eq "$pattern"; then
+            echo "Valid title: $TITLE"
+          else
+            echo "::error::The title must follow Conventional Commits, such as 'feat: add SPDX uploads', 'fix(osv): retry on timeouts' or 'feat!: change the webhook payload'. Got: $TITLE"
+            exit 1
+          fi
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+
   check:
+    if: github.event.action != 'edited'
     name: Format, clippy and tests
     runs-on: ubuntu-24.04
     steps:
@@ -29,7 +52,38 @@ jobs:
       - run: mise run lint
       - run: mise run test
 
+  coverage:
+    if: github.event.action != 'edited'
+    name: Coverage
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: coverage
+      - run: mise run coverage
+      - name: Summarize
+        run: |
+          {
+            echo '## Coverage'
+            echo '```'
+            mise exec -- cargo llvm-cov report --summary-only $NANOBOM_SERVER_PACKAGES | tail -1
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      # Authenticated with GitHub's OIDC token: no Codecov secret to store.
+      - uses: codecov/codecov-action@303a32d7a59b442fa8d48b6a1cc6825c09c847a5 # v7.1.1
+        with:
+          use_oidc: true
+          files: lcov.info
+          disable_search: true
+          fail_ci_if_error: true
+
   deny:
+    if: github.event.action != 'edited'
     name: Advisories and licences
     runs-on: ubuntu-24.04
     steps:
@@ -38,6 +92,7 @@ jobs:
       - run: mise run deny
 
   release-build:
+    if: github.event.action != 'edited'
     name: Release build
     runs-on: ubuntu-24.04
     steps:
@@ -52,6 +107,7 @@ jobs:
           ls -l target/release/nanobom target/site/pkg
 
   image:
+    if: github.event.action != 'edited'
     name: Container image (${{ matrix.architecture }})
     runs-on: ${{ matrix.runner }}
     strategy:

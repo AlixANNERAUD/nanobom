@@ -1,9 +1,10 @@
 [tools]
-rust = { version = "1.99.1", components = "rustfmt,clippy", targets = "wasm32-unknown-unknown", mr_boxington = true }
+rust = { version = "1.99.1", components = "rustfmt,clippy,llvm-tools", targets = "wasm32-unknown-unknown", mr_boxington = true }
 mr-boxington = "latest"
 "github:leptos-rs/cargo-leptos" = "0.3.11"
 "aqua:nextest-rs/nextest/cargo-nextest" = "0.9.149"
 "aqua:EmbarkStudios/cargo-deny" = "0.20.2"
+"aqua:taiki-e/cargo-llvm-cov" = "0.9.1"
 "github:SeaQL/sea-orm" = { version = "2.0.4", version_prefix = "sea-orm-cli@", bin = "sea-orm-cli" }
 # Must match the wasm-bindgen version in Cargo.lock. The statically linked (musl) build runs on
 # any Linux, including the Debian 12 image builder whose glibc is older than the gnu build needs.
@@ -33,6 +34,10 @@ run = [
 [tasks.test]
 description = "Run the test suite"
 run = "cargo nextest run $NANOBOM_SERVER_PACKAGES --no-tests=pass"
+
+[tasks.coverage]
+description = "Run the test suite with coverage, writing lcov.info"
+run = "cargo llvm-cov nextest $NANOBOM_SERVER_PACKAGES --no-tests=pass --lcov --output-path lcov.info"
 
 [tasks.deny]
 description = "Check advisories, licences, bans and sources"
