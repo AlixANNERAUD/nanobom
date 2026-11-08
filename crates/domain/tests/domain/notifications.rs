@@ -534,6 +534,35 @@ async fn an_open_finding_newly_exploited_is_notified_once() {
 }
 
 #[tokio::test]
+async fn exploited_findings_are_delivered_in_the_order_they_were_found() {
+    let fixture = Exploited::new(Severity::Unknown, false).await;
+    let first = fixture
+        .finding("GHSA-first", &["CVE-2021-23337"], "low", "open")
+        .await;
+    fixture
+        .finding("GHSA-second", &["CVE-2021-23337"], "low", "open")
+        .await;
+    // Updated last: PostgreSQL now holds its row after the second one.
+    findings::ActiveModel {
+        id: Set(first),
+        last_seen_at: Set(chrono::Utc::now().fixed_offset()),
+        ..Default::default()
+    }
+    .update(&fixture.database)
+    .await
+    .unwrap();
+
+    let deliveries = fixture.deliveries(vec![]).await;
+    let delivered: Vec<&str> = deliveries[0]
+        .payload
+        .findings
+        .iter()
+        .map(|finding| finding.vulnerability.as_str())
+        .collect();
+    assert_eq!(delivered, ["GHSA-first", "GHSA-second"]);
+}
+
+#[tokio::test]
 async fn exploited_findings_are_marked_even_without_a_webhook() {
     let fixture = Exploited::new(Severity::Unknown, false).await;
     notifications::delete(&fixture.database, &fixture.owner, fixture.organization)

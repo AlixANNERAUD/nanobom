@@ -42,7 +42,7 @@ use nanobom_osv::Severity;
 use reqwest::Url;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseConnection,
-    EntityTrait, ModelTrait, QueryFilter, TransactionTrait,
+    EntityTrait, ModelTrait, QueryFilter, QueryOrder, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 
@@ -317,14 +317,18 @@ struct Candidate {
     cvss_score: Option<f64>,
 }
 
-/// The open findings of a run's scope that were never notified as known exploited.
+/// The open findings of a run's scope that were never notified as known exploited, in the order
+/// they were found.
 async fn unnotified_open_findings(
     database: &impl ConnectionTrait,
     scope: Scope,
 ) -> Result<Vec<Candidate>> {
+    // Ordered explicitly: SQLite happens to return rows by identifier, PostgreSQL in whatever
+    // order its table holds them, which changes as rows are updated.
     let mut query = findings::Entity::find()
         .filter(findings::Column::Status.eq("open"))
-        .filter(findings::Column::ExploitedNotifiedAt.is_null());
+        .filter(findings::Column::ExploitedNotifiedAt.is_null())
+        .order_by_asc(findings::Column::Id);
     let mut project_query = projects::Entity::find();
     match scope {
         Scope::All => {}

@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Duration, FixedOffset, Utc};
 use nanobom_entity::{organization_webhooks, projects};
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, EntityTrait, ExprTrait, QueryFilter,
+    ColumnTrait, ConnectionTrait, EntityTrait, ExprTrait, QueryFilter, QueryOrder,
     sea_query::{Expr, Func},
 };
 
@@ -33,11 +33,11 @@ pub fn is_stale(
     now - reference > Duration::days(i64::from(stale_after_days))
 }
 
-/// Every stale project of the instance.
+/// Every stale project of the instance, in creation order.
 ///
 /// Filtered in SQL, like [`is_stale`] (`COALESCE(last_upload_at, created_at)` older than the
-/// threshold). Timestamps are stored as text in one format and always written in UTC, so
-/// comparing them as text orders them in time.
+/// threshold). PostgreSQL compares the timestamps as such; SQLite stores them as text in one
+/// format, always written in UTC, so comparing them as text orders them in time too.
 pub async fn stale_projects(
     database: &impl ConnectionTrait,
     stale_after_days: u32,
@@ -54,6 +54,7 @@ pub async fn stale_projects(
             ]))
             .lt(cutoff),
         )
+        .order_by_asc(projects::Column::Id)
         .all(database)
         .await?)
 }

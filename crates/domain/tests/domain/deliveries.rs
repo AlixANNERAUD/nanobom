@@ -14,7 +14,7 @@ use nanobom_domain::{
 };
 use nanobom_entity::webhook_deliveries;
 use nanobom_osv::Severity;
-use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection, EntityTrait};
+use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection, EntityTrait, QueryOrder};
 use serde::Serialize;
 use wiremock::{
     Mock, MockServer, ResponseTemplate,
@@ -638,6 +638,7 @@ async fn every_delivery_is_recorded_before_the_first_attempt() {
     .expect("the first delivery is attempted");
     // A restart now would lose nothing: every organization's document is recorded.
     let rows = webhook_deliveries::Entity::find()
+        .order_by_asc(webhook_deliveries::Column::Id)
         .all(&database)
         .await
         .unwrap();
