@@ -53,9 +53,32 @@ depends = ["lint", "test", "deny"]
 description = "Build the documentation into docs/book"
 run = "mdbook build docs"
 
+# cargo-leptos 0.3.11 reads the binary's arguments from its command line only (there is no
+# `bin-args` key in the workspace metadata), hence `-- serve`. The environment replaces the
+# container defaults (/data, port 8080, JSON logs) with a local, throwaway setup; cargo-leptos
+# itself runs with `site-addr` and `site-root` from Cargo.toml, which these values must match.
 [tasks.dev]
-description = "Run the server with live reload"
-run = "cargo leptos watch"
+description = "Run the server with live reload on http://127.0.0.1:3000"
+run = [
+  "mkdir -p target/dev",
+  "cargo leptos watch -- serve",
+]
+
+[tasks.dev.env]
+NANOBOM_DATABASE_URL = "sqlite://target/dev/nanobom.db?mode=rwc"
+NANOBOM_SITE_ROOT = "target/site"
+NANOBOM_LISTEN_ADDRESS = "127.0.0.1:3000"
+NANOBOM_PUBLIC_URL = "http://127.0.0.1:3000"
+NANOBOM_LOG_FORMAT = "text"
+NANOBOM_SCHEDULE = "off"
+
+[tasks.dev-admin]
+description = "Create an administrator in the development database (asks for the password)"
+run = "cargo run --quiet --package nanobom -- create-administrator --username admin"
+
+[tasks.dev-admin.env]
+NANOBOM_DATABASE_URL = "sqlite://target/dev/nanobom.db?mode=rwc"
+NANOBOM_LOG_FORMAT = "text"
 
 [tasks.build]
 description = "Build the release binary and the site"

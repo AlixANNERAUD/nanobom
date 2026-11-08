@@ -11,25 +11,29 @@ cargo-deny, wasm-bindgen, mdBook…) and runs the tasks. Every cargo command goe
 
 ```sh
 mise install
-mise run dev      # server with live reload on http://127.0.0.1:3000
-mise run check    # formatting, clippy, tests and cargo-deny, as CI
-mise run test     # tests only (cargo-nextest)
-mise run coverage # tests with coverage, written to lcov.info
-mise run build    # release binary and site in target/
-mise run docs     # this book, in docs/book
+mise run dev       # server with live reload on http://127.0.0.1:3000
+mise run dev-admin # first administrator of the development database
+mise run check     # formatting, clippy, tests and cargo-deny, as CI
+mise run test      # tests only (cargo-nextest)
+mise run coverage  # tests with coverage, written to lcov.info
+mise run build     # release binary and site in target/
+mise run docs      # this book, in docs/book
 ```
 
-The default database path, `/data/nanobom.db`, suits the container image, not a workstation. Put
-local settings in a `mise.local.toml`, which git ignores:
+`mise run dev` needs neither `/data` nor root. It runs `cargo leptos watch -- serve` (cargo-leptos
+passes what follows `--` to the `nanobom` binary, which requires a subcommand) with development
+settings that match `site-addr` and `site-root` in `Cargo.toml`: a SQLite database in
+`target/dev/nanobom.db`, the site in `target/site`, scheduled runs off, text logs, and
+<http://127.0.0.1:3000> as the public URL. The first build takes a few minutes (it compiles the
+server and the browser bundle); later changes rebuild and reload the page.
 
-```toml
-[env]
-NANOBOM_DATABASE_URL = "sqlite://nanobom-dev.db"
-NANOBOM_LOG_FORMAT = "text"
+Create the first administrator in that database, then sign in at <http://127.0.0.1:3000/login>:
+
+```sh
+mise run dev-admin   # username "admin"; asks for the password
 ```
 
-Then create an administrator with
-`mise exec -- cargo run -p nanobom -- create-administrator --username admin`.
+Delete `target/dev/` to start over with an empty database.
 
 To run the release build: `mise run build`, then
 `NANOBOM_SITE_ROOT=target/site target/release/nanobom serve`.
