@@ -351,6 +351,50 @@ async fn project_tokens_only_reach_their_project() {
 }
 
 #[tokio::test]
+async fn search_ignores_the_case_of_versions_too() {
+    let fixture = setup().await;
+    let database = &fixture.database;
+    let created = tokens::create(database, &fixture.owner, fixture.organization, None, "CI")
+        .await
+        .unwrap();
+    let token = tokens::authenticate(database, &created.secret)
+        .await
+        .unwrap()
+        .unwrap();
+    let document = serde_json::json!({
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.5",
+        "version": 1,
+        "components": [{
+            "type": "library",
+            "name": "Widget",
+            "version": "1.0.0-RC1",
+            "purl": "pkg:npm/Widget@1.0.0-RC1"
+        }]
+    });
+    inventory::ingest(
+        database,
+        &token,
+        "acme",
+        "web",
+        inventory::parse(document.to_string().as_bytes()).unwrap(),
+        UploadSource::default(),
+    )
+    .await
+    .unwrap();
+    for query in ["widget 1.0.0-rc", "WIDGET@1.0.0-RC1", "widget 1.0.0-rc2"] {
+        let found = inventory::search(database, &fixture.viewer, query)
+            .await
+            .unwrap();
+        assert_eq!(
+            found.len(),
+            usize::from(query != "widget 1.0.0-rc2"),
+            "{query}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn search_finds_components_by_name_and_version_in_visible_organizations() {
     let fixture = setup().await;
     let database = &fixture.database;
