@@ -381,7 +381,7 @@ pub const MAXIMUM_SEARCH_RESULTS: usize = 200;
 
 /// Finds components by name across the organizations the actor can see: `openssl` matches
 /// names containing it, `openssl 3.` (or `openssl@3.`) also requires the version to start with
-/// `3.`. Names match case-insensitively; `%` and `_` are taken literally.
+/// `3.`. Names and versions match case-insensitively; `%` and `_` are taken literally.
 /// Results are sorted by name then version and capped at [`MAXIMUM_SEARCH_RESULTS`]; an empty
 /// name returns nothing rather than every component.
 pub async fn search(
