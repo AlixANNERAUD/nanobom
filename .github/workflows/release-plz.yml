@@ -22,15 +22,15 @@ jobs:
       created: ${{ steps.release-plz.outputs.releases_created }}
       tag: ${{ steps.tag.outputs.tag }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+      - uses: jdx/mise-action@v5.2.7
         env:
           MISE_ENV: ci
       - id: release-plz
-        uses: release-plz/action@b2baf303c463c223526d52a8a91b0777f052cf3f # v0.5.146
+        uses: release-plz/action@v0.5.146
         with:
           command: release
           version: 0.4.1
@@ -67,14 +67,14 @@ jobs:
       group: release-plz-${{ github.ref }}
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
+      - uses: jdx/mise-action@v5.2.7
         env:
           MISE_ENV: ci
-      - uses: release-plz/action@b2baf303c463c223526d52a8a91b0777f052cf3f # v0.5.146
+      - uses: release-plz/action@v0.5.146
         with:
           command: release-pr
           version: 0.4.1
