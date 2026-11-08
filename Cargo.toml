@@ -25,7 +25,7 @@ leptos_router = "0.8.17"
 leptos_meta = "0.8.7"
 axum = { version = "0.8.9", features = ["macros"] }
 tower = { version = "0.5.3", features = ["util"] }
-tower-http = { version = "0.6.11", features = ["compression-gzip", "compression-br", "trace", "timeout", "fs", "set-header"] }
+tower-http = { version = "0.7.1", features = ["compression-gzip", "compression-br", "trace", "timeout", "fs", "set-header"] }
 axum-login = "0.18.0"
 async-trait = "0.1"
 tower-sessions = { version = "0.14.0", default-features = false, features = ["axum-core"] }
