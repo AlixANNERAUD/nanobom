@@ -8,19 +8,22 @@ answers "not found" rather than "forbidden", so its name does not leak.
 
 Each organization has a **slug**, which appears in addresses and upload URLs
 (`/organizations/acme`, `/api/organizations/acme/projects/web/sbom`), and a display name. Slugs
-are 1 to 64 characters among lower-case letters, digits, `.`, `_` and `-`, starting with a
-letter or a digit; upper-case letters are folded to lower case, so `Acme` and `acme` are the
-same organization.
+are case-insensitive: `Acme` and `acme` are the same organization (the rules are in the
+[reference](../reference/accounts.md#names)).
+
+Members have one of four [roles](../reference/accounts.md#organization-roles): viewer, member,
+admin or owner. Instance administrators act as owners of every organization.
 
 By default every new user also gets a **personal organization** named after their username,
 which they own. It is an ordinary organization; the setting only saves a step for people
-working alone. See [Accounts, organizations and access](access/README.md).
+working alone.
 
 ## Projects
 
 A **project** is one thing you ship: a service, a library, a container image. It is created by
 its first upload with an organization-wide token (or never, with a project token: see
-[tokens](uploading/api.md#tokens)). Its slug follows the same rules as organization slugs.
+[tokens](../reference/upload-api.md#tokens)). Its slug follows the same rules as organization
+slugs.
 
 A project holds the components of its **latest** SBOM only. The history of uploads (when, from
 which commit or image tag, how many components) is kept; the components of older uploads are
@@ -33,8 +36,7 @@ component missing from the new SBOM is gone, and its findings are fixed at the n
 one SBOM per project and build, describing everything the project ships.
 
 Components are identified by their package URL. Components without one are counted and listed
-in the upload's response but cannot be checked: see
-[Generating an SBOM](uploading/generators.md).
+in the upload's response but cannot be checked.
 
 ## Runs
 
@@ -47,7 +49,7 @@ A **run** matches the components of a scope against OSV and updates the findings
 
 Runs execute one at a time. A run that cannot complete, because OSV is unreachable for example,
 changes nothing: findings stay as they were, and the run is recorded as failed. A failure never
-reads as "no vulnerabilities". See [Runs and matching](findings/runs.md).
+reads as "no vulnerabilities". See [How findings are kept up to date](findings.md).
 
 ## Findings
 
@@ -74,21 +76,12 @@ Every change is kept in the finding's history, with who did it, why, and which r
    └── reopened ── FIXED
 ```
 
-## Aliases
+One vulnerability often has several identifiers: a GitHub advisory (`GHSA-…`), a CVE, a RustSec
+or PyPA advisory. OSV lists them as **aliases**, and nanobom merges identifiers that are aliases
+of each other into one finding: a CVE published after the GHSA does not create a second finding
+([aliases](findings.md#aliases)).
 
-One vulnerability often has several identifiers: a GitHub advisory (`GHSA-…`), a CVE, a
-RustSec or PyPA advisory. OSV lists them as **aliases**. nanobom merges identifiers that are
-aliases of each other into one finding, named after the smallest identifier it first saw, and
-matches it through any of them later: a CVE published after the GHSA does not create a second
-finding.
-
-## Severity
-
-Each finding has a severity: **critical**, **high**, **medium**, **low** or **unknown**. It comes
-from the CVSS base score (critical from 9.0, high from 7.0, medium from 4.0, low below), using
-the most recent CVSS version the advisory gives (4.0, then 3.1, 3.0, 2.0), else the qualitative
-rating the advisory database gives (as GitHub advisories do), else unknown. When a finding
-merges several identifiers, the highest severity among them wins.
-
-Severity says how bad a vulnerability could be, not whether anyone exploits it; that is what
-the [exploitation signals](findings/exploitation.md) are for.
+Each finding has a **severity**, critical, high, medium, low or unknown, from the CVSS scores of
+its advisories ([severity](findings.md#severity)). Severity says how bad a vulnerability could
+be, not whether anyone exploits it; that is what the
+[exploitation signals](prioritization.md) are for.

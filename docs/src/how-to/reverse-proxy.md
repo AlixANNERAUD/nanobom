@@ -1,4 +1,4 @@
-# Reverse proxy and TLS
+# Run behind a reverse proxy with TLS
 
 nanobom speaks plain HTTP. Put a reverse proxy in front of it to terminate TLS, and tell nanobom
 the address users reach it at:
@@ -7,6 +7,12 @@ the address users reach it at:
 NANOBOM_PUBLIC_URL=https://nanobom.example.org
 NANOBOM_TRUST_FORWARDED_HEADERS=true
 ```
+
+Bind nanobom to the loopback interface or a private network
+(`NANOBOM_LISTEN_ADDRESS=127.0.0.1:8080` on the same host),
+so the proxy is the only way in. Only set `NANOBOM_TRUST_FORWARDED_HEADERS` when that is the case:
+a client talking to nanobom directly could otherwise choose its own address and escape sign-in
+rate limiting.
 
 What the proxy must get right:
 
@@ -19,10 +25,7 @@ What the proxy must get right:
 | **Client addresses in `X-Forwarded-For`** | Sign-in rate limiting is per client address; behind a proxy, every request otherwise comes from the proxy. The proxy must **replace** the header, not append to what the client sent. |
 | **`/metrics` kept internal** | It needs no authentication; it reveals only instance-wide counts, but there is no reason to publish them. |
 
-Bind nanobom to the loopback interface or a private network (`NANOBOM_LISTEN_ADDRESS=127.0.0.1:8080`
-on the same host), so the proxy is the only way in. Only set `NANOBOM_TRUST_FORWARDED_HEADERS` when
-that is the case: a client talking to nanobom directly could otherwise choose its own address and
-escape rate limiting.
+HSTS is left to the proxy: nanobom does not send it.
 
 ## nginx
 

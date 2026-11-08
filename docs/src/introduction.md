@@ -33,7 +33,7 @@ The container image is about 20 MB.
 ## What it does not do
 
 - **It does not generate SBOMs.** Your build does, with the generator of your ecosystem (see
-  [Generating an SBOM](uploading/generators.md)). nanobom only reads CycloneDX JSON, versions 1.3
+  [Generate an SBOM](how-to/generate-sbom.md)). nanobom only reads CycloneDX JSON, versions 1.3
   to 1.7; SPDX is not supported.
 - **It does not scan images or file systems.** It trusts the SBOM. A component missing from the
   SBOM is invisible to nanobom.
@@ -48,14 +48,22 @@ The container image is about 20 MB.
   organizations; the HTTP API accepts SBOMs (and returns an evaluation for CI). Webhooks and
   Prometheus metrics are the machine-readable outputs.
 
-## How to read this guide
+## How this documentation is organized
 
-- New to nanobom? Read [Concepts](concepts.md), then [Getting started](getting-started.md).
-- Wiring a pipeline: [Uploading SBOMs](uploading/README.md).
-- Deciding what to fix first: [Findings and prioritization](findings/README.md).
-- Running an instance: the [Configuration reference](configuration.md) and
-  [Operating nanobom](operations/README.md).
-- Something does not work: [Troubleshooting](troubleshooting.md).
+It has four parts, one per need:
+
+- **[Tutorials](tutorials/first-scan.md)** are lessons. Follow them in order, step by step, when
+  you are new to nanobom: [Your first scan](tutorials/first-scan.md) runs it on your machine,
+  [Gate a repository's CI](tutorials/gate-ci.md) wires a GitHub repository to it.
+- **[How-to guides](how-to/install.md)** are recipes for a goal you already have: install an
+  instance, upload from GitLab CI, set up single sign-on, back up the database, fix an upload
+  that answers `503`.
+- **[Reference](reference/configuration.md)** describes the machinery, completely and without
+  commentary: every option, command, API field, webhook field, permission and metric. Look
+  things up there.
+- **[Explanation](explanation/concepts.md)** is background to read away from the keyboard: what
+  organizations, runs and findings are, how findings are kept up to date, why exploitation
+  signals come first, what protects what, how the code is laid out.
 
 nanobom is free software under the
 [Apache-2.0 license](https://github.com/AlixANNERAUD/nanobom/blob/main/LICENSE); the source,

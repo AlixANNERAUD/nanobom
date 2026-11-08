@@ -3,7 +3,7 @@
 The web interface is available in **English** and **French**. Each request is answered in:
 
 1. the language chosen with the language switch in the page header, remembered in the
-   `nanobom_locale` cookie of that browser;
+   `nanobom_locale` cookie of that browser (it holds only the chosen language);
 2. otherwise, the best match among the browser's preferred languages (`Accept-Language`);
 3. otherwise, English.
 
@@ -23,4 +23,4 @@ Dates are shown in UTC.
 Translations live in `crates/app/locales/` (interface) and `crates/domain/locales/` (messages of
 the domain, such as validation errors), one JSON file per language. A message missing from a
 language fails the build, so a release never shows a half-translated page. Adding a language is
-described in [Development](development.md#translations).
+described in [Develop and contribute](../how-to/develop.md#add-a-language).

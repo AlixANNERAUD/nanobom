@@ -1,4 +1,8 @@
-# Troubleshooting
+# Troubleshoot
+
+Each entry gives the symptom, its cause, and the fix. Status codes and messages of the upload API
+are listed in the [upload API reference](../reference/upload-api.md#status-codes); log messages in
+the [logs reference](../reference/metrics.md#log-messages).
 
 ## Uploads
 
@@ -33,16 +37,17 @@ of the organization. Fix the project slug in the URL, or use the token of that p
 The SBOM is larger than the limit. The limit may be:
 
 - nanobom's, `NANOBOM_MAXIMUM_SBOM_SIZE` (16 MiB by default); the answer is then plain text, not
-  JSON;
+  JSON. Raise the limit, or split the SBOM;
 - the reverse proxy's: nginx accepts 1 MiB by default and answers with an HTML page. Set
-  `client_max_body_size` (see [Reverse proxy and TLS](operations/reverse-proxy.md)).
+  `client_max_body_size` (see [Run behind a reverse proxy](reverse-proxy.md)).
 
 Very large SBOMs often list each file of an image; generators can usually list packages only.
 
 ### Upload answers 422
 
-The `error` field says what is wrong; [The upload API](uploading/api.md#status-codes) lists the
-messages. The usual ones:
+The `error` field says what is wrong; the
+[upload API reference](../reference/upload-api.md#status-codes) lists the messages. The usual
+ones:
 
 - `the SBOM must be a CycloneDX JSON document` — an SPDX document, an XML CycloneDX document, or
   the generator's default format: ask for CycloneDX JSON explicitly (Syft:
@@ -51,13 +56,15 @@ messages. The usual ones:
   than 1.7;
 - `the project slug must be …` — the project name in the URL contains spaces, slashes or other
   characters. `${GITHUB_REPOSITORY#*/}` and `$CI_PROJECT_NAME` are usually fine; a repository
-  name with a dot at the start or with upper-case letters is folded or refused.
+  name with a dot at the start or with upper-case letters is folded or refused;
+- `fail_on=exploited needs exploitation data (NANOBOM_EXPLOITATION_DATA)` — exploitation data is
+  off on this instance: gate on a severity instead.
 
 ### Upload answers 409
 
 That is the gate doing its job: open findings reach `fail_on`. The response lists them in
 `evaluation.findings`. Fix them by upgrading the components, or ignore the ones that do not
-apply, with a reason (see [Triage](findings/triage.md)); ignored findings do not count.
+apply, with a reason (see [Triage findings](triage.md)); ignored findings do not count.
 
 ### Upload answers 503
 
@@ -76,7 +83,7 @@ decide.
 A reverse proxy between CI and nanobom gave up on a waiting upload (most default to 60 seconds).
 nanobom still finishes the run. Raise the proxy's read timeout above
 `NANOBOM_UPLOAD_WAIT_SECONDS`, or lower the setting: see
-[Reverse proxy timeouts](uploading/ci.md#reverse-proxy-timeouts).
+[Let uploads wait through your proxies](fail-ci.md#let-uploads-wait-through-your-proxies).
 
 ### Components without package URL
 
@@ -86,8 +93,8 @@ cannot be checked. OSV matches components by package URL, so those are invisible
 
 Usually the generator could not identify them: vendored code, binaries copied into an image,
 packages installed outside a package manager. Use the generator of the ecosystem instead of a
-generic scanner where you can (see [Generating an SBOM](uploading/generators.md)). Components
-that are genuinely your own code have no package URL, and need none.
+generic scanner where you can (see [Generate an SBOM](generate-sbom.md)). Components that are
+genuinely your own code have no package URL, and need none.
 
 ### A project appeared twice, or with an unexpected name
 
@@ -123,7 +130,7 @@ they used to be included. Compare `component_count` across uploads in the projec
 
 Severity comes from the highest-rated record among the finding's aliases, using the most recent
 CVSS version available. A GitHub advisory and the CVE it aliases can rate the same issue
-differently; nanobom shows the higher. See [Severity](findings/runs.md#severity).
+differently; nanobom shows the higher. See [Severity](../explanation/findings.md#severity).
 
 ### No finding is known exploited
 
@@ -172,9 +179,19 @@ release. In the image, it is set to `/app/site`.
 
 Too many failed attempts from the same address: wait a few seconds. If every user is limited at
 once, nanobom sees all requests coming from the reverse proxy: set
-`NANOBOM_TRUST_FORWARDED_HEADERS=true` (see [Local accounts](access/local-accounts.md#rate-limiting)).
+`NANOBOM_TRUST_FORWARDED_HEADERS=true`, only behind a proxy that replaces `X-Forwarded-For` (see
+[Run behind a reverse proxy](reverse-proxy.md)).
 
 ## Single sign-on
+
+The sign-in page shows a short message, and the logs say why:
+
+| Message | Cause |
+| --- | --- |
+| The identity provider could not sign you in | Discovery failed, the provider refused the sign-in (wrong redirect URI or client secret), or its answer could not be verified; see the `OpenID Connect sign-in refused` or `starting the OpenID Connect sign-in failed` log line, and [below](#the-identity-provider-could-not-sign-you-in) |
+| The sign-in took too long; please try again | The session cookie set when leaving for the provider was not sent back: the sign-in took longer than the session, or the public URL's host or scheme differs from the address in the browser |
+| This account is not known here and new accounts are not created automatically | `NANOBOM_OIDC_CREATE_USERS=false` and the user never signed in |
+| This account is disabled | An instance administrator disabled the user |
 
 ### The provider reports a redirect URI mismatch
 
@@ -193,7 +210,7 @@ failed`):
   not follow;
 - `unexpected issuer URI` — the issuer in the discovery document differs from
   `NANOBOM_OIDC_ISSUER`. Copy it exactly from the discovery document. If it ends with `/`, see
-  the [known limitation](access/openid-connect.md#setting-up-the-client);
+  the [known limitation](single-sign-on.md#2-configure-nanobom);
 - `the identity provider refused the sign-in` — usually a wrong client secret, or a client not
   allowed to use the authorization code flow.
 
@@ -203,7 +220,7 @@ failed`):
   after changing them at the provider.
 - The claim must be in the ID token or in the user information. Many providers put groups and
   roles in the access token only by default, which nanobom does not read; see the
-  [provider examples](access/openid-connect.md#provider-examples).
+  [provider examples](single-sign-on.md#keycloak).
 - `NANOBOM_OIDC_GROUPS_CLAIM` must name the claim exactly, as a top-level name or a dotted path
   (`realm_access.roles`).
 - Group names in `NANOBOM_OIDC_GROUP_MAPPING` must match the claim's values exactly; Keycloak

@@ -1,21 +1,17 @@
-# Backups and upgrades
-
-## What to back up
+# Back up, restore and upgrade
 
 Everything lives in the SQLite database (`/data/nanobom.db` in the image): users and password
 hashes, organizations, upload token digests, inventories, findings and their history, sessions,
 and the cached OSV and exploitation data. Back up that file and nothing else; treat the backups
 as sensitive.
 
+## Take a backup
+
 Do not copy the database file of a running instance with `cp`: nanobom uses SQLite's
 write-ahead log, so recent changes may still be in `nanobom.db-wal` and the copy can be
-inconsistent. Use `nanobom backup`.
-
-## Taking a backup
-
-`nanobom backup <file>` writes a consistent copy of the live database with SQLite's
-`VACUUM INTO`, without stopping nanobom or blocking it. It refuses to overwrite an existing file,
-and the directory must exist and be writable by the user nanobom runs as.
+inconsistent. Use `nanobom backup <file>`, which writes a consistent copy of the live database
+without stopping nanobom or blocking it. It refuses to overwrite an existing file, and the
+directory must exist and be writable by the user nanobom runs as.
 
 The image has no shell to manage files, so give it a backup directory. With Compose, add a bind
 mount owned by the container's user (65532):
@@ -43,7 +39,7 @@ nanobom backup "/var/backups/nanobom/nanobom-$(date +%F).db"
 A backup is an ordinary SQLite database, so it can be checked with
 `sqlite3 nanobom-2026-11-08.db 'PRAGMA integrity_check'`.
 
-## Restoring
+## Restore a backup
 
 1. Stop nanobom.
 2. Replace the database with the backup, and delete the `-wal` and `-shm` files next to it, which
@@ -66,15 +62,17 @@ Sessions are in the database too, so users signed in after the backup was taken 
 again; uploads and runs since then are lost and come back with the next uploads and the next
 nightly run.
 
-## Upgrading
+## Upgrade
+
+Take a backup first: migrations only go forward, so going back to an older version means
+restoring it. Then:
 
 ```sh
 docker compose pull && docker compose up -d --wait
 ```
 
 Database migrations run when the server starts, before it accepts requests. `nanobom migrate`
-runs them alone, for a deployment that wants them as a separate step. Migrations only go forward:
-take a backup before upgrading, since going back to an older version means restoring it.
+runs them alone, for a deployment that wants them as a separate step.
 
 Images are tagged `X.Y.Z`, `X.Y`, `X` and `latest`. Pin a tag that matches how you want to
 upgrade: `X.Y` follows fixes only. While nanobom's version is below 1.0, a breaking change raises
@@ -84,24 +82,6 @@ the minor version (`0.3` to `0.4`): read the
 On shutdown (`SIGTERM`), requests in progress finish; a run in progress is not resumed and stays
 listed as running. The next scheduled run covers its scope again.
 
-## Sizing
-
-nanobom does its work in short bursts, after uploads and at night, and is idle the rest of the
-time. What makes it grow:
-
-- **Memory** peaks during uploads: each request body is held in memory, and parsing an SBOM takes
-  a few times its size, with two SBOMs parsed at a time at most. Raise
-  `NANOBOM_MAXIMUM_SBOM_SIZE` with that in mind.
-- **Disk** holds the components of each project's latest SBOM, the findings and their history,
-  and the cached vulnerability records. Old uploads only keep their metadata (date, commit, tag,
-  counts), not their components, so the database grows with the number of projects and findings,
-  not with the number of uploads.
-- **Run duration** depends on the number of distinct package URLs (one OSV request per 1,000) and
-  on how many vulnerability records are new or modified (fetched 8 at a time). The first run of a
-  large instance takes the longest; later ones reuse the cache. Watch
-  `nanobom_run_duration_seconds`, and keep `NANOBOM_UPLOAD_WAIT_SECONDS` above the usual duration
-  of a project's run plus the time it may wait behind the nightly run.
-
-One instance runs one process: do not start two servers on the same database. Runs are
-serialized inside the process, and two processes would each run the schedule and send every
-webhook twice.
+After an upgrade from a version without exploitation signals, the first run delivers every open
+known exploited finding of its scope once to the organizations' webhooks, with the `exploited`
+reason, since none had been notified as such.

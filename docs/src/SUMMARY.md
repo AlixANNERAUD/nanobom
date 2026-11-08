@@ -1,36 +1,44 @@
 # Summary
 
 [Introduction](introduction.md)
-[Concepts](concepts.md)
 
-# Using nanobom
+# Tutorials
 
-- [Getting started](getting-started.md)
-- [Uploading SBOMs](uploading/README.md)
-  - [Generating an SBOM](uploading/generators.md)
-  - [The upload API](uploading/api.md)
-  - [Continuous integration](uploading/ci.md)
-- [Findings and prioritization](findings/README.md)
-  - [Runs and matching](findings/runs.md)
-  - [Exploitation signals](findings/exploitation.md)
-  - [Triage, stale projects and search](findings/triage.md)
-- [Notifications](notifications.md)
-- [Accounts, organizations and access](access/README.md)
-  - [Roles and permissions](access/roles.md)
-  - [Local accounts](access/local-accounts.md)
-  - [OpenID Connect](access/openid-connect.md)
-- [Languages](languages.md)
+- [Your first scan](tutorials/first-scan.md)
+- [Gate a repository's CI](tutorials/gate-ci.md)
 
-# Running nanobom
+# How-to guides
 
-- [Configuration reference](configuration.md)
-- [Operating nanobom](operations/README.md)
-  - [Reverse proxy and TLS](operations/reverse-proxy.md)
-  - [Monitoring](operations/monitoring.md)
-  - [Backups and upgrades](operations/maintenance.md)
-  - [Security model](operations/security.md)
-- [Troubleshooting](troubleshooting.md)
+- [Install nanobom](how-to/install.md)
+- [Generate an SBOM](how-to/generate-sbom.md)
+- [Upload from CI](how-to/upload-from-ci.md)
+- [Fail CI on vulnerabilities](how-to/fail-ci.md)
+- [Triage findings](how-to/triage.md)
+- [Get notified](how-to/notifications.md)
+- [Set up single sign-on](how-to/single-sign-on.md)
+- [Map identity-provider groups to organizations](how-to/group-mapping.md)
+- [Manage users, administrators and organizations](how-to/manage-access.md)
+- [Run behind a reverse proxy with TLS](how-to/reverse-proxy.md)
+- [Monitor with Prometheus](how-to/monitoring.md)
+- [Back up, restore and upgrade](how-to/maintenance.md)
+- [Run without internet access](how-to/offline.md)
+- [Troubleshoot](how-to/troubleshoot.md)
+- [Develop and contribute](how-to/develop.md)
 
-# Contributing
+# Reference
 
-- [Development](development.md)
+- [Configuration](reference/configuration.md)
+- [Command line](reference/command-line.md)
+- [Upload API](reference/upload-api.md)
+- [Webhook payloads](reference/webhooks.md)
+- [Accounts, roles and permissions](reference/accounts.md)
+- [Metrics, health and logs](reference/metrics.md)
+- [Languages](reference/languages.md)
+
+# Explanation
+
+- [Concepts](explanation/concepts.md)
+- [How findings are kept up to date](explanation/findings.md)
+- [Prioritization](explanation/prioritization.md)
+- [Security model](explanation/security.md)
+- [Architecture](explanation/architecture.md)
