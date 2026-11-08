@@ -7,3 +7,4 @@ mod dependency_track;
 mod interface;
 mod operations;
 mod upload;
+mod vex;

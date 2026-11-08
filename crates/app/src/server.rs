@@ -331,6 +331,9 @@ pub fn finding(value: nanobom_domain::findings::Finding) -> model::FindingRow {
         fixed_at: value.fixed_at,
         ignore_reason: value.ignore_reason,
         ignore_expires_at: value.ignore_expires_at,
+        ignore_justification: value
+            .ignore_justification
+            .map(|justification| justification.as_str().to_owned()),
         exploitation: model::Exploitation {
             known_exploited: value.exploitation.known_exploited,
             kev_date_added: value.exploitation.kev_date_added,

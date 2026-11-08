@@ -15,6 +15,8 @@ pub struct Model {
     #[sea_orm(column_type = "Text", nullable)]
     pub reason: Option<String>,
     pub run_id: Option<i64>,
+    pub justification: Option<String>,
+    pub upload_token_id: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -59,6 +59,10 @@ pub const SUPPORTED_SPECIFICATION_VERSIONS: [&str; 5] = ["1.3", "1.4", "1.5", "1
 /// serialization of SPDX 2.2 and 2.3, which share the fields nanobom reads.
 pub const SUPPORTED_SPDX_VERSIONS: [&str; 2] = ["SPDX-2.2", "SPDX-2.3"];
 
+/// CycloneDX specification versions accepted for a standalone VEX document: `vulnerabilities`
+/// appeared in 1.4.
+pub const SUPPORTED_VEX_VERSIONS: [&str; 4] = ["1.4", "1.5", "1.6", "1.7"];
+
 /// At most this many skipped components are listed in an upload's response; all are counted.
 const MAXIMUM_LISTED_SKIPPED_COMPONENTS: usize = 100;
 
@@ -107,6 +111,9 @@ pub struct ParsedSbom {
     /// an identifier (`bom-ref`, SPDXID) given to components with different package URLs. Paths
     /// derived from the graph may then be missing.
     pub dependencies_partial: bool,
+    /// The analysed vulnerabilities of a CycloneDX SBOM's `vulnerabilities`, which the upload
+    /// imports like a VEX document ([`crate::vex`]); always empty for SPDX.
+    pub vex: Vec<crate::vex::Statement>,
 }
 
 /// An edge of an SBOM's dependency graph, between package URLs in canonical form.
@@ -271,12 +278,50 @@ fn parse_cyclonedx(document: &[u8], specification_version: String) -> Result<Par
         Some(dependencies) => dependency_edges(&dependencies.0, project, &references),
         None => (Vec::new(), false),
     };
-    Ok(collector.finish(
+    let mut parsed = collector.finish(
         specification_version,
         bom.serial_number.as_ref().map(ToString::to_string),
         dependencies,
         dependencies_partial,
-    ))
+    );
+    parsed.vex = crate::vex::statements(&bom);
+    Ok(parsed)
+}
+
+/// Reads a standalone CycloneDX VEX document (JSON, a version of [`SUPPORTED_VEX_VERSIONS`]),
+/// deserialized straight into the model of its specification version like an SBOM. Errors are
+/// [`Error::Invalid`] with a VEX problem: not JSON, not CycloneDX, an unsupported version, or a
+/// document that does not follow it.
+pub(crate) fn read_vex(document: &[u8]) -> Result<Bom> {
+    let header: Header = match serde_json::from_slice(document) {
+        Ok(header) => header,
+        // Valid JSON, but not an object.
+        Err(error) if error.classify() == Category::Data => {
+            return Err(Error::invalid(Problem::VexNotCycloneDx));
+        }
+        Err(error) => {
+            return Err(Error::invalid(Problem::VexNotJson {
+                detail: capped(&error.to_string()),
+            }));
+        }
+    };
+    if !matches!(&header.format, Some(Text::Text(format)) if format == "CycloneDX") {
+        return Err(Error::invalid(Problem::VexNotCycloneDx));
+    }
+    let version = match header.specification_version {
+        Some(Text::Text(version)) => version,
+        _ => String::new(),
+    };
+    let unsupported = |version: String| Error::invalid(Problem::UnsupportedVexVersion { version });
+    if !SUPPORTED_VEX_VERSIONS.contains(&version.as_str()) {
+        return Err(unsupported(version));
+    }
+    let parsed = SpecVersion::from_str(&version).map_err(|_| unsupported(version.clone()))?;
+    Bom::parse_from_json_with_version(document, parsed).map_err(|error| {
+        Error::invalid(Problem::InvalidVex {
+            detail: capped(&error.to_string()),
+        })
+    })
 }
 
 /// How the `bom-ref`s of an SBOM resolve to the components kept.
@@ -446,6 +491,7 @@ impl Collector {
             skipped: self.skipped,
             dependencies,
             dependencies_partial,
+            vex: Vec::new(),
         }
     }
 }

@@ -235,6 +235,7 @@ pub async fn load_finding(finding: i64) -> Result<FindingData, ServerFnError> {
             })
             .collect(),
         ignored_by: detail.ignored_by,
+        ignored_by_token: detail.ignored_by_token,
         affected_components: detail
             .affected_components
             .into_iter()
@@ -253,7 +254,11 @@ pub async fn load_finding(finding: i64) -> Result<FindingData, ServerFnError> {
                 created_at: event.created_at,
                 kind: event.kind.as_str().to_owned(),
                 actor: event.actor,
+                token: event.token,
                 reason: event.reason,
+                justification: event
+                    .justification
+                    .map(|justification| justification.as_str().to_owned()),
             })
             .collect(),
         dependency_paths: detail
@@ -486,6 +491,7 @@ pub async fn trigger_run(
 pub async fn ignore_finding(
     finding: i64,
     reason: String,
+    justification: Option<String>,
     expires_on: Option<String>,
 ) -> Result<(), ServerFnError> {
     use chrono::{NaiveDate, NaiveTime};
@@ -505,9 +511,29 @@ pub async fn ignore_finding(
         },
         None => None,
     };
-    let result = nanobom_domain::findings::ignore(database, &actor, finding, &reason, expires_at)
-        .await
-        .map(|()| crate::t!("notices.finding_ignored").to_owned());
+    let justification = match justification
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(nanobom_domain::findings::Justification::parse)
+        .transpose()
+    {
+        Ok(justification) => justification,
+        Err(error) => {
+            finish(Err(error), &format!("/findings/{finding}"));
+            return Ok(());
+        }
+    };
+    let result = nanobom_domain::findings::ignore(
+        database,
+        &actor,
+        finding,
+        &reason,
+        justification,
+        expires_at,
+    )
+    .await
+    .map(|()| crate::t!("notices.finding_ignored").to_owned());
     finish(result, &format!("/findings/{finding}"));
     Ok(())
 }
