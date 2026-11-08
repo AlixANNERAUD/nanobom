@@ -127,7 +127,7 @@
       "other": "{count} composants"
     },
     "last_upload": "dernier envoi {time}",
-    "stale_alert": "Aucun SBOM reçu depuis le {date} : vérifiez le job de CI qui l’envoie.",
+    "stale_alert": "Aucun SBOM reçu depuis le {date} : vérifiez le job d’intégration continue qui l’envoie.",
     "stale_never_alert": "Aucun SBOM reçu depuis la création du projet le {date} : vérifiez le job d’intégration continue qui l’envoie.",
     "without_purl_title": "Certains composants ne peuvent pas être vérifiés",
     "without_purl_text": {
@@ -208,7 +208,6 @@
     "yes": "Connues",
     "no": "Inconnues",
     "epss_score": "Score EPSS",
-    "epss_percentile": "Percentile EPSS",
     "epss_value": "{score} (percentile {percentile}, {date})",
     "percent": "{value} %",
     "kev_link": "Catalogue des vulnérabilités exploitées connues de la CISA",

@@ -208,7 +208,6 @@
     "yes": "Known",
     "no": "Unknown",
     "epss_score": "EPSS score",
-    "epss_percentile": "EPSS percentile",
     "epss_value": "{score} (percentile {percentile}, {date})",
     "percent": "{value}%",
     "kev_link": "CISA Known Exploited Vulnerabilities catalog",
