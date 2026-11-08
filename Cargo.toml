@@ -28,7 +28,7 @@ tower = { version = "0.5.3", features = ["util"] }
 tower-http = { version = "0.6.11", features = ["compression-gzip", "compression-br", "trace", "timeout", "fs", "set-header"] }
 axum-login = "0.18.0"
 async-trait = "0.1"
-tower-sessions = { version = "0.14.0", default-features = false, features = ["axum-core"] }
+tower-sessions = { version = "0.15.0", default-features = false, features = ["axum-core"] }
 password-auth = "1.0.0"
 openidconnect = { version = "4.1.0", default-features = false, features = ["reqwest", "rustls-tls"] }
 tower_governor = { version = "0.8.0", default-features = false, features = ["axum"] }
