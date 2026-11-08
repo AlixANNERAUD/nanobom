@@ -70,13 +70,13 @@ fn Members(page: SettingsData) -> impl IntoView {
                                                         .into_any()
                                                 } else {
                                                     view! {
-                                                        <span>{member.manual_role.map_or("—", Role::label)}</span>
+                                                        <span>{member.manual_role.map_or("-", Role::label)}</span>
                                                     }
                                                         .into_any()
                                                 }}
                                             </td>
                                             <td class=format!("{TABLE_CELL} text-muted-foreground")>
-                                                {member.synchronized_role.map_or("—", Role::label)}
+                                                {member.synchronized_role.map_or("-", Role::label)}
                                             </td>
                                             <td class=format!("{TABLE_CELL} text-right")>
                                                 {(editable || member.user_id == current_user && member.manual_role.is_some())
