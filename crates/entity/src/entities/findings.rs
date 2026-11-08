@@ -25,6 +25,7 @@ pub struct Model {
     pub ignore_expires_at: Option<DateTimeWithTimeZone>,
     pub ignored_by_user_id: Option<i64>,
     pub ignored_at: Option<DateTimeWithTimeZone>,
+    pub exploited_notified_at: Option<DateTimeWithTimeZone>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

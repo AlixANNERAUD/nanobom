@@ -102,6 +102,7 @@ pub async fn set(
                 enabled: Set(enabled),
                 last_delivery_at: Set(None),
                 last_delivery_status: Set(None),
+                exploited_only: Set(false),
             }
             .insert(database)
             .await?
