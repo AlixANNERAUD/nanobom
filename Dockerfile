@@ -3,6 +3,7 @@
 # The build uses the toolchain pinned in mise.toml (Rust, cargo-leptos, wasm-bindgen), like CI.
 FROM debian:bookworm-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS builder
 
+# Updating mise means updating the checksums below (SHASUMS256.txt of its release).
 ARG MISE_VERSION=2026.10.18
 ARG TARGETARCH
 
@@ -10,18 +11,22 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl git build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+# The mise binary is checked against the release's checksums before it runs.
 RUN case "$TARGETARCH" in \
-        amd64) arch=x64 ;; \
-        arm64) arch=arm64 ;; \
+        amd64) arch=x64; sha256=e97c38973336aa2ff350fea50f47b412b266fe263b102b7200ff1e9b118c6942 ;; \
+        arm64) arch=arm64; sha256=3a3c72376687ba21a588d0f5a2c88c76f483fb6cdece7b0fc43d5e3132b08a52 ;; \
         *) echo "unsupported architecture: $TARGETARCH" >&2; exit 1 ;; \
     esac \
-    && curl -fsSL "https://github.com/jdx/mise/releases/download/v${MISE_VERSION}/mise-v${MISE_VERSION}-linux-${arch}" \
+    && curl -fsSL --retry 5 --retry-all-errors \
+        "https://github.com/jdx/mise/releases/download/v${MISE_VERSION}/mise-v${MISE_VERSION}-linux-${arch}" \
         -o /usr/local/bin/mise \
+    && echo "$sha256  /usr/local/bin/mise" | sha256sum --check --strict \
     && chmod +x /usr/local/bin/mise
 
 ENV MISE_ENV=ci \
     MISE_DATA_DIR=/opt/mise \
     MISE_YES=1 \
+    MISE_HTTP_RETRIES=5 \
     PATH=/opt/mise/shims:$PATH \
     CARGO_HOME=/opt/cargo \
     CARGO_TERM_COLOR=never \

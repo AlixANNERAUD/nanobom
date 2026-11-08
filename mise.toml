@@ -8,6 +8,10 @@ mr-boxington = "latest"
 # Must match the wasm-bindgen version in Cargo.lock. The statically linked (musl) build runs on
 # any Linux, including the Debian 12 image builder whose glibc is older than the gnu build needs.
 "github:wasm-bindgen/wasm-bindgen" = { version = "0.2.130", matching = "unknown-linux-musl" }
+# cargo-leptos uses these from the PATH instead of downloading them at each clean build (GitHub
+# refusing those downloads was failing builds). The versions are cargo-leptos 0.3.11's defaults.
+"github:WebAssembly/binaryen" = { version = "123", version_prefix = "version_" }
+"aqua:tailwindlabs/tailwindcss" = "4.2.1"
 
 [env]
 # The browser bundle is built separately for wasm32, so server-side commands leave it out to
