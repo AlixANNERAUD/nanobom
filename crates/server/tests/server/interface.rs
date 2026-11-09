@@ -629,6 +629,28 @@ async fn exploitation_signals_are_shown_and_filtered() {
     assert!(html.contains("0.500"));
     assert!(html.contains("https://www.cisa.gov/known-exploited-vulnerabilities-catalog"));
     assert!(html.contains("https://www.first.org/epss/"));
+    assert!(html.contains("Ransomware campaigns"));
+    assert!(!html.contains("Unknown"));
+
+    // A KEV entry without a due date: the badge has no tooltip rather than an empty one.
+    nanobom_entity::exploitation::ActiveModel {
+        cve_id: Set("CVE-2021-23337".to_owned()),
+        kev_due_date: Set(None),
+        kev_ransomware: Set(false),
+        ..Default::default()
+    }
+    .update(&server.database)
+    .await
+    .unwrap();
+    let html = alice.page(project_page).await;
+    assert!(html.contains("Known exploited"));
+    assert!(!html.contains("CISA due date"));
+    assert!(
+        !html.contains("title=\"\""),
+        "an empty title attribute in:\n{html}"
+    );
+    let html = alice.page(&finding_page).await;
+    assert!(html.contains("Unknown"));
 
     // Without the exploitation row, the filter hides the finding.
     nanobom_entity::exploitation::Entity::delete_by_id("CVE-2021-23337")

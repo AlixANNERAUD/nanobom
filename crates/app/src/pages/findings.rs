@@ -89,8 +89,7 @@ fn finding_rows(findings: Vec<FindingRow>) -> impl IntoView {
                 let title = finding
                     .exploitation
                     .kev_due_date
-                    .map(|date| tf!("project.known_exploited_due", date = date.to_string()))
-                    .unwrap_or_default();
+                    .map(|date| tf!("project.known_exploited_due", date = date.to_string()));
                 view! {
                     <span title=title class="mt-1 block">
                         <Badge variant=BadgeVariant::Destructive>{t!("project.known_exploited")}</Badge>
