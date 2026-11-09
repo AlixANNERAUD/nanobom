@@ -108,6 +108,9 @@ code.
   changelog are derived.
 - Run `mise run check` before pushing; CI runs the same checks, plus the release build and the
   container image.
+- `main` is protected: changes arrive through pull requests, which merge once the
+  `CI passed` and `Pull request title` checks succeed. `CI passed` succeeds when every CI job
+  does, except coverage, which depends on Codecov being up.
 - Keep comments and documentation about what the code does not say: why, constraints,
   trade-offs.
 

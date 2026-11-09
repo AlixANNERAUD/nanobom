@@ -5,16 +5,15 @@ on:
   push:
     branches: [main]
     tags-ignore: ["**"]
+  # The pull request title is checked by pr-title.yml: a title edit must not start a run here,
+  # since its skipped jobs would replace the results of the real run on the same commit.
   pull_request:
-    # `edited` re-checks the title when it changes; only the title check runs then.
-    types: [opened, edited, reopened, synchronize]
 
 permissions:
   contents: read
 
 concurrency:
-  # Title edits get their own group, so they never cancel a build in progress.
-  group: ci-${{ github.ref }}-${{ github.event.action == 'edited' && 'title' || 'build' }}
+  group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -23,27 +22,7 @@ env:
   CARGO_INCREMENTAL: "0"
 
 jobs:
-  # Pull requests are squash-merged, so the title becomes the commit on main, from which
-  # release-plz derives the version bump and the changelog (see RELEASING.md).
-  pr-title:
-    name: Pull request title
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Check that the title follows Conventional Commits
-        run: |
-          pattern='^(feat|fix|perf|refactor|docs|test|ci|build|chore|style|revert)(\([a-z0-9_-]+\))?!?: [^ ].*$'
-          if printf '%s' "$TITLE" | grep -Eq "$pattern"; then
-            echo "Valid title: $TITLE"
-          else
-            echo "::error::The title must follow Conventional Commits, such as 'feat: add SPDX uploads', 'fix(osv): retry on timeouts' or 'feat!: change the webhook payload'. Got: $TITLE"
-            exit 1
-          fi
-        env:
-          TITLE: ${{ github.event.pull_request.title }}
-
   check:
-    if: github.event.action != 'edited'
     name: Format, clippy and tests
     runs-on: ubuntu-24.04
     steps:
@@ -55,7 +34,6 @@ jobs:
       - run: mise run test
 
   postgres:
-    if: github.event.action != 'edited'
     name: Tests on PostgreSQL
     runs-on: ubuntu-24.04
     services:
@@ -81,7 +59,6 @@ jobs:
       - run: mise run test-postgres
 
   coverage:
-    if: github.event.action != 'edited'
     name: Coverage
     runs-on: ubuntu-24.04
     steps:
@@ -110,7 +87,6 @@ jobs:
           fail_ci_if_error: ${{ github.actor != 'dependabot[bot]' }}
 
   deny:
-    if: github.event.action != 'edited'
     name: Advisories and licences
     runs-on: ubuntu-24.04
     steps:
@@ -119,7 +95,6 @@ jobs:
       - run: mise run deny
 
   release-build:
-    if: github.event.action != 'edited'
     name: Release build
     runs-on: ubuntu-24.04
     steps:
@@ -134,7 +109,6 @@ jobs:
           ls -l target/release/nanobom target/site/pkg
 
   image:
-    if: github.event.action != 'edited'
     name: Container image (${{ matrix.architecture }})
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -179,3 +153,22 @@ jobs:
           NANOBOM_IMAGE: nanobom:ci
       - name: Report size
         run: docker image ls nanobom:ci
+
+  # The one check branch protection requires: it fails unless every job above succeeded, so
+  # adding a job here needs no change to the repository settings. Coverage is left out: its
+  # upload depends on Codecov being up, and the tests it runs already run in `check`.
+  passed:
+    name: CI passed
+    if: always()
+    needs: [check, postgres, deny, release-build, image]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check that every job succeeded
+        run: |
+          echo "$RESULTS" | jq --exit-status 'all(.[]; .result == "success")' > /dev/null || {
+            echo "$RESULTS" | jq --raw-output 'to_entries[] | "\(.key): \(.value.result)"'
+            echo "::error::A required job did not succeed"
+            exit 1
+          }
+        env:
+          RESULTS: ${{ toJSON(needs) }}

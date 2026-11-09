@@ -1,0 +1,31 @@
+name: Pull request title
+
+# Pull requests are merged with their title as the subject release-plz reads to derive the
+# version bump and the changelog (see RELEASING.md). Separate from ci.yml so that editing a title
+# re-runs only this check.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions: {}
+
+concurrency:
+  group: pr-title-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  pr-title:
+    name: Pull request title
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check that the title follows Conventional Commits
+        run: |
+          pattern='^(feat|fix|perf|refactor|docs|test|ci|build|chore|style|revert)(\([a-z0-9_-]+\))?!?: [^ ].*$'
+          if printf '%s' "$TITLE" | grep -Eq "$pattern"; then
+            echo "Valid title: $TITLE"
+          else
+            echo "::error::The title must follow Conventional Commits, such as 'feat: add SPDX uploads', 'fix(osv): retry on timeouts' or 'feat!: change the webhook payload'. Got: $TITLE"
+            exit 1
+          fi
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
