@@ -23,7 +23,7 @@ about a particular organization.
 | `nanobom_run_duration_seconds` | histogram | Duration of runs |
 | `nanobom_osv_request_errors_total{kind}` | counter | Failed requests to OSV, retries included; `kind` is `status` (an error status) or `request` (network error or unreadable answer) |
 | `nanobom_exploitation_refresh_failures_total` | counter | Refreshes of exploitation data that failed or were abandoned, including those where only one of KEV and EPSS failed; a refresh counts once even when both failed |
-| `nanobom_webhook_deliveries_total{outcome}` | counter | Webhook delivery attempts, by outcome: `delivered`, `retried` (the attempt failed and another is scheduled) or `abandoned` (the attempt failed and no retry follows: refused by the receiver, or the last retry) |
+| `nanobom_webhook_deliveries_total{channel, outcome}` | counter | Delivery attempts, by channel (`webhook` or `email`) and outcome: `delivered`, `retried` (the attempt failed and another is scheduled) or `abandoned` (the attempt failed and no retry follows: refused by the receiver, or the last retry) |
 
 Gauges are computed from the database at startup and after each run. `nanobom_stale_projects`
 is also recomputed on each scrape, since projects go stale with time alone (with
@@ -53,7 +53,8 @@ detail from nanobom's own crates.
 | --- | --- | --- |
 | `run failed; findings left unchanged` | error | A run could not complete; `error` says why |
 | `OSV request failed, retrying` | warn | A request to OSV failed and is retried |
-| `webhook delivery failed` | warn | A webhook (an organization's, or the failure webhook) did not answer with a `2xx`; `attempt` and `status` say which attempt and why. See [Delivery](webhooks.md#delivery) for retries |
+| `notification delivery failed` | warn | A webhook (an organization's, or the failure webhook) did not answer with a `2xx`, or an SMTP server did not accept an email; `channel`, `attempt` and `status` say which channel, which attempt and why. See [Delivery](webhooks.md#delivery) for retries |
+| `test email failed` | warn | The **Send a test email** button of an organization's settings got no `2xx` from the SMTP server; `status` says why |
 | `a stage of a run panicked; the worker continues` | error | A bug stopped a run, or the work after it; the run is recorded as failed |
 | `a run interrupted by a restart is recorded as failed` | warn | nanobom was stopped during a run; the run is closed at startup and sent to the failure webhook |
 | `refreshing exploitation data failed` | warn | KEV or EPSS could not be downloaded, or did not answer within its 25 seconds; `feed` names it when the other feed was still stored |

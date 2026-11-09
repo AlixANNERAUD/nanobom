@@ -114,7 +114,8 @@ nanobom makes requests to:
 - CISA and FIRST (`NANOBOM_KEV_URL`, `NANOBOM_EPSS_URL`), after runs, unless exploitation data is
   off;
 - the OpenID Connect provider, at sign-in;
-- webhooks: organization webhooks set by organization admins, and the failure webhook.
+- webhooks: organization webhooks set by organization admins, and the failure webhook;
+- the SMTP server (`NANOBOM_SMTP_URL`), for emails to the recipients organization admins set.
 
 Organization admins can make nanobom `POST` to any `http` or `https` address they choose,
 including addresses on its own network. If nanobom runs next to services that trust their

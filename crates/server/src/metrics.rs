@@ -75,8 +75,8 @@ fn describe() {
     describe_counter!("nanobom_run_failures_total", "Runs that could not complete");
     describe_counter!(
         "nanobom_webhook_deliveries_total",
-        "Webhook delivery attempts, by outcome: delivered, retried (failed, another attempt is \
-         scheduled) or abandoned (failed for good)"
+        "Notification delivery attempts, by channel (webhook or email) and outcome: delivered, \
+         retried (failed, another attempt is scheduled) or abandoned (failed for good)"
     );
     describe_counter!(
         "nanobom_osv_request_errors_total",
@@ -107,11 +107,17 @@ pub fn record_failed_run() {
     counter!("nanobom_run_failures_total").increment(1);
 }
 
-/// Counts the outcomes of webhook delivery attempts.
-pub fn record_deliveries(outcomes: &[deliveries::Outcome]) {
+/// Counts the outcomes of delivery attempts, webhooks and emails. The metric keeps its name
+/// from the time webhooks were the only channel, so existing dashboards go on working.
+pub fn record_deliveries(outcomes: &[(deliveries::Channel, deliveries::Outcome)]) {
     handle();
-    for outcome in outcomes {
-        counter!("nanobom_webhook_deliveries_total", "outcome" => outcome.as_str()).increment(1);
+    for (channel, outcome) in outcomes {
+        counter!(
+            "nanobom_webhook_deliveries_total",
+            "channel" => channel.as_str(),
+            "outcome" => outcome.as_str()
+        )
+        .increment(1);
     }
 }
 

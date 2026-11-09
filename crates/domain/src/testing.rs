@@ -1,4 +1,5 @@
-//! Helpers for tests: a fresh, migrated database per test.
+//! Helpers for tests: a fresh, migrated database per test, a fake vulnerability source and an
+//! SMTP sink.
 //!
 //! Tests use a private in-memory SQLite database by default. Set `NANOBOM_TEST_DATABASE_URL` to
 //! run them against another database such as PostgreSQL; the schema is then dropped and recreated
@@ -179,5 +180,143 @@ impl nanobom_osv::VulnerabilitySource for FakeSource {
                 url: "fake".to_owned(),
                 message: format!("{id} is unknown"),
             })
+    }
+}
+
+/// A message accepted by an [`SmtpSink`].
+#[derive(Debug, Clone)]
+pub struct ReceivedEmail {
+    /// The envelope sender (`MAIL FROM`).
+    pub from: String,
+    /// The envelope recipients (`RCPT TO`).
+    pub recipients: Vec<String>,
+    /// The message as sent, headers and MIME parts, with dot-stuffing undone.
+    pub data: String,
+}
+
+#[derive(Default)]
+struct SinkState {
+    received: Vec<ReceivedEmail>,
+    /// Replies to the next `RCPT TO` commands, instead of accepting them.
+    rejections: std::collections::VecDeque<String>,
+}
+
+/// An SMTP server on the loopback interface that speaks just enough SMTP for lettre (no TLS,
+/// no authentication) and records the messages it accepts, so that tests exercise the real
+/// SMTP client without reaching the network. It can be told to refuse the next recipients with
+/// a given reply, transient (4xx) or permanent (5xx).
+pub struct SmtpSink {
+    address: std::net::SocketAddr,
+    state: std::sync::Arc<std::sync::Mutex<SinkState>>,
+}
+
+impl SmtpSink {
+    /// Starts the sink on a free port; it serves until the test's runtime ends.
+    pub async fn start() -> Self {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind the SMTP sink");
+        let address = listener.local_addr().expect("the sink's address");
+        let state = std::sync::Arc::new(std::sync::Mutex::new(SinkState::default()));
+        let shared = std::sync::Arc::clone(&state);
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                tokio::spawn(serve_smtp(stream, std::sync::Arc::clone(&shared)));
+            }
+        });
+        Self { address, state }
+    }
+
+    /// The URL of the sink for `NANOBOM_SMTP_URL`.
+    pub fn url(&self) -> String {
+        format!("smtp://{}", self.address)
+    }
+
+    /// Answers the next `RCPT TO` with this reply, such as `450 4.2.1 mailbox busy`.
+    pub fn reject_next(&self, reply: &str) {
+        self.state
+            .lock()
+            .expect("not poisoned")
+            .rejections
+            .push_back(reply.to_owned());
+    }
+
+    /// The messages accepted so far, in order.
+    pub fn received(&self) -> Vec<ReceivedEmail> {
+        self.state.lock().expect("not poisoned").received.clone()
+    }
+}
+
+async fn serve_smtp(
+    stream: tokio::net::TcpStream,
+    state: std::sync::Arc<std::sync::Mutex<SinkState>>,
+) {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    let (reader, mut writer) = stream.into_split();
+    let mut lines = BufReader::new(reader).lines();
+    let mut from = String::new();
+    let mut recipients = Vec::new();
+    if writer.write_all(b"220 sink ESMTP\r\n").await.is_err() {
+        return;
+    }
+    while let Ok(Some(line)) = lines.next_line().await {
+        let command = line.to_ascii_uppercase();
+        let reply = if command.starts_with("EHLO") || command.starts_with("HELO") {
+            "250 sink".to_owned()
+        } else if command.starts_with("MAIL FROM:") {
+            from = line["MAIL FROM:".len()..].trim().to_owned();
+            recipients.clear();
+            "250 2.1.0 ok".to_owned()
+        } else if command.starts_with("RCPT TO:") {
+            let rejection = state.lock().expect("not poisoned").rejections.pop_front();
+            match rejection {
+                Some(reply) => reply,
+                None => {
+                    recipients.push(
+                        line["RCPT TO:".len()..]
+                            .trim()
+                            .trim_matches(['<', '>'])
+                            .to_owned(),
+                    );
+                    "250 2.1.5 ok".to_owned()
+                }
+            }
+        } else if command == "DATA" {
+            if writer.write_all(b"354 go ahead\r\n").await.is_err() {
+                return;
+            }
+            let mut data = String::new();
+            while let Ok(Some(line)) = lines.next_line().await {
+                if line == "." {
+                    break;
+                }
+                data.push_str(line.strip_prefix('.').unwrap_or(&line));
+                data.push('\n');
+            }
+            state
+                .lock()
+                .expect("not poisoned")
+                .received
+                .push(ReceivedEmail {
+                    from: from.trim_matches(['<', '>']).to_owned(),
+                    recipients: std::mem::take(&mut recipients),
+                    data,
+                });
+            "250 2.0.0 queued".to_owned()
+        } else if command == "QUIT" {
+            let _ = writer.write_all(b"221 2.0.0 bye\r\n").await;
+            return;
+        } else {
+            // RSET, NOOP and anything else.
+            "250 ok".to_owned()
+        };
+        if writer
+            .write_all(format!("{reply}\r\n").as_bytes())
+            .await
+            .is_err()
+        {
+            return;
+        }
     }
 }

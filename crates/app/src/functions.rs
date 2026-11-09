@@ -370,6 +370,9 @@ pub async fn load_settings(organization: String) -> Result<SettingsData, ServerF
     let webhook = notifications::get(database, &actor, found.id)
         .await
         .map_err(failure)?;
+    let email = nanobom_domain::email::get(database, &actor, found.id)
+        .await
+        .map_err(failure)?;
     let deliveries = nanobom_domain::deliveries::recent(database, &actor, found.id, 10)
         .await
         .map_err(failure)?;
@@ -429,10 +432,18 @@ pub async fn load_settings(organization: String) -> Result<SettingsData, ServerF
             exploited_only: webhook.exploited_only,
             format: webhook.format.as_str().to_owned(),
         }),
+        email: email.map(|email| EmailSettings {
+            recipients: email.recipients,
+            language: email.language.as_str().to_owned(),
+            minimum_severity: crate::server::severity(email.minimum_severity),
+            exploited_only: email.exploited_only,
+        }),
+        email_available: context()?.mailer.is_some(),
         deliveries: deliveries
             .into_iter()
             .map(|delivery| WebhookDelivery {
                 id: delivery.id,
+                email: delivery.channel == nanobom_domain::deliveries::Channel::Email,
                 event: delivery.event,
                 state: crate::server::delivery_state(delivery.state),
                 attempts: delivery.attempts,
@@ -793,6 +804,86 @@ pub async fn delete_webhook(organization: String) -> Result<(), ServerFnError> {
         let id = organization_id(database, &actor, &organization).await?;
         nanobom_domain::notifications::delete(database, &actor, id).await?;
         Ok(crate::t!("notices.webhook_removed").to_owned())
+    }
+    .await;
+    finish(result, &format!("/organizations/{organization}/settings"));
+    Ok(())
+}
+
+/// Saves where the organization's notifications are emailed. Recipients are typed in one
+/// field, separated by line breaks, commas or semicolons.
+#[server(endpoint = "save_email")]
+pub async fn save_email(
+    organization: String,
+    recipients: String,
+    language: String,
+    minimum_severity: String,
+    exploited_only: Option<String>,
+) -> Result<(), ServerFnError> {
+    use nanobom_domain::email::{self, Language};
+    let actor = actor().await?;
+    let database = &context()?.database;
+    let result = async {
+        let id = organization_id(database, &actor, &organization).await?;
+        let severity = Severity::parse(&minimum_severity).ok_or(nanobom_domain::Error::invalid(
+            nanobom_domain::Problem::UnknownSeverity,
+        ))?;
+        let language = Language::parse(&language).ok_or(nanobom_domain::Error::invalid(
+            nanobom_domain::Problem::UnknownEmailLanguage,
+        ))?;
+        email::set(
+            database,
+            &actor,
+            id,
+            &email::EmailSettings {
+                recipients: email::split_recipients(&recipients)
+                    .map(str::to_owned)
+                    .collect(),
+                language,
+                minimum_severity: crate::server::domain_severity(severity),
+                exploited_only: exploited_only.is_some(),
+            },
+        )
+        .await?;
+        Ok(crate::t!("notices.email_saved").to_owned())
+    }
+    .await;
+    finish(result, &format!("/organizations/{organization}/settings"));
+    Ok(())
+}
+
+#[server(endpoint = "delete_email")]
+pub async fn delete_email(organization: String) -> Result<(), ServerFnError> {
+    let actor = actor().await?;
+    let database = &context()?.database;
+    let result = async {
+        let id = organization_id(database, &actor, &organization).await?;
+        nanobom_domain::email::delete(database, &actor, id).await?;
+        Ok(crate::t!("notices.email_removed").to_owned())
+    }
+    .await;
+    finish(result, &format!("/organizations/{organization}/settings"));
+    Ok(())
+}
+
+/// Sends a test email to the saved recipients at once; the page shows the SMTP server's reply
+/// when it refuses.
+#[server(endpoint = "send_test_email")]
+pub async fn send_test_email(organization: String) -> Result<(), ServerFnError> {
+    let actor = actor().await?;
+    let context = context()?;
+    let database = &context.database;
+    let result = async {
+        let id = organization_id(database, &actor, &organization).await?;
+        nanobom_domain::email::send_test(
+            database,
+            &actor,
+            id,
+            context.mailer.as_ref(),
+            &context.settings.public_url,
+        )
+        .await?;
+        Ok(crate::t!("notices.test_email_sent").to_owned())
     }
     .await;
     finish(result, &format!("/organizations/{organization}/settings"));

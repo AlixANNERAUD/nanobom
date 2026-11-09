@@ -1,5 +1,5 @@
-//! The retry loop of the webhook delivery queue: failed deliveries are attempted again when
-//! their backoff expires, and old finished deliveries are pruned.
+//! The retry loop of the delivery queue (webhooks and emails): failed deliveries are attempted
+//! again when their backoff expires, and old finished deliveries are pruned.
 //!
 //! First attempts are made by the run worker right after a run; this loop only picks up what
 //! is due afterwards (retries, and deliveries whose first attempt a restart cut short). It
@@ -47,9 +47,9 @@ pub fn start(
             match pass.await {
                 Ok(()) => {}
                 Err(error) if error.is_panic() => {
-                    tracing::error!(%error, "retrying webhook deliveries panicked; the loop continues");
+                    tracing::error!(%error, "retrying deliveries panicked; the loop continues");
                 }
-                Err(error) => tracing::warn!(%error, "retrying webhook deliveries was cancelled"),
+                Err(error) => tracing::warn!(%error, "retrying deliveries was cancelled"),
             }
         }
     })
@@ -62,7 +62,23 @@ async fn tick(database: &DatabaseConnection, notifier: &Notifier, pruning: bool)
     }
     match notifier.retry_due(database, RETRIES_PER_TICK).await {
         Ok(outcomes) => metrics::record_deliveries(&outcomes),
-        Err(error) => tracing::error!(%error, "retrying webhook deliveries failed"),
+        Err(error) => tracing::error!(%error, "retrying deliveries failed"),
+    }
+}
+
+/// Abandons the pending emails when the instance has no SMTP server any more
+/// (`NANOBOM_SMTP_URL` removed): nothing could send them. Call it at startup.
+pub async fn cancel_unsendable_emails(database: &DatabaseConnection, email: bool) {
+    if email {
+        return;
+    }
+    match deliveries::cancel_pending_emails(database).await {
+        Ok(0) => {}
+        Ok(count) => tracing::info!(
+            count,
+            "pending emails abandoned: no SMTP server is configured"
+        ),
+        Err(error) => tracing::warn!(%error, "abandoning pending emails failed"),
     }
 }
 
@@ -86,7 +102,7 @@ pub async fn cancel_outdated_failures(
 async fn prune(database: &DatabaseConnection) {
     match deliveries::prune(database, Utc::now().fixed_offset()).await {
         Ok(0) => {}
-        Ok(count) => tracing::info!(count, "old webhook deliveries deleted"),
-        Err(error) => tracing::warn!(%error, "deleting old webhook deliveries failed"),
+        Ok(count) => tracing::info!(count, "old deliveries deleted"),
+        Err(error) => tracing::warn!(%error, "deleting old deliveries failed"),
     }
 }

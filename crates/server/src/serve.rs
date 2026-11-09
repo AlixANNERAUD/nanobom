@@ -13,6 +13,7 @@ use nanobom_app::{
     shell,
 };
 use nanobom_domain::{
+    email::Mailer,
     evaluation::Evaluator,
     exploitation::{FeedSettings, Feeds},
     notifications::Notifier,
@@ -53,7 +54,9 @@ fn interface_context(state: &AppState) -> InterfaceContext {
             password_minimum_length: state.options.accounts.password_minimum_length,
             personal_organizations: state.options.accounts.personal_organizations,
             stale_after_days: state.options.stale_after_days,
+            public_url: state.options.public_url.clone(),
         },
+        mailer: state.mailer.clone(),
         request_run: Arc::new(move |trigger, scope, triggered_by| {
             runner.request(RunRequest {
                 trigger,
@@ -139,7 +142,16 @@ pub async fn run(
         tracing::info!("exploitation data is off");
         None
     };
-    let notifier = Notifier::new()?;
+    let notifier = match mailer(&options)? {
+        Some(mailer) => {
+            tracing::info!("email notifications are on");
+            Notifier::new()?.with_mailer(mailer)
+        }
+        None => {
+            tracing::info!("email notifications are off (no NANOBOM_SMTP_URL)");
+            Notifier::new()?
+        }
+    };
     let settings = NotificationSettings {
         public_url: options.public_url.clone(),
         failure_webhook: options.failure_webhook_url.clone(),
@@ -147,12 +159,14 @@ pub async fn run(
         exploitation_refresh_timeout: runner::EXPLOITATION_REFRESH_TIMEOUT,
     };
     deliveries::cancel_outdated_failures(&database, settings.failure_webhook.as_ref()).await;
+    deliveries::cancel_unsendable_emails(&database, notifier.mailer().is_some()).await;
     runner::close_interrupted_runs(&database, &settings).await;
     deliveries::start(
         database.clone(),
         notifier.clone(),
         deliveries::RETRY_INTERVAL,
     );
+    let mailer = notifier.mailer().cloned();
     let runner = Runner::start(database.clone(), evaluator, notifier, settings, feeds);
     match schedule {
         Some(schedule) => runner::start_schedule(runner.clone(), schedule),
@@ -160,7 +174,7 @@ pub async fn run(
     }
 
     let leptos_options = leptos_options(&options);
-    let state = AppState::new(database, options, leptos_options, runner, openid);
+    let state = AppState::new(database, options, leptos_options, runner, openid, mailer);
     let listener = tokio::net::TcpListener::bind(address).await?;
     tracing::info!(%address, "listening");
     axum::serve(
@@ -170,6 +184,29 @@ pub async fn run(
     .with_graceful_shutdown(shutdown_signal())
     .await?;
     Ok(())
+}
+
+/// The mailer of email notifications, when an SMTP server is configured. Fails when the SMTP
+/// URL cannot be used or the sender is missing or invalid, so a mistake shows at startup rather
+/// than at the first notification. The SMTP server itself is contacted at the first email.
+pub fn mailer(options: &ServeOptions) -> Result<Option<Mailer>, crate::Failure> {
+    let smtp = &options.smtp;
+    let Some(url) = smtp
+        .smtp_url
+        .as_ref()
+        .filter(|url| !url.0.trim().is_empty())
+    else {
+        if smtp.smtp_from.is_some() {
+            tracing::warn!("NANOBOM_SMTP_FROM is set without NANOBOM_SMTP_URL: email stays off");
+        }
+        return Ok(None);
+    };
+    let from = smtp
+        .smtp_from
+        .as_deref()
+        .filter(|from| !from.trim().is_empty())
+        .ok_or("NANOBOM_SMTP_FROM is required with NANOBOM_SMTP_URL: the sender of the emails")?;
+    Ok(Some(Mailer::new(&url.0, from)?))
 }
 
 async fn shutdown_signal() {

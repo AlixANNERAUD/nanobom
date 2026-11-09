@@ -1,5 +1,5 @@
-//! Organization settings (members, API tokens, webhook, license policy) and instance
-//! administration.
+//! Organization settings (members, API tokens, webhook, email notifications, license policy)
+//! and instance administration.
 
 use leptos::prelude::*;
 use leptos_meta::Title;
@@ -8,9 +8,10 @@ use leptos_router::hooks::use_params_map;
 use crate::{
     components::{Empty, Heading, Loaded, Page, action, format_time, ui::*},
     functions::{
-        AddMember, CreateToken, CreateUser, DeleteOrganization, DeleteWebhook, RemoveMember,
-        RenameOrganization, ResetPassword, RevokeToken, SaveLicensePolicy, SaveWebhook,
-        SetMemberRole, SetUserAdministrator, SetUserDisabled, load_administration, load_settings,
+        AddMember, CreateToken, CreateUser, DeleteEmail, DeleteOrganization, DeleteWebhook,
+        RemoveMember, RenameOrganization, ResetPassword, RevokeToken, SaveEmail, SaveLicensePolicy,
+        SaveWebhook, SendTestEmail, SetMemberRole, SetUserAdministrator, SetUserDisabled,
+        load_administration, load_settings,
     },
     model::{
         AdministrationData, DeliveryState, LicenseAction, Role, SettingsData, Severity,
@@ -290,8 +291,6 @@ fn WebhookSettings(page: SettingsData) -> impl IntoView {
         ("slack", t!("settings.format_slack")),
         ("teams", t!("settings.format_teams")),
     ];
-    let deliveries = (!page.deliveries.is_empty())
-        .then(|| view! { <Deliveries deliveries=page.deliveries.clone() /> });
     let remove = webhook.is_some().then({
         let organization = organization.clone();
         move || {
@@ -361,16 +360,130 @@ fn WebhookSettings(page: SettingsData) -> impl IntoView {
                         </div>
                     </form>
                     {remove}
-                    {deliveries}
                 </div>
             </CardContent>
         </Card>
     }
 }
 
-/// The latest deliveries to the webhook: their state, attempts and the last answer.
+/// Where notifications are emailed. Without an SMTP server on the instance, the card only says
+/// that email is off.
+#[component]
+fn EmailNotificationSettings(page: SettingsData) -> impl IntoView {
+    let organization = page.organization.slug.clone();
+    if !page.email_available {
+        return view! {
+            <Card>
+                <CardHeader>
+                    <CardTitle>{t!("settings.email_title")}</CardTitle>
+                    <CardDescription>{t!("settings.email_unavailable")}</CardDescription>
+                </CardHeader>
+            </Card>
+        }
+        .into_any();
+    }
+    let email = page.email.clone();
+    let minimum = email
+        .as_ref()
+        .map_or(Severity::High, |email| email.minimum_severity);
+    let exploited_only = email.as_ref().is_some_and(|email| email.exploited_only);
+    let language = email
+        .as_ref()
+        .map_or_else(|| "en".to_owned(), |email| email.language.clone());
+    let recipients = email
+        .as_ref()
+        .map(|email| email.recipients.join("\n"))
+        .unwrap_or_default();
+    let languages = [
+        ("en", t!("settings.email_language_en")),
+        ("fr", t!("settings.email_language_fr")),
+    ];
+    let actions = email.is_some().then({
+        let organization = organization.clone();
+        move || {
+            view! {
+                <div class="flex flex-wrap gap-2">
+                    <form method="post" action={action::<SendTestEmail>()}>
+                        <input type="hidden" name="organization" value=organization.clone() />
+                        <Button variant=ButtonVariant::Outline size=ButtonSize::Small>{t!("settings.send_test_email")}</Button>
+                    </form>
+                    <form method="post" action={action::<DeleteEmail>()}>
+                        <input type="hidden" name="organization" value=organization />
+                        <Button variant=ButtonVariant::Ghost size=ButtonSize::Small>{t!("settings.remove_email")}</Button>
+                    </form>
+                </div>
+            }
+        }
+    });
+    view! {
+        <Card>
+            <CardHeader>
+                <CardTitle>{t!("settings.email_title")}</CardTitle>
+                <CardDescription>{t!("settings.email_description")}</CardDescription>
+            </CardHeader>
+            <CardContent>
+                <div class="grid gap-4">
+                    <form method="post" action={action::<SaveEmail>()} class="grid gap-4">
+                        <input type="hidden" name="organization" value=organization.clone() />
+                        <Field label=t!("settings.email_recipients") input_id="email-recipients">
+                            <textarea
+                                id="email-recipients"
+                                name="recipients"
+                                rows="3"
+                                class=TEXTAREA
+                                required
+                                placeholder="security@example.org"
+                            >
+                                {recipients}
+                            </textarea>
+                        </Field>
+                        <div class="flex flex-wrap items-end gap-4">
+                            <Field label=t!("settings.email_language") input_id="email-language">
+                                <select id="email-language" name="language" class=format!("{SELECT} w-40")>
+                                    {languages
+                                        .into_iter()
+                                        .map(|(value, label)| {
+                                            view! { <option value=value selected=value == language>{label}</option> }
+                                        })
+                                        .collect_view()}
+                                </select>
+                            </Field>
+                            <Field label=t!("settings.minimum_severity") input_id="email-severity">
+                                <select id="email-severity" name="minimum_severity" class=format!("{SELECT} w-40")>
+                                    {Severity::DESCENDING
+                                        .into_iter()
+                                        .map(|severity| {
+                                            view! {
+                                                <option value=severity.as_str() selected=severity == minimum>
+                                                    {severity.label()}
+                                                </option>
+                                            }
+                                        })
+                                        .collect_view()}
+                                </select>
+                            </Field>
+                            <label class=format!("{LABEL} h-9")>
+                                <input type="checkbox" name="exploited_only" class=CHECKBOX checked=exploited_only />
+                                {t!("settings.exploited_only")}
+                            </label>
+                            <Button>{t!("settings.save_email")}</Button>
+                        </div>
+                    </form>
+                    {actions}
+                </div>
+            </CardContent>
+        </Card>
+    }
+    .into_any()
+}
+
+/// The latest deliveries, to the webhook and by email: their state, attempts and the last
+/// answer. Hidden while there are none.
 #[component]
 fn Deliveries(deliveries: Vec<WebhookDelivery>) -> impl IntoView {
+    if deliveries.is_empty() {
+        return ().into_any();
+    }
     let rows = deliveries
         .into_iter()
         .map(|delivery| {
@@ -399,10 +512,16 @@ fn Deliveries(deliveries: Vec<WebhookDelivery>) -> impl IntoView {
                         </span>
                     }
                 });
+            let channel = if delivery.email {
+                t!("settings.delivery_channel_email")
+            } else {
+                t!("settings.delivery_channel_webhook")
+            };
             view! {
                 <tr class=TABLE_ROW>
                     <th scope="row" class=format!("{TABLE_CELL} text-left font-medium")>
                         <span class="font-mono text-xs">{delivery.event.clone()}</span>
+                        <span class="text-muted-foreground block text-xs font-normal">{channel}</span>
                         <span class="text-muted-foreground block text-xs font-normal">
                             {format_time(delivery.created_at)}
                         </span>
@@ -418,21 +537,26 @@ fn Deliveries(deliveries: Vec<WebhookDelivery>) -> impl IntoView {
         })
         .collect_view();
     view! {
-        <section class="grid gap-2">
-            <h3 class="text-sm font-medium">{t!("settings.deliveries_title")}</h3>
-            <Table caption=t!("settings.deliveries_title")>
-                <thead>
-                    <tr class=TABLE_HEAD_ROW>
-                        <th scope="col" class=TABLE_HEAD>{t!("settings.delivery_event")}</th>
-                        <th scope="col" class=TABLE_HEAD>{t!("settings.delivery_state")}</th>
-                        <th scope="col" class=TABLE_HEAD>{t!("settings.delivery_attempts")}</th>
-                        <th scope="col" class=TABLE_HEAD>{t!("settings.delivery_last_attempt")}</th>
-                    </tr>
-                </thead>
-                <tbody>{rows}</tbody>
-            </Table>
-        </section>
+        <Card>
+            <CardHeader>
+                <CardTitle>{t!("settings.deliveries_title")}</CardTitle>
+            </CardHeader>
+            <CardContent>
+                <Table caption=t!("settings.deliveries_title")>
+                    <thead>
+                        <tr class=TABLE_HEAD_ROW>
+                            <th scope="col" class=TABLE_HEAD>{t!("settings.delivery_event")}</th>
+                            <th scope="col" class=TABLE_HEAD>{t!("settings.delivery_state")}</th>
+                            <th scope="col" class=TABLE_HEAD>{t!("settings.delivery_attempts")}</th>
+                            <th scope="col" class=TABLE_HEAD>{t!("settings.delivery_last_attempt")}</th>
+                        </tr>
+                    </thead>
+                    <tbody>{rows}</tbody>
+                </Table>
+            </CardContent>
+        </Card>
     }
+    .into_any()
 }
 
 /// The license policy: three lists of identifiers, replaced as a whole on save, and the two
@@ -602,6 +726,8 @@ pub fn SettingsPage() -> impl IntoView {
                         <Members page=page.clone() />
                         <Tokens page=page.clone() />
                         <WebhookSettings page=page.clone() />
+                        <EmailNotificationSettings page=page.clone() />
+                        <Deliveries deliveries=page.deliveries.clone() />
                         <LicensePolicySettings page=page.clone() />
                         <OrganizationSettings page />
                     }

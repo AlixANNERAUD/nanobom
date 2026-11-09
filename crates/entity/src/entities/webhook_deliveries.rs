@@ -21,6 +21,7 @@ pub struct Model {
     pub last_status: Option<String>,
     pub delivered_at: Option<DateTimeWithTimeZone>,
     pub created_at: DateTimeWithTimeZone,
+    pub channel: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -535,8 +535,8 @@ async fn failed_webhook_deliveries_are_retried() {
         .await;
     let text = body_text(response).await;
     for line in [
-        "nanobom_webhook_deliveries_total{outcome=\"retried\"} 1",
-        "nanobom_webhook_deliveries_total{outcome=\"delivered\"} 1",
+        "nanobom_webhook_deliveries_total{channel=\"webhook\",outcome=\"retried\"} 1",
+        "nanobom_webhook_deliveries_total{channel=\"webhook\",outcome=\"delivered\"} 1",
     ] {
         assert!(text.contains(line), "{line} is missing from:\n{text}");
     }

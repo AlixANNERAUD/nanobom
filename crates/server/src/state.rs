@@ -9,6 +9,7 @@ use std::sync::Arc;
 use axum::extract::FromRef;
 use leptos::config::LeptosOptions;
 use nanobom_authentication::OpenId;
+use nanobom_domain::email::Mailer;
 use sea_orm::DatabaseConnection;
 use tokio::sync::Semaphore;
 
@@ -32,6 +33,8 @@ pub struct AppState {
     pub openid: Option<Arc<OpenId>>,
     /// Uploads through the Dependency-Track API whose run has not finished.
     pub processing_tokens: ProcessingTokens,
+    /// Sends email notifications and test emails; `None` when no SMTP server is configured.
+    pub mailer: Option<Mailer>,
 }
 
 /// SBOMs parsed concurrently; others wait their turn.
@@ -44,6 +47,7 @@ impl AppState {
         leptos_options: LeptosOptions,
         runner: Runner,
         openid: Option<OpenId>,
+        mailer: Option<Mailer>,
     ) -> Self {
         let waiting_uploads = Arc::new(Semaphore::new(options.max_waiting_uploads as usize));
         Self {
@@ -55,6 +59,7 @@ impl AppState {
             runner,
             openid: openid.map(Arc::new),
             processing_tokens: ProcessingTokens::default(),
+            mailer,
         }
     }
 }

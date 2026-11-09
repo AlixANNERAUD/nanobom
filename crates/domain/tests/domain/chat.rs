@@ -5,7 +5,7 @@ use chrono::{Duration, Utc};
 use nanobom_domain::{
     access::Actor,
     chat::MAX_ITEMS,
-    deliveries::{self, Outcome, State},
+    deliveries::{self, Channel, Outcome, State},
     evaluation::{NewFinding, RunOutcome, Scope, Trigger},
     notifications::{
         self, Format, NewFindingsPayload, Payload, PayloadFinding, PayloadOrganization, PayloadRun,
@@ -510,16 +510,23 @@ async fn deliveries_are_rendered_and_posted_in_the_webhooks_format() {
             &database,
             &run_with(organization.id),
             &"https://nanobom.example.org/".parse().unwrap(),
+            false,
         )
         .await
         .unwrap();
-        assert_eq!(deliveries[0].format, format);
+        assert!(
+            matches!(&deliveries[0].target, notifications::Target::Webhook { format: sent, .. } if *sent == format)
+        );
         let outcomes = notifications::Notifier::new()
             .unwrap()
             .deliver(&database, deliveries)
             .await
             .unwrap();
-        assert_eq!(outcomes, [Outcome::Delivered], "{format:?}");
+        assert_eq!(
+            outcomes,
+            [(Channel::Webhook, Outcome::Delivered)],
+            "{format:?}"
+        );
 
         let requests = receiver.received_requests().await.unwrap();
         let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
@@ -590,10 +597,17 @@ async fn a_stale_projects_delivery_follows_the_format() {
         &database,
         30,
         &"https://nanobom.example.org/".parse().unwrap(),
+        false,
     )
     .await
     .unwrap();
-    assert_eq!(deliveries[0].format, Format::Slack);
+    assert!(matches!(
+        deliveries[0].target,
+        notifications::Target::Webhook {
+            format: Format::Slack,
+            ..
+        }
+    ));
     notifications::Notifier::new()
         .unwrap()
         .deliver(&database, deliveries)

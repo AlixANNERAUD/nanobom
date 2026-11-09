@@ -15,7 +15,8 @@ language:
 
 - the upload API's messages, since they end up in CI logs read by whoever maintains the pipeline;
 - webhook payloads and logs, which are meant for programs, and the Slack and Microsoft Teams
-  messages, since the language of a channel's readers is unknown;
+  messages, since the language of a channel's readers is unknown (emails are in the language
+  chosen in the organization's email settings);
 - vulnerability descriptions, which come from OSV as published;
 - the label of the single sign-on button, which is set by `NANOBOM_OIDC_BUTTON_LABEL`.
 

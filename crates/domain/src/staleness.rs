@@ -11,7 +11,7 @@
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Duration, FixedOffset, Utc};
-use nanobom_entity::{organization_webhooks, projects};
+use nanobom_entity::projects;
 use sea_orm::{
     ColumnTrait, ConnectionTrait, EntityTrait, ExprTrait, PaginatorTrait, QueryFilter, QueryOrder,
     Select,
@@ -72,8 +72,8 @@ fn stale(stale_after_days: u32) -> Select<projects::Entity> {
 }
 
 /// The stale projects not yet notified for their current stale period (never notified, or
-/// notified before their latest upload), grouped by organization, for the organizations with
-/// an enabled webhook.
+/// notified before their latest upload), grouped by organization. The caller leaves out the
+/// organizations without a destination for them (an enabled webhook or email recipients).
 pub async fn newly_stale(
     database: &impl ConnectionTrait,
     stale_after_days: u32,
@@ -92,20 +92,6 @@ pub async fn newly_stale(
                 .push(project);
         }
     }
-    let identifiers: Vec<i64> = by_organization.keys().copied().collect();
-    let mut enabled = Vec::new();
-    for chunk in identifiers.chunks(QUERY_CHUNK) {
-        enabled.extend(
-            organization_webhooks::Entity::find()
-                .filter(organization_webhooks::Column::OrganizationId.is_in(chunk.to_vec()))
-                .filter(organization_webhooks::Column::Enabled.eq(true))
-                .all(database)
-                .await?
-                .into_iter()
-                .map(|webhook| webhook.organization_id),
-        );
-    }
-    by_organization.retain(|organization_id, _| enabled.contains(organization_id));
     Ok(by_organization)
 }
 

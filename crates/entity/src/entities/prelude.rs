@@ -7,6 +7,7 @@ pub use super::finding_events::Entity as FindingEvents;
 pub use super::findings::Entity as Findings;
 pub use super::license_rules::Entity as LicenseRules;
 pub use super::memberships::Entity as Memberships;
+pub use super::organization_emails::Entity as OrganizationEmails;
 pub use super::organization_webhooks::Entity as OrganizationWebhooks;
 pub use super::organizations::Entity as Organizations;
 pub use super::projects::Entity as Projects;

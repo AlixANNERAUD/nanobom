@@ -94,5 +94,6 @@ nanobom writes one JSON object per line on standard error (Docker and systemd co
 streams, so a collector reading only standard output must read both now). If you collect logs,
 alert on the messages listed in the [logs reference](../reference/metrics.md#log-messages), first of all
 `run failed; findings left unchanged`, `a stage of a run panicked; the worker continues` and
-`database error`. Webhook receivers that stay down show as a growing
-`nanobom_webhook_deliveries_total{outcome="abandoned"}`.
+`database error`. Webhook receivers that stay down, or an SMTP server that refuses emails, show
+as a growing `nanobom_webhook_deliveries_total{outcome="abandoned"}` (its `channel` label says
+which).

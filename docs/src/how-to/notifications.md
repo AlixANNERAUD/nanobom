@@ -1,9 +1,10 @@
 # Get notified
 
-nanobom posts to webhooks: new findings and stale projects to each organization's webhook, failed
-runs to the instance's failure webhook. An organization's webhook receives JSON documents, or
-messages that Slack and Microsoft Teams show in a channel. The documents, the messages, and when
-each is sent, are described in the [webhook reference](../reference/webhooks.md).
+nanobom posts to webhooks and sends emails: new findings and stale projects to each
+organization's webhook and email recipients, failed runs to the instance's failure webhook. An
+organization's webhook receives JSON documents, or messages that Slack and Microsoft Teams show
+in a channel. The documents, the messages, the emails, and when each is sent, are described in
+the [webhook and email reference](../reference/webhooks.md).
 
 ## Send an organization's new findings to a webhook
 
@@ -90,6 +91,50 @@ channel while **Recent deliveries** says **Delivered**, look at the workflow's r
 Power Automate: the workflow runs under the account of whoever created it, so it can stop working
 when that account loses access to the channel.
 
+## Send them by email
+
+Emails go through an SMTP server of yours, which the operator configures once for the instance;
+then each organization's admins choose who receives its emails.
+
+1. Set the SMTP server and the sender, then restart nanobom:
+
+   ```sh
+   NANOBOM_SMTP_URL=smtps://nanobom%40example.org:app-password@smtp.example.org
+   NANOBOM_SMTP_FROM="nanobom <nanobom@example.org>"
+   ```
+
+   `smtps://` connects with TLS on port 465; for a server that only offers STARTTLS on port 587,
+   use `smtp://…:587?tls=required`. Percent-encode the user and password (`@` becomes `%40`).
+   Most providers (Google Workspace, Microsoft 365, Amazon SES, Mailgun, Postmark…) give SMTP
+   credentials for applications; use those rather than a person's password. Every option is in
+   the [configuration reference](../reference/configuration.md#email). The log says
+   `email notifications are on` at startup.
+2. In nanobom, open the organization's **Settings → Email notifications** and fill in:
+   - **Recipients**: one address per line (or separated by commas), at most 20; a team's
+     mailing list is easier to keep up to date than a list of people;
+   - **Language**: English or French;
+   - **Minimum severity** and **Only known exploited vulnerabilities**, which work as for the
+     webhook and independently of it.
+
+   Then **Save email settings**.
+3. Choose **Send a test email**. The page says **Test email sent** once the SMTP server accepted
+   it, or shows its reply, such as `permanent error (535): authentication failed` for wrong
+   credentials. A test can be sent every 30 seconds.
+
+The next run that opens findings sends one email to all the recipients, with a subject such as
+`nanobom: 3 new vulnerabilities in acme/web` and the findings, each linking to its page in
+nanobom. Stale projects are emailed too. What an email contains is in the
+[reference](../reference/webhooks.md#emails).
+
+Emails show in **Recent deliveries** with the webhook's, marked **Email**. An SMTP reply in the
+`4xx` range (greylisting, a full mailbox) is retried like a webhook; a `5xx` reply (an unknown
+address, a message refused as spam) is not, and the delivery shows as **Failed** with the reply.
+Changing the recipients or the language abandons the emails waiting for a retry; **Remove email
+notifications** turns email off for the organization.
+
+If emails land in spam, make sure the sender's domain allows your SMTP server to send for it
+(SPF, DKIM): nanobom does not sign messages itself.
+
 ## Receive them in Home Assistant
 
 [`examples/home-assistant.yaml`](https://github.com/AlixANNERAUD/nanobom/blob/main/examples/home-assistant.yaml)
@@ -174,8 +219,9 @@ Ignore fields you do not know rather than rejecting the request: later versions 
 
 A project is stale when no SBOM arrived for `NANOBOM_STALE_AFTER_DAYS` (30 by default); see
 [stale projects](../explanation/findings.md#stale-projects). An organization with an enabled
-webhook receives its newly stale projects as `projects.stale` after scheduled runs, whatever the
-minimum severity and the known exploited option. Nothing else is needed.
+webhook or email recipients receives its newly stale projects as `projects.stale` after
+scheduled runs, whatever the minimum severity and the known exploited option. Nothing else is
+needed.
 
 Choose the threshold above the longest normal gap between two builds: a library released twice a
 year would be stale most of the time with the default, so either raise the threshold or upload

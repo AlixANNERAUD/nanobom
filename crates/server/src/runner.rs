@@ -43,7 +43,7 @@ use croner::Cron;
 use nanobom_domain::{
     evaluation::{self, Evaluator, RunOutcome, Scope, Trigger},
     exploitation::{self, Feeds},
-    notifications::{self, Delivery, Format, Notifier, RunFailedPayload},
+    notifications::{self, Delivery, Format, Notifier, RunFailedPayload, Target},
 };
 use nanobom_osv::VulnerabilitySource;
 use reqwest::Url;
@@ -403,16 +403,21 @@ async fn notify(
     // Every document of a run is queued before the first is posted, so a receiver that hangs
     // delays the others but cannot make them lost to a restart.
     let mut queued = Vec::new();
+    // Email is off without an SMTP server: organizations' recipients are then ignored.
+    let email = notifier.mailer().is_some();
     if outcome.succeeded() {
-        match notifications::queue_new_findings(database, outcome, &settings.public_url).await {
+        match notifications::queue_new_findings(database, outcome, &settings.public_url, email)
+            .await
+        {
             Ok(ids) => queued.extend(ids),
-            Err(error) => tracing::error!(%error, "preparing webhook deliveries failed"),
+            Err(error) => tracing::error!(%error, "preparing notification deliveries failed"),
         }
         if outcome.trigger == Trigger::Scheduled {
             match notifications::queue_stale(
                 database,
                 settings.stale_after_days,
                 &settings.public_url,
+                email,
             )
             .await
             {
@@ -429,7 +434,7 @@ async fn notify(
     // The first attempts; the retry loop takes over failed ones.
     match notifier.attempt_all(database, &queued).await {
         Ok(outcomes) => metrics::record_deliveries(&outcomes),
-        Err(error) => tracing::error!(%error, "attempting webhook deliveries failed"),
+        Err(error) => tracing::error!(%error, "attempting notification deliveries failed"),
     }
 }
 
@@ -440,8 +445,10 @@ fn failure_delivery(
 ) -> Option<Delivery<RunFailedPayload>> {
     Some(Delivery {
         organization_id: None,
-        format: Format::Json,
-        url: settings.failure_webhook.as_ref()?.to_string(),
+        target: Target::Webhook {
+            url: settings.failure_webhook.as_ref()?.to_string(),
+            format: Format::Json,
+        },
         payload: notifications::run_failed_payload(outcome, &settings.public_url)?,
     })
 }
