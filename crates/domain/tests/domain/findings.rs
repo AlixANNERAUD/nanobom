@@ -107,7 +107,7 @@ async fn upload_tokens_read_only_the_open_findings_of_projects_they_cover() {
     // The token's own project, whether the token covers the organization or the project.
     assert_eq!(
         identifiers(
-            findings::open_for_upload_token(&database, &acme_token, api)
+            findings::open_for_upload_token(&database, &acme_token, api, "")
                 .await
                 .unwrap()
         ),
@@ -115,7 +115,7 @@ async fn upload_tokens_read_only_the_open_findings_of_projects_they_cover() {
     );
     assert_eq!(
         identifiers(
-            findings::open_for_upload_token(&database, &web_token, web)
+            findings::open_for_upload_token(&database, &web_token, web, "")
                 .await
                 .unwrap()
         ),
@@ -123,17 +123,17 @@ async fn upload_tokens_read_only_the_open_findings_of_projects_they_cover() {
     );
     // Another organization's token.
     assert!(matches!(
-        findings::open_for_upload_token(&database, &globex_token, web).await,
+        findings::open_for_upload_token(&database, &globex_token, web, "").await,
         Err(Error::NotFound)
     ));
     // A project token used on a sibling project.
     assert!(matches!(
-        findings::open_for_upload_token(&database, &web_token, api).await,
+        findings::open_for_upload_token(&database, &web_token, api, "").await,
         Err(Error::NotFound)
     ));
     // A project that does not exist.
     assert!(matches!(
-        findings::open_for_upload_token(&database, &acme_token, api + web + 100).await,
+        findings::open_for_upload_token(&database, &acme_token, api + web + 100, "").await,
         Err(Error::NotFound)
     ));
 }

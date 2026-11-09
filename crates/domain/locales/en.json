@@ -62,7 +62,9 @@
     "unknown_license_id": "\"{license}\" is not an SPDX license identifier (see https://spdx.org/licenses) nor LicenseRef- followed by letters, digits, '.' or '-'",
     "unknown_license_action": "unknown license action \"{action}\"; expected allow, warn or forbid",
     "conflicting_license_rule": "\"{license}\" is listed with two different actions",
-    "too_many_license_rules": "a license policy holds at most {maximum} rules"
+    "too_many_license_rules": "a license policy holds at most {maximum} rules",
+    "invalid_version_name": "the version must be 1 to {maximum} characters: letters, digits, '.', '_', '+', '/' or '-'",
+    "too_many_versions": "this project already has {maximum} active versions: upload to an existing version instead"
   },
   "email": {
     "new_findings_subject": {
@@ -80,6 +82,8 @@
     },
     "component_in_project": "{component} in {project}",
     "introduced_via": "Introduced via {names}",
+    "versions": "Versions: {names}",
+    "unnamed_version": "unnamed version",
     "more_names": {
       "one": "{count} more",
       "other": "{count} more"

@@ -3,7 +3,8 @@
 //!
 //! An upload is a full snapshot: [`ingest`] deletes the version's components and inserts the
 //! new ones in one transaction, so a version's components are always those of exactly one SBOM.
-//! Uploads go to the project's unnamed version.
+//! An upload names its version, or goes to the unnamed one; the first upload naming a version
+//! creates it, with the open and ignored findings of the latest version ([`crate::versions`]).
 //! Findings are not touched here; the next run ([`crate::evaluation`]) compares them with the
 //! new components.
 //!
@@ -632,12 +633,20 @@ fn is_version_requirement(version: &str) -> bool {
             .any(|segment| segment.eq_ignore_ascii_case("x"))
 }
 
-/// Where an upload comes from, as given by CI. Both labels are free text kept for display: at
-/// most 300 characters without control characters; blank values are dropped.
+/// Where an upload comes from and which version it describes, as given by CI. Both labels are
+/// free text kept for display: at most 300 characters without control characters; blank values
+/// are dropped.
 #[derive(Debug, Clone, Default)]
 pub struct UploadSource {
     pub source_commit: Option<String>,
     pub image_tag: Option<String>,
+    /// The project version, checked by [`crate::versions::validate_name`]; `None` for the
+    /// unnamed version. Never read from the SBOM.
+    pub version: Option<String>,
+    /// `Some(true)` makes the version the latest; `Some(false)` keeps a version this upload
+    /// creates from becoming the latest. `None`: a created version becomes the latest, an
+    /// existing one keeps its flag.
+    pub latest: Option<bool>,
 }
 
 /// The result of an upload, returned to CI.
@@ -650,6 +659,13 @@ pub struct UploadOutcome {
     pub project_id: i64,
     /// Whether this upload created the project (organization-wide tokens only).
     pub project_created: bool,
+    /// The project version the upload went to; empty for the unnamed version.
+    pub version: String,
+    /// Whether this upload created the version.
+    pub version_created: bool,
+    /// The identifier of the version, for the caller's next steps.
+    #[serde(skip)]
+    pub version_id: i64,
     pub upload_id: i64,
     /// Components stored, after removing duplicates.
     pub component_count: usize,
@@ -751,6 +767,10 @@ async fn store(
     crate::tokens::require_upload_scope(token)?;
     let source_commit = optional_label(Field::SourceCommit, source.source_commit)?;
     let image_tag = optional_label(Field::ImageTag, source.image_tag)?;
+    let version_name = match source.version.as_deref() {
+        Some(name) => crate::versions::validate_name(name)?,
+        None => crate::versions::UNNAMED.to_owned(),
+    };
     let transaction = crate::database::begin_write(database).await?;
     let existing = crate::projects::find_model(&transaction, organization.id, project_slug).await?;
     let (project, project_created) = match (existing, token.project_id) {
@@ -758,14 +778,47 @@ async fn store(
         (Some(project), Some(allowed)) if project.id == allowed => (project, false),
         (Some(_), Some(_)) => return Err(Error::Forbidden),
         (None, None) if create_missing => (
-            crate::projects::insert(&transaction, organization.id, project_slug, None).await?,
+            crate::projects::insert(
+                &transaction,
+                organization.id,
+                project_slug,
+                None,
+                &version_name,
+            )
+            .await?,
             true,
         ),
         (None, _) => return Err(Error::NotFound),
     };
 
     let now = Utc::now().fixed_offset();
-    let version = crate::versions::unnamed(&transaction, project.id, now).await?;
+    // First, to take the project row's write lock: on PostgreSQL it holds back other uploads to
+    // the project until this one commits, so that two of them never both create a version past
+    // the cap or both move the latest flag. The project's own time is that of its last upload
+    // to any version: staleness is per project.
+    let mut updated: projects::ActiveModel = project.clone().into();
+    updated.last_upload_at = Set(Some(now));
+    updated.update(&transaction).await?;
+    let prepared = crate::versions::prepare_upload(
+        &transaction,
+        project.id,
+        &version_name,
+        source.latest,
+        now,
+    )
+    .await?;
+    if let Some(source_version) = &prepared.inherits_from {
+        crate::versions::inherit(
+            &transaction,
+            source_version,
+            &prepared.version,
+            token.id,
+            now,
+        )
+        .await?;
+    }
+    let version_created = project_created || prepared.created;
+    let version = prepared.version;
     // Before the components, which the edges reference.
     component_dependencies::Entity::delete_many()
         .filter(component_dependencies::Column::VersionId.eq(version.id))
@@ -814,17 +867,14 @@ async fn store(
     }
     .insert(&transaction)
     .await?;
-    crate::versions::record_upload(&transaction, version, now, dependencies_partial).await?;
-    // The project's own time is that of its last upload to any version: staleness is per
-    // project.
-    let mut updated: projects::ActiveModel = project.clone().into();
-    updated.last_upload_at = Set(Some(now));
-    updated.update(&transaction).await?;
+    let version =
+        crate::versions::record_upload(&transaction, version, now, dependencies_partial).await?;
     transaction.commit().await?;
 
     tracing::info!(
         organization = %organization.slug,
         project = %project.slug,
+        version = %version.name,
         components = component_count,
         without_purl = sbom.skipped_count,
         "SBOM uploaded"
@@ -834,6 +884,9 @@ async fn store(
         project: project.slug,
         project_id: project.id,
         project_created,
+        version: version.name,
+        version_created,
+        version_id: version.id,
         upload_id: upload.id,
         component_count,
         components_without_purl: sbom.skipped_count,
@@ -907,7 +960,18 @@ pub async fn components(
     reader: impl Into<Reader>,
     project_id: i64,
 ) -> Result<Vec<components::Model>> {
-    let version = crate::versions::find(database, reader, project_id, None).await?;
+    components_in_version(database, reader, project_id, None).await
+}
+
+/// Like [`components()`], for the version named `version` (`None`: the latest); a missing version
+/// is [`Error::NotFound`].
+pub async fn components_in_version(
+    database: &impl ConnectionTrait,
+    reader: impl Into<Reader>,
+    project_id: i64,
+    version: Option<&str>,
+) -> Result<Vec<components::Model>> {
+    let version = crate::versions::find(database, reader, project_id, version).await?;
     Ok(components::Entity::find()
         .filter(components::Column::VersionId.eq(version.id))
         .order_by_asc(components::Column::Purl)

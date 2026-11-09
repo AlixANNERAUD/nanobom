@@ -139,6 +139,9 @@ pub struct NewFinding {
     pub organization_slug: String,
     pub project_id: i64,
     pub project_slug: String,
+    /// The project version the finding belongs to, and its name (empty for the unnamed one).
+    pub version_id: i64,
+    pub version: String,
     pub purl: String,
     /// The identifier the finding is filed under.
     pub vulnerability_id: String,
@@ -723,6 +726,10 @@ async fn update_project(
         fixed: 0,
         new_findings: Vec::new(),
     };
+    let organization = organizations::Entity::find_by_id(project.organization_id)
+        .one(database)
+        .await?
+        .ok_or_else(|| sea_orm::DbErr::RecordNotFound("organization".to_owned()))?;
     for version in versions {
         let version_targets: Vec<&Target> = targets
             .iter()
@@ -731,8 +738,9 @@ async fn update_project(
         let version_changes = update_version(
             database,
             run_id,
+            &organization,
             project,
-            version.id,
+            version,
             &version_targets,
             references,
             records,
@@ -746,19 +754,18 @@ async fn update_project(
 
 /// Opens, reopens and fixes the findings of one version: a finding is matched within its
 /// version only, so each version keeps its own triage.
+#[allow(clippy::too_many_arguments)]
 async fn update_version(
     database: &DatabaseConnection,
     run_id: i64,
+    organization: &organizations::Model,
     project: &projects::Model,
-    version_id: i64,
+    version: &project_versions::Model,
     targets: &[&Target],
     references: &HashMap<&str, Vec<VulnerabilityReference>>,
     records: &HashMap<String, Vulnerability>,
 ) -> std::result::Result<ProjectChanges, sea_orm::DbErr> {
-    let organization = organizations::Entity::find_by_id(project.organization_id)
-        .one(database)
-        .await?
-        .ok_or_else(|| sea_orm::DbErr::RecordNotFound("organization".to_owned()))?;
+    let version_id = version.id;
     let transaction = crate::database::begin_write(database).await?;
     let now = Utc::now().fixed_offset();
     // Ordered, because the first stored finding matching an alias group is the one kept and the
@@ -873,6 +880,8 @@ async fn update_version(
                 organization_slug: organization.slug.clone(),
                 project_id: project.id,
                 project_slug: project.slug.clone(),
+                version_id,
+                version: version.name.clone(),
                 purl: target.purl.clone(),
                 vulnerability_id: vulnerability_id.clone(),
                 aliases: names

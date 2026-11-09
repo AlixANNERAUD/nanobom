@@ -249,7 +249,7 @@ async fn every_row_names_a_version_of_its_project() {
         .await
         .unwrap()
         .unwrap();
-    let document = vex::export(&fixture.database, &token, "acme", "shop")
+    let document = vex::export(&fixture.database, &token, "acme", "shop", None)
         .await
         .unwrap();
     let mut document = serde_json::to_value(&document).unwrap();
@@ -258,7 +258,7 @@ async fn every_row_names_a_version_of_its_project() {
         "justification": "code_not_reachable",
     });
     let statements = vex::parse(&serde_json::to_vec(&document).unwrap()).unwrap();
-    let outcome = vex::import(&fixture.database, &token, "acme", "shop", &statements)
+    let outcome = vex::import(&fixture.database, &token, "acme", "shop", None, &statements)
         .await
         .unwrap();
     assert_eq!(outcome.ignored, 1);

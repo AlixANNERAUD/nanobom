@@ -249,26 +249,37 @@ fn component(purl: &str) -> DocumentComponent {
     }
 }
 
-/// The findings of a project's latest version as a CycloneDX VEX document. Requires [`crate::access::Permission::View`]
-/// in the organization; a missing organization or project, or one outside a token's reach, is
-/// [`Error::NotFound`].
+/// The findings of a project version (`None`: the latest) as a CycloneDX VEX document, whose
+/// metadata component carries the version name, unless it is the unnamed version. Requires
+/// [`crate::access::Permission::View`] in the organization; a missing organization, project or
+/// version, or one outside a token's reach, is [`Error::NotFound`].
 pub async fn export(
     database: &impl ConnectionTrait,
     reader: impl Into<Reader>,
     organization_slug: &str,
     project_slug: &str,
+    version: Option<&str>,
 ) -> Result<Document> {
     let reader = reader.into();
     let organization = crate::organizations::find(database, reader, organization_slug).await?;
     let project = crate::projects::find(database, reader, organization.id, project_slug).await?;
-    let findings = crate::findings::list(
+    let version = crate::versions::select(database, project.id, version).await?;
+    let findings = crate::findings::list_in_version(
         database,
         reader,
         project.id,
+        Some(&version.name),
         &crate::findings::Filter::default(),
     )
     .await?;
-    document(database, &organization.slug, project, findings).await
+    document(
+        database,
+        &organization.slug,
+        project,
+        &version.name,
+        findings,
+    )
+    .await
 }
 
 /// The organization and project an upload token names, if the token covers them.
@@ -295,6 +306,7 @@ async fn document(
     database: &impl ConnectionTrait,
     organization_slug: &str,
     project: projects::Model,
+    version: &str,
     mut findings: Vec<Finding>,
 ) -> Result<Document> {
     // A stable order, so two exports of the same state differ only in their header.
@@ -382,7 +394,7 @@ async fn document(
                 bom_ref: Some(format!("{organization_slug}/{}", project.slug)),
                 group: None,
                 name: project.name,
-                version: None,
+                version: (!version.is_empty()).then(|| version.to_owned()),
                 purl: None,
             },
         },
@@ -705,27 +717,30 @@ pub struct ImportOutcome {
     pub results: Vec<StatementOutcome>,
 }
 
-/// Imports VEX statements into a project's latest version with an upload token: the project must be in the
-/// token's organization, and be the token's project when it has one; any other project is
-/// [`Error::NotFound`]. A read token ([`crate::tokens::Scope::Read`]) is [`Error::Forbidden`].
-/// The ignores are recorded as made by the token. Runs in one transaction.
+/// Imports VEX statements into a project version (`None`: the latest) with an upload token: the
+/// project must be in the token's organization, and be the token's project when it has one;
+/// any other project, or a missing version, is [`Error::NotFound`]. A read token
+/// ([`crate::tokens::Scope::Read`]) is [`Error::Forbidden`]. The ignores are recorded as made
+/// by the token. Runs in one transaction.
 pub async fn import(
     database: &(impl ConnectionTrait + TransactionTrait),
     token: &upload_tokens::Model,
     organization_slug: &str,
     project_slug: &str,
+    version: Option<&str>,
     statements: &[Statement],
 ) -> Result<ImportOutcome> {
     let (_, project) = token_project(database, token, organization_slug, project_slug).await?;
-    apply(database, token, project.id, statements).await
+    apply(database, token, project.id, version, statements).await
 }
 
-/// Like [`import`], for a project already checked against the token (an upload that carried
-/// statements).
+/// Like [`import`], for a project already checked against the token and the version it just
+/// uploaded to (an upload that carried statements).
 pub async fn import_into_project(
     database: &(impl ConnectionTrait + TransactionTrait),
     token: &upload_tokens::Model,
     project_id: i64,
+    version: &str,
     statements: &[Statement],
 ) -> Result<ImportOutcome> {
     projects::Entity::find_by_id(project_id)
@@ -736,7 +751,7 @@ pub async fn import_into_project(
                 && token.project_id.is_none_or(|allowed| allowed == project.id)
         })
         .ok_or(Error::NotFound)?;
-    apply(database, token, project_id, statements).await
+    apply(database, token, project_id, Some(version), statements).await
 }
 
 /// The reason recorded for an ignore imported from a statement: its detail, or a sentence
@@ -761,11 +776,12 @@ async fn apply(
     database: &(impl ConnectionTrait + TransactionTrait),
     token: &upload_tokens::Model,
     project_id: i64,
+    version: Option<&str>,
     statements: &[Statement],
 ) -> Result<ImportOutcome> {
     crate::tokens::require_upload_scope(token)?;
     let transaction = crate::database::begin_write(database).await?;
-    let version = crate::versions::select(&transaction, project_id, None).await?;
+    let version = crate::versions::select(&transaction, project_id, version).await?;
     let candidates = findings::Entity::find()
         .filter(findings::Column::VersionId.eq(version.id))
         .filter(findings::Column::Status.ne(Status::Fixed.as_str()))

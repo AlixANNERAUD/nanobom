@@ -25,8 +25,8 @@ use std::{collections::HashMap, str::FromStr};
 
 use chrono::{DateTime, FixedOffset, Utc};
 use nanobom_entity::{
-    components, finding_events, findings, organizations, projects, upload_tokens, users,
-    vulnerabilities,
+    components, finding_events, findings, organizations, project_versions, projects, upload_tokens,
+    users, vulnerabilities,
 };
 use nanobom_osv::{Severity, Vulnerability, schema::Reference};
 use packageurl::PackageUrl;
@@ -186,6 +186,10 @@ pub enum EventKind {
     Restored,
     /// Returned to open by a run because the ignore reached its expiry.
     IgnoreExpired,
+    /// Copied, with its status and ignore, from the latest version when an upload created the
+    /// finding's version; the reason holds the name of the version it was copied from (empty
+    /// for the unnamed version).
+    Inherited,
 }
 
 impl EventKind {
@@ -198,6 +202,7 @@ impl EventKind {
             EventKind::Ignored => "ignored",
             EventKind::Restored => "restored",
             EventKind::IgnoreExpired => "ignore_expired",
+            EventKind::Inherited => "inherited",
         }
     }
 
@@ -208,6 +213,7 @@ impl EventKind {
             "ignored" => EventKind::Ignored,
             "restored" => EventKind::Restored,
             "ignore_expired" => EventKind::IgnoreExpired,
+            "inherited" => EventKind::Inherited,
             _ => EventKind::Opened,
         }
     }
@@ -219,6 +225,8 @@ pub struct Finding {
     pub id: i64,
     pub project_id: i64,
     pub project_slug: String,
+    /// The name of the project version the finding belongs to; empty for the unnamed version.
+    pub version: String,
     pub purl: String,
     pub ecosystem: String,
     pub component_name: String,
@@ -275,6 +283,7 @@ fn component_name_and_version(purl: &str) -> (String, Option<String>) {
 fn view(
     finding: findings::Model,
     project_slug: String,
+    version: String,
     vulnerability: Option<&VulnerabilityFacts>,
 ) -> Finding {
     let (component_name, component_version) = component_name_and_version(&finding.purl);
@@ -282,6 +291,7 @@ fn view(
         id: finding.id,
         project_id: finding.project_id,
         project_slug,
+        version,
         component_name,
         component_version,
         license: None,
@@ -314,25 +324,38 @@ pub async fn list(
     project_id: i64,
     filter: &Filter,
 ) -> Result<Vec<Finding>> {
-    let project =
-        crate::projects::authorize(database, reader, project_id, Permission::View).await?;
-    let version = crate::versions::select(database, project_id, None).await?;
-    version_findings(database, project, version.id, filter).await
+    list_in_version(database, reader, project_id, None, filter).await
 }
 
-/// The open findings of a project an upload token covers, most severe first (then as `list`
-/// orders them), for the evaluation returned to CI after an upload. A project outside the
-/// token is [`Error::NotFound`].
+/// Like [`list`], for the version named `version` (`None`: the latest); a missing version is
+/// [`Error::NotFound`].
+pub async fn list_in_version(
+    database: &impl ConnectionTrait,
+    reader: impl Into<Reader>,
+    project_id: i64,
+    version: Option<&str>,
+    filter: &Filter,
+) -> Result<Vec<Finding>> {
+    let project =
+        crate::projects::authorize(database, reader, project_id, Permission::View).await?;
+    let version = crate::versions::select(database, project_id, version).await?;
+    version_findings(database, project, &version, filter).await
+}
+
+/// The open findings of a project version an upload token covers, most severe first (then as
+/// `list` orders them), for the evaluation returned to CI after an upload: the gate judges the
+/// version uploaded, not the others. A project outside the token is [`Error::NotFound`].
 pub async fn open_for_upload_token(
     database: &impl ConnectionTrait,
     token: &upload_tokens::Model,
     project_id: i64,
+    version: &str,
 ) -> Result<Vec<Finding>> {
     let filter = Filter {
         statuses: vec![Status::Open],
         ..Filter::default()
     };
-    let mut findings = list(database, token, project_id, &filter).await?;
+    let mut findings = list_in_version(database, token, project_id, Some(version), &filter).await?;
     // Stable: findings of the same severity keep the order of `list`.
     findings.sort_by_key(|finding| std::cmp::Reverse(finding.severity));
     Ok(findings)
@@ -344,9 +367,10 @@ pub async fn open_for_upload_token(
 async fn version_findings(
     database: &impl ConnectionTrait,
     project: projects::Model,
-    version_id: i64,
+    version: &project_versions::Model,
     filter: &Filter,
 ) -> Result<Vec<Finding>> {
+    let version_id = version.id;
     let mut query = findings::Entity::find().filter(findings::Column::VersionId.eq(version_id));
     if !filter.severities.is_empty() {
         query = query.filter(
@@ -374,7 +398,12 @@ async fn version_findings(
         .into_iter()
         .map(|finding| {
             let vulnerability = facts.get(&finding.vulnerability_id);
-            view(finding, project.slug.clone(), vulnerability)
+            view(
+                finding,
+                project.slug.clone(),
+                version.name.clone(),
+                vulnerability,
+            )
         })
         .collect();
     let keys: Vec<(i64, Vec<String>)> = findings
@@ -460,7 +489,17 @@ pub async fn ecosystems(
     reader: impl Into<Reader>,
     project_id: i64,
 ) -> Result<Vec<String>> {
-    let version = crate::versions::find(database, reader, project_id, None).await?;
+    ecosystems_in_version(database, reader, project_id, None).await
+}
+
+/// Like [`ecosystems`], for the version named `version` (`None`: the latest).
+pub async fn ecosystems_in_version(
+    database: &impl ConnectionTrait,
+    reader: impl Into<Reader>,
+    project_id: i64,
+    version: Option<&str>,
+) -> Result<Vec<String>> {
+    let version = crate::versions::find(database, reader, project_id, version).await?;
     let mut ecosystems: Vec<String> = findings::Entity::find()
         .filter(findings::Column::VersionId.eq(version.id))
         .all(database)
@@ -584,6 +623,14 @@ pub async fn detail(
         .ok_or(Error::NotFound)?;
     let record: Option<Vulnerability> = serde_json::from_str(&vulnerability.record).ok();
     let version_id = finding.version_id;
+    let version_name = match version_id {
+        Some(version_id) => project_versions::Entity::find_by_id(version_id)
+            .one(database)
+            .await?
+            .map(|version| version.name)
+            .unwrap_or_default(),
+        None => String::new(),
+    };
     // The finding's own version, whichever is latest: its page describes that version.
     let graph = match version_id {
         Some(version_id) => Graph::load(database, version_id).await?,
@@ -708,7 +755,7 @@ pub async fn detail(
                 summary: vulnerability.summary.clone(),
                 cvss_score: vulnerability.cvss_score,
             };
-            let mut view = view(finding, project.slug, Some(&facts));
+            let mut view = view(finding, project.slug, version_name, Some(&facts));
             view.introduced_via = graph.introduced_via(&view.purl);
             if let Some(version_id) = version_id {
                 view.license = licenses(database, version_id, Some(&view.purl))
@@ -922,8 +969,18 @@ pub struct ProjectOverview {
     pub stale: bool,
 }
 
-/// The projects of an organization with the open findings of their active versions by
-/// severity; `stale_after_days` is the stale threshold (0: never stale).
+/// A vulnerability of a package across the active versions of a project, for [`overview`].
+#[derive(Default)]
+struct Issue {
+    /// The highest severity among the versions where it is open.
+    open: Option<Severity>,
+    known_exploited: bool,
+    ignored: bool,
+}
+
+/// The projects of an organization with the open issues of their active versions by severity:
+/// a vulnerability of a package counts once however many versions have it, at its highest
+/// severity. `stale_after_days` is the stale threshold (0: never stale).
 pub async fn overview(
     database: &impl ConnectionTrait,
     reader: impl Into<Reader>,
@@ -956,6 +1013,10 @@ pub async fn overview(
         .map(|(position, project)| (project.id, position))
         .collect();
     let identifiers: Vec<i64> = projects.iter().map(|project| project.id).collect();
+    // A vulnerability of a package found in several versions is one issue to fix, counted once
+    // at its highest severity: open when it is open in any version, ignored when ignored in
+    // every version that has it open or ignored.
+    let mut issues: HashMap<(i64, String, String, String), Issue> = HashMap::new();
     for chunk in identifiers.chunks(QUERY_CHUNK) {
         let rows = findings::Entity::find()
             .filter(findings::Column::ProjectId.is_in(chunk.iter().copied()))
@@ -982,21 +1043,39 @@ pub async fn overview(
             .collect();
         let exploitations = exploitation::for_findings(database, &keys).await?;
         for finding in rows {
-            let overview = &mut overviews[index[&finding.project_id]];
+            let known_exploited = exploitations
+                .get(&finding.id)
+                .is_some_and(|value| value.known_exploited);
+            let (package, _) = component_name_and_version(&finding.purl);
+            let issue = issues
+                .entry((
+                    finding.project_id,
+                    finding.vulnerability_id,
+                    finding.ecosystem,
+                    package,
+                ))
+                .or_default();
             match Status::parse(&finding.status) {
-                Status::Ignored => overview.ignored += 1,
+                Status::Ignored => issue.ignored = true,
                 _ => {
-                    overview
-                        .open
-                        .add(finding.severity.parse().unwrap_or(Severity::Unknown));
-                    if exploitations
-                        .get(&finding.id)
-                        .is_some_and(|value| value.known_exploited)
-                    {
-                        overview.known_exploited += 1;
-                    }
+                    let severity = finding.severity.parse().unwrap_or(Severity::Unknown);
+                    issue.open = Some(issue.open.map_or(severity, |open| open.max(severity)));
+                    issue.known_exploited |= known_exploited;
                 }
             }
+        }
+    }
+    for ((project_id, ..), issue) in issues {
+        let overview = &mut overviews[index[&project_id]];
+        match issue.open {
+            Some(severity) => {
+                overview.open.add(severity);
+                if issue.known_exploited {
+                    overview.known_exploited += 1;
+                }
+            }
+            None if issue.ignored => overview.ignored += 1,
+            None => {}
         }
     }
     Ok(overviews)

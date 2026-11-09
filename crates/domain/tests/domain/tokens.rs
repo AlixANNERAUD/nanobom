@@ -159,7 +159,7 @@ async fn read_tokens_cannot_upload_import_or_create_projects() {
     )
     .unwrap();
     assert!(matches!(
-        vex::import(&database, &token, "acme", "web", &statements).await,
+        vex::import(&database, &token, "acme", "web", None, &statements).await,
         Err(Error::Forbidden)
     ));
     // Another organization stays missing rather than forbidden.
@@ -275,7 +275,7 @@ async fn token_readers_see_their_reach_as_viewers() {
         Err(Error::NotFound)
     ));
     assert!(matches!(
-        vex::export(&database, reader, "acme", "api").await,
+        vex::export(&database, reader, "acme", "api", None).await,
         Err(Error::NotFound)
     ));
 }

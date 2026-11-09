@@ -151,6 +151,7 @@ fn Filters(page: ProjectData, filter: FindingFilter) -> impl IntoView {
     let selected = |current: &Option<String>, value: &str| current.as_deref() == Some(value);
     view! {
         <form method="get" class="flex flex-wrap items-end gap-3" aria-label=t!("project.filter_label")>
+            {filter.version.clone().map(|version| view! { <input type="hidden" name="version" value=version /> })}
             <div class="grid gap-2">
                 <label class=LABEL for="filter-severity">{t!("project.severity")}</label>
                 <select id="filter-severity" name="severity" class=SELECT>
@@ -217,6 +218,62 @@ fn Filters(page: ProjectData, filter: FindingFilter) -> impl IntoView {
     }
 }
 
+/// How a version is named in the interface: the unnamed version gets a label.
+fn version_label(name: &str) -> String {
+    if name.is_empty() {
+        t!("project.version_unnamed").to_owned()
+    } else {
+        name.to_owned()
+    }
+}
+
+/// `version=…` for a link to a project version, encoded: version names may hold `+` and `/`.
+fn version_query(name: &str) -> String {
+    format!(
+        "version={}",
+        name.replace('%', "%25")
+            .replace('+', "%2B")
+            .replace('/', "%2F")
+    )
+}
+
+/// The version selector of the project page, a plain GET form; shown only when the project has
+/// named versions. Changing the version drops the filters, which may not apply to it.
+#[component]
+fn VersionSelector(page: ProjectData) -> impl IntoView {
+    let options = page
+        .versions
+        .into_iter()
+        .map(|version| {
+            let selected = version.name == page.version.name;
+            let label = if version.latest {
+                tf!(
+                    "project.version_latest",
+                    version = version_label(&version.name)
+                )
+            } else {
+                version_label(&version.name)
+            };
+            view! {
+                <option value=version.name selected=selected>
+                    {label}
+                </option>
+            }
+        })
+        .collect_view();
+    view! {
+        <form method="get" class="flex flex-wrap items-end gap-3" aria-label=t!("project.version_form")>
+            <div class="grid gap-2">
+                <label class=LABEL for="version">{t!("project.version")}</label>
+                <select id="version" name="version" class=SELECT>
+                    {options}
+                </select>
+            </div>
+            <Button variant=ButtonVariant::Secondary>{t!("project.version_show")}</Button>
+        </form>
+    }
+}
+
 #[component]
 pub fn ProjectPage() -> impl IntoView {
     let params = use_params_map();
@@ -233,6 +290,8 @@ pub fn ProjectPage() -> impl IntoView {
                 status: nonempty("status"),
                 ecosystem: nonempty("ecosystem"),
                 exploited: nonempty("exploited").is_some_and(|value| value == "1"),
+                // Empty names the unnamed version.
+                version: query.get("version"),
             },
         )
     };
@@ -248,7 +307,15 @@ pub fn ProjectPage() -> impl IntoView {
                     let organization = page.organization.clone();
                     let organization_slug = organization.slug.clone();
                     let project_slug = page.slug.clone();
-                    let latest = page.uploads.first().cloned();
+                    let latest = page.version_upload.clone();
+                    let versioned = page.versions.iter().any(|version| !version.name.is_empty());
+                    let selector = versioned.then(|| view! { <VersionSelector page=page.clone() /> });
+                    // Links to the version shown, unless it is the latest, which they show anyway.
+                    let version_suffix = if page.version.latest {
+                        String::new()
+                    } else {
+                        format!("?{}", version_query(&page.version.name))
+                    };
                     let subtitle = format!(
                         "{}{}",
                         tp!("project.components", page.component_count),
@@ -336,6 +403,15 @@ pub fn ProjectPage() -> impl IntoView {
                                         {sbom_format(&upload.specification_version)}
                                         {upload.source_commit.map(|commit| format!(" · {}", tf!("project.commit", commit = commit)))}
                                         {upload.image_tag.map(|tag| format!(" · {}", tf!("project.image", tag = tag)))}
+                                        {versioned
+                                            .then(|| {
+                                                let version = if upload.version.is_empty() {
+                                                    t!("project.upload_unnamed_version").to_owned()
+                                                } else {
+                                                    tf!("project.upload_version", version = upload.version.clone())
+                                                };
+                                                format!(" · {version}")
+                                            })}
                                     </span>
                                 </li>
                             }
@@ -389,7 +465,7 @@ pub fn ProjectPage() -> impl IntoView {
                         </nav>
                         <Heading title=page.name.clone() subtitle>
                             <LinkButton
-                                href=format!("/api/organizations/{organization_slug}/projects/{project_slug}/vex")
+                                href=format!("/api/organizations/{organization_slug}/projects/{project_slug}/vex{version_suffix}")
                                 variant=ButtonVariant::Outline
                             >
                                 {t!("project.export_vex")}
@@ -397,6 +473,7 @@ pub fn ProjectPage() -> impl IntoView {
                             {check_now}
                         </Heading>
                         {stale}
+                        {selector}
                         {without_purl}
                         <Filters page=page.clone() filter />
                         {table}
@@ -790,6 +867,23 @@ pub fn FindingPage() -> impl IntoView {
                                 {page.project_slug.clone()}
                             </a>
                             " / "
+                            {(!finding.version.is_empty())
+                                .then(|| {
+                                    view! {
+                                        <a
+                                            class="hover:underline"
+                                            href=format!(
+                                                "/organizations/{}/projects/{}?{}",
+                                                page.organization_slug,
+                                                page.project_slug,
+                                                version_query(&finding.version),
+                                            )
+                                        >
+                                            {tf!("finding.project_version", version = finding.version.clone())}
+                                        </a>
+                                        " / "
+                                    }
+                                })}
                             <span aria-current="page">{finding.vulnerability_id.clone()}</span>
                         </nav>
                         <Heading
@@ -855,9 +949,19 @@ pub fn FindingPage() -> impl IntoView {
                                                 .clone()
                                                 .into_iter()
                                                 .map(|event| {
+                                                    // The reason of an inherited finding is the version it comes from.
+                                                    let (label, reason) = if event.kind == "inherited" {
+                                                        let label = match event.reason.as_deref().unwrap_or_default() {
+                                                            "" => t!("finding.event_inherited_unnamed").to_owned(),
+                                                            version => tf!("finding.event_inherited", version = version),
+                                                        };
+                                                        (label, None)
+                                                    } else {
+                                                        (event_label(&event.kind).to_owned(), event.reason.clone())
+                                                    };
                                                     view! {
                                                         <li>
-                                                            <span class="font-medium">{event_label(&event.kind)}</span>
+                                                            <span class="font-medium">{label}</span>
                                                             <span class="text-muted-foreground">
                                                                 " · " {format_time(event.created_at)}
                                                                 {changed_by(event.actor.clone(), event.token.clone()).map(|by| format!(" · {by}"))}
@@ -866,9 +970,7 @@ pub fn FindingPage() -> impl IntoView {
                                                                     .as_deref()
                                                                     .map(|value| format!(" · {}", justification_label(value)))}
                                                             </span>
-                                                            {event
-                                                                .reason
-                                                                .clone()
+                                                            {reason
                                                                 .map(|reason| view! { <p class="mt-1 whitespace-pre-wrap">{reason}</p> })}
                                                         </li>
                                                     }

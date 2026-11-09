@@ -153,7 +153,7 @@
       "get": {
         "operationId": "listFindings",
         "summary": "Findings of a project",
-        "description": "The project's findings in the project page's order: known exploited first, then by severity, EPSS score, CVSS score, component and vulnerability.",
+        "description": "The findings of a project version (the latest unless `version` names one) in the project page's order: known exploited first, then by severity, EPSS score, CVSS score, component and vulnerability.",
         "tags": [
           "read"
         ],
@@ -166,6 +166,9 @@
           },
           {
             "$ref": "#/components/parameters/Project"
+          },
+          {
+            "$ref": "#/components/parameters/Version"
           },
           {
             "name": "status",
@@ -253,7 +256,7 @@
       "get": {
         "operationId": "listComponents",
         "summary": "Components of a project",
-        "description": "The project's components from its latest SBOM, by package URL.",
+        "description": "The components of a project version (the latest unless `version` names one) from its latest SBOM, by package URL.",
         "tags": [
           "read"
         ],
@@ -266,6 +269,9 @@
           },
           {
             "$ref": "#/components/parameters/Project"
+          },
+          {
+            "$ref": "#/components/parameters/Version"
           },
           {
             "$ref": "#/components/parameters/Limit"
@@ -552,7 +558,7 @@
       "get": {
         "operationId": "listLicenseViolations",
         "summary": "License violations of a project",
-        "description": "The project's components whose license the organization's policy forbids or warns about, computed from the current policy and the latest SBOM: forbidden components first, then warned ones, each by name then package URL. Empty, with `active: false`, when the organization has no active policy.",
+        "description": "The components of a project version (the latest unless `version` names one) whose license the organization's policy forbids or warns about, computed from the current policy and the version's latest SBOM: forbidden components first, then warned ones, each by name then package URL. Empty, with `active: false`, when the organization has no active policy.",
         "tags": [
           "read"
         ],
@@ -565,6 +571,9 @@
           },
           {
             "$ref": "#/components/parameters/Project"
+          },
+          {
+            "$ref": "#/components/parameters/Version"
           },
           {
             "$ref": "#/components/parameters/Limit"
@@ -606,6 +615,59 @@
           },
           "422": {
             "$ref": "#/components/responses/Invalid"
+          }
+        }
+      }
+    },
+    "/api/organizations/{organization}/projects/{project}/versions": {
+      "get": {
+        "operationId": "listVersions",
+        "summary": "Versions of a project",
+        "description": "The project's versions, newest first, with the open findings of each by severity.",
+        "tags": [
+          "read"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IfNoneMatch"
+          },
+          {
+            "$ref": "#/components/parameters/Organization"
+          },
+          {
+            "$ref": "#/components/parameters/Project"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The versions.",
+            "headers": {
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionList"
+                }
+              }
+            }
+          },
+          "304": {
+            "$ref": "#/components/responses/NotModified"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
           }
         }
       }
@@ -678,6 +740,15 @@
         "schema": {
           "type": "string"
         }
+      },
+      "Version": {
+        "name": "version",
+        "in": "query",
+        "description": "The project version, by name; an empty value names the unnamed version. Without it, the latest version. An unknown version is 404.",
+        "schema": {
+          "type": "string"
+        },
+        "example": "2.4"
       }
     },
     "headers": {
@@ -832,17 +903,18 @@
             "description": "No SBOM for longer than the stale threshold (NANOBOM_STALE_AFTER_DAYS)."
           },
           "open": {
-            "$ref": "#/components/schemas/SeverityCounts"
+            "$ref": "#/components/schemas/SeverityCounts",
+            "description": "Open issues of the project's active versions by severity: a vulnerability of a package found in several versions counts once, at its highest severity."
           },
           "ignored": {
             "type": "integer",
             "minimum": 0,
-            "description": "Ignored findings."
+            "description": "Issues ignored in every active version that has them."
           },
           "known_exploited": {
             "type": "integer",
             "minimum": 0,
-            "description": "Open findings with a CVE in the CISA KEV catalog."
+            "description": "Open issues with a CVE in the CISA KEV catalog, counted like `open`."
           },
           "url": {
             "type": "string",
@@ -1078,6 +1150,10 @@
             "type": "string",
             "description": "Project slug."
           },
+          "version": {
+            "type": "string",
+            "description": "The project version the finding belongs to; empty for the unnamed version."
+          },
           "vulnerability_id": {
             "type": "string",
             "description": "The OSV identifier (GHSA-..., CVE-..., RUSTSEC-...)."
@@ -1167,6 +1243,7 @@
         "required": [
           "id",
           "project",
+          "version",
           "vulnerability_id",
           "aliases",
           "summary",
@@ -1213,7 +1290,8 @@
               "reopened",
               "ignored",
               "restored",
-              "ignore_expired"
+              "ignore_expired",
+              "inherited"
             ]
           },
           "user": {
@@ -1234,7 +1312,8 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "description": "The member's or the VEX statement's reason. For `inherited`, the name of the version the finding was copied from (empty for the unnamed version)."
           },
           "justification": {
             "type": [
@@ -1419,6 +1498,10 @@
             "type": "string",
             "description": "Project slug."
           },
+          "version": {
+            "type": "string",
+            "description": "The project version the finding belongs to; empty for the unnamed version."
+          },
           "vulnerability_id": {
             "type": "string",
             "description": "The OSV identifier (GHSA-..., CVE-..., RUSTSEC-...)."
@@ -1594,6 +1677,7 @@
         "required": [
           "id",
           "project",
+          "version",
           "vulnerability_id",
           "aliases",
           "summary",
@@ -1871,6 +1955,60 @@
           "active",
           "forbidden",
           "warned"
+        ]
+      },
+      "Version": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The version name; empty for the unnamed version, which receives uploads that name no version."
+          },
+          "latest": {
+            "type": "boolean",
+            "description": "Whether this is the latest version, the one read when a request names none. Exactly one version of a project is latest."
+          },
+          "active": {
+            "type": "boolean",
+            "description": "Whether runs evaluate the version."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_upload_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "The version's latest SBOM upload; null before the first one."
+          },
+          "open": {
+            "$ref": "#/components/schemas/SeverityCounts"
+          }
+        },
+        "required": [
+          "name",
+          "latest",
+          "active",
+          "created_at",
+          "last_upload_at",
+          "open"
+        ]
+      },
+      "VersionList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Version"
+            }
+          }
+        },
+        "required": [
+          "items"
         ]
       }
     }

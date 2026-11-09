@@ -1,7 +1,7 @@
 # VEX API
 
-nanobom exports a project's findings as a CycloneDX VEX document and imports VEX statements
-into a project. Why and when to use them is explained in [VEX](../explanation/vex.md); the steps
+nanobom exports the findings of a project version as a CycloneDX VEX document and imports VEX
+statements into a project version. Why and when to use them is explained in [VEX](../explanation/vex.md); the steps
 are in [Exchange VEX statements](../how-to/vex.md).
 
 ## Endpoints
@@ -13,19 +13,27 @@ PUT /api/organizations/{organization}/projects/{project}/vex
 
 | Method | Authentication | Does |
 | --- | --- | --- |
-| `GET` | A [token](upload-api.md#tokens) of either scope, in `Authorization: Bearer nanobom_…` or `X-Api-Key`, or the session of a signed-in member (any role), as on the [read API](read-api.md#authentication) | Returns the project's findings as a CycloneDX 1.6 JSON document |
-| `PUT` | `Authorization: Bearer nanobom_…` only, with a token of the `upload` scope | Applies the statements of a CycloneDX VEX document to the project's open findings |
+| `GET` | A [token](upload-api.md#tokens) of either scope, in `Authorization: Bearer nanobom_…` or `X-Api-Key`, or the session of a signed-in member (any role), as on the [read API](read-api.md#authentication) | Returns the findings of a project version as a CycloneDX 1.6 JSON document |
+| `PUT` | `Authorization: Bearer nanobom_…` only, with a token of the `upload` scope | Applies the statements of a CycloneDX VEX document to the open findings of a project version |
+
+Both take `version`, the name of a [project version](../explanation/concepts.md#versions)
+(`?version=2.4`; an empty `version=` names the unnamed version). Without it, they work on the
+latest version. An unknown version is a `404`. Statements imported into one version change
+nothing in the others: each version keeps its own triage.
 
 A token reaches its organization's projects, or its own project for a project token. Any other project, like a missing one, is a `404`:
 unlike uploads, these endpoints never create a project.
 
 Slugs are case-insensitive. The body of a `PUT` may be at most `NANOBOM_MAXIMUM_SBOM_SIZE` MiB
-(16 by default). The **Export VEX** button of the project page links to the `GET` endpoint.
+(16 by default). The **Export VEX** button of the project page links to the `GET` endpoint, for
+the version the page shows.
 
 ## Export
 
 The response is `200` with `Content-Type: application/vnd.cyclonedx+json` and
-`Content-Disposition: attachment; filename="{organization}-{project}.vex.cdx.json"`. Like
+`Content-Disposition: attachment; filename="{organization}-{project}.vex.cdx.json"`, or
+`{organization}-{project}-{version}.vex.cdx.json` for a named version, with its `/` replaced by
+`-`. Like
 every [read API](read-api.md#caching) response, it is `Cache-Control: private, no-cache` and
 varies on `Cookie`, `Authorization` and `X-Api-Key`.
 
@@ -35,7 +43,7 @@ varies on `Cookie`, `Authorization` and `X-Api-Key`.
 | `serialNumber` | A new random `urn:uuid:` at each export |
 | `metadata.timestamp` | The time of the export, UTC |
 | `metadata.tools.components` | nanobom and its version |
-| `metadata.component` | The project: its name, `bom-ref` `{organization}/{project}` |
+| `metadata.component` | The project: its name, `bom-ref` `{organization}/{project}`, and the version name in `version` (absent for the unnamed version) |
 | `components` | Each component that has a finding, with `bom-ref` and `purl` set to its package URL |
 | `vulnerabilities` | One entry per finding, open, ignored or fixed, sorted by identifier then package URL |
 
@@ -88,7 +96,7 @@ out.
 
 ### Which findings a statement covers
 
-A statement covers a finding of the project when both hold:
+A statement covers a finding of the project version when both hold:
 
 - **Vulnerability**: its `id`, or the `id` of one of its `references`, equals the finding's
   identifier or one of its aliases, ignoring case. A statement about `CVE-2021-23337` covers a
@@ -156,7 +164,7 @@ nothing. The whole import is one transaction.
 | --- | --- |
 | `ignored` | Open findings were ignored |
 | `already_ignored` | The covered findings were already ignored |
-| `no_matching_finding` | No open or ignored finding of the project is covered |
+| `no_matching_finding` | No open or ignored finding of the project version is covered |
 | `informational` | The state does not ignore findings |
 | `unresolved_reference` | The reference is neither a `bom-ref` of the document nor a package URL |
 | `no_version` | The package URL has no version |
@@ -165,8 +173,9 @@ nothing. The whole import is one transaction.
 ## Statements inside an SBOM
 
 An SBOM sent to the [upload API](upload-api.md) may carry statements in its own
-`vulnerabilities`, and they are imported like a VEX document, with the upload's token. The
-response then has a `vex` object, shaped like the import response above.
+`vulnerabilities`, and they are imported like a VEX document, with the upload's token, into the
+version the upload went to. The response then has a `vex` object, shaped like the import
+response above.
 
 - With `wait` or `fail_on`, they are imported **after** the evaluation and **before** the gate:
   they also cover the findings this upload's run opened, and `fail_on` does not count what they
@@ -185,7 +194,7 @@ Errors are English JSON, `{"error": "…"}`.
 | `200` | Exported, or imported |
 | `401` | `GET`: neither a valid token nor a session; `PUT`: no valid token. The response has a `WWW-Authenticate: Bearer` header |
 | `403` | `PUT` with a read token |
-| `404` | The organization or project does not exist, or the token or member does not reach it |
+| `404` | The organization, project or version does not exist, or the token or member does not reach it |
 | `413` | The body is larger than `NANOBOM_MAXIMUM_SBOM_SIZE` |
 | `422` | Invalid document |
 | `500` | A database error |

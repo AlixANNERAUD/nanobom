@@ -339,7 +339,7 @@ fn conforms(document: &Value, schema: &Value, value: &Value, path: &str) -> Resu
 }
 
 /// Checks a `200` response of a documented path against its schema.
-fn assert_documented(path: &str, body: &Value) {
+pub(crate) fn assert_documented(path: &str, body: &Value) {
     let document = openapi();
     let schema = &document["paths"][path]["get"]["responses"]["200"]["content"]["application/json"]
         ["schema"];

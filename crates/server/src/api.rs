@@ -1,6 +1,8 @@
 //! The HTTP API used by CI, authenticated with upload tokens.
 //!
-//! One route: `PUT /api/organizations/{organization}/projects/{project}/sbom`. The token is
+//! One route: `PUT /api/organizations/{organization}/projects/{project}/sbom`, with an optional
+//! `version` (the project version the SBOM describes, never read from the SBOM itself) and
+//! `latest` ([`nanobom_domain::versions`]). The token is
 //! checked before the body is parsed, so an anonymous client, or one with a read token, cannot
 //! make the server parse anything; the token's reach (its organization, or one project) is then enforced by
 //! [`inventory::ingest`]. Parsing runs on the blocking thread pool, a few SBOMs at a time
@@ -13,7 +15,8 @@
 //! (unless runs after uploads are disabled). With them, it waits for a run of the project that
 //! starts after the upload
 //! ([`Runner::request_and_wait`](crate::runner::Runner::request_and_wait)), at most
-//! `--upload-wait-seconds`, and returns the project's open findings. `fail_on` then turns the
+//! `--upload-wait-seconds`, and returns the open findings of the version uploaded (the run
+//! covers every version of the project, the gate only this one). `fail_on` then turns the
 //! result into a status CI can act on:
 //!
 //! - `409 Conflict` when open findings reach a threshold (a severity, or `exploited`), or, with
@@ -54,7 +57,7 @@ use nanobom_domain::{
     findings::{self, Finding},
     inventory::{self, ParsedSbom, UploadOutcome, UploadSource},
     licenses::{self, Action, Violations},
-    notifications, tokens, vex,
+    notifications, tokens, versions, vex,
 };
 use nanobom_entity::upload_tokens;
 use nanobom_osv::Severity;
@@ -234,6 +237,11 @@ pub struct UploadParameters {
     source_commit: Option<String>,
     /// The container image tag the SBOM describes.
     image_tag: Option<String>,
+    /// The project version the SBOM describes; the unnamed version when absent.
+    version: Option<String>,
+    /// `true` makes the version the latest; `false` keeps a version this upload creates from
+    /// becoming the latest.
+    latest: Option<String>,
     /// `true` to wait for the project's evaluation and return it.
     wait: Option<String>,
     /// Answer with an error status when one of these thresholds is reached (comma-separated);
@@ -242,12 +250,18 @@ pub struct UploadParameters {
 }
 
 fn parse_wait(value: Option<&str>) -> Result<bool, ApiError> {
+    Ok(parse_flag("wait", value)?.unwrap_or(false))
+}
+
+/// A `true` or `false` parameter; `None` when absent.
+fn parse_flag(name: &str, value: Option<&str>) -> Result<Option<bool>, ApiError> {
     match value.map(str::trim) {
-        None | Some("false") => Ok(false),
-        Some("true") => Ok(true),
+        None => Ok(None),
+        Some("false") => Ok(Some(false)),
+        Some("true") => Ok(Some(true)),
         Some(_) => Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
-            "wait must be true or false",
+            format!("{name} must be true or false"),
         )),
     }
 }
@@ -465,7 +479,7 @@ struct EvaluationFinding {
     url: String,
 }
 
-/// The evaluation of a run and the project's open findings, most severe first.
+/// The evaluation of a run and the uploaded version's open findings, most severe first.
 fn evaluation(
     run: &Waited,
     findings: &[Finding],
@@ -545,6 +559,13 @@ async fn upload_sbom(
             "fail_on=exploited needs exploitation data (NANOBOM_EXPLOITATION_DATA)",
         ));
     }
+    // Checked before the body is parsed: a mistyped version stores nothing.
+    let version = parameters
+        .version
+        .as_deref()
+        .map(versions::validate_name)
+        .transpose()?;
+    let latest = parse_flag("latest", parameters.latest.as_deref())?;
     let wait = parse_wait(parameters.wait.as_deref())? || !thresholds.is_empty();
     // Held through the wait, until the handler returns.
     let _waiting_slot = wait.then(|| waiting_slot(&state)).transpose()?;
@@ -562,6 +583,8 @@ async fn upload_sbom(
         UploadSource {
             source_commit: parameters.source_commit,
             image_tag: parameters.image_tag,
+            version,
+            latest,
         },
     )
     .await?;
@@ -572,6 +595,7 @@ async fn upload_sbom(
         StatusCode::OK
     };
     let project_id = outcome.project_id;
+    let version = outcome.version.clone();
     let mut response = UploadResponse {
         error: None,
         evaluation: None,
@@ -591,18 +615,26 @@ async fn upload_sbom(
         // the gate, which then counts only what the SBOM does not say is unaffected.
         if !statements.is_empty() {
             response.vex = Some(
-                vex::import_into_project(&state.database, &token, project_id, &statements).await?,
+                vex::import_into_project(
+                    &state.database,
+                    &token,
+                    project_id,
+                    &version,
+                    &statements,
+                )
+                .await?,
             );
         }
+        // The gate judges the version uploaded: other versions have their own uploads.
         let findings =
-            findings::open_for_upload_token(&state.database, &token, response.outcome.project_id)
-                .await?;
+            findings::open_for_upload_token(&state.database, &token, project_id, &version).await?;
         // Counted by the database and listed from the first components: cheap enough to
         // return whether the gate checks licenses or not.
-        let violations = licenses::violations(
+        let violations = licenses::violations_in_version(
             &state.database,
             &token,
             project_id,
+            Some(&version),
             0,
             MAXIMUM_LISTED_VIOLATIONS,
         )
@@ -646,7 +678,14 @@ async fn upload_sbom(
         // follows may open findings the statements cover, which the next upload then ignores.
         if !statements.is_empty() {
             response.vex = Some(
-                vex::import_into_project(&state.database, &token, project_id, &statements).await?,
+                vex::import_into_project(
+                    &state.database,
+                    &token,
+                    project_id,
+                    &version,
+                    &statements,
+                )
+                .await?,
             );
         }
         if state.options.run_after_upload {

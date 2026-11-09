@@ -11,24 +11,36 @@ Dependency-Track's model maps onto nanobom's, and where it stops.
 
 Dependency-Track identifies a project by a UUID, or by a name and a version, and keeps one
 project per version. nanobom identifies a project by its slug within an organization, and keeps
-one inventory per project: each upload replaces the previous one ([Concepts](concepts.md)).
+one inventory per [version](concepts.md#versions) of the project: each upload replaces the
+previous one of its version.
 
 - **The organization comes from the token.** Dependency-Track has no organizations; a nanobom
   upload token belongs to one, so the token alone tells where the SBOM goes.
 - **The project name is the slug.** It is normalized as in the native API, trimmed and folded to
   lower case, but not rewritten further: a name with a space or an accent is refused rather than
   silently mapped to a slug nobody chose, which could merge two projects into one.
-- **The version is a label.** nanobom has no project versions yet, so `projectVersion` is stored
-  as the upload's image tag. Uploads of `1.4.0` and `1.5.0` of the same project replace each
-  other, as uploads of one project always do.
+- **The version is a project version.** `projectVersion` names the version of the project the
+  SBOM goes to, as in Dependency-Track: uploads of `1.4.0` and `1.5.0` of the same project are two
+  versions, each with its own findings, and a new version starts with the triage of the latest
+  one, as Dependency-Track's clone with audit history does. A blank `projectVersion` is the
+  unnamed version. Dependency-Track's latest-version flag (`isLatest`) is nanobom's `latest`.
+  Before nanobom had versions, `projectVersion` was only recorded as the upload's image tag, and
+  uploads of every version replaced each other; pipelines that send a new `projectVersion` with
+  every build (a build number) now create a version each time, up to the limit of 50 active
+  versions per project, and should send a release or branch name instead.
+- **Versions differ in two ways.** nanobom accepts a narrower set of version names (letters,
+  digits, `.`, `_`, `+`, `/` and `-`, up to 64 characters) and refuses others with a `400`,
+  rather than mapping them to a name nobody chose. And a new version becomes the latest unless
+  the upload says `isLatest: false`, where Dependency-Track leaves the flag alone unless asked:
+  with nanobom, the version most recently created is the one the project page shows.
 - **UUIDs cannot be resolved.** A client configured with a project UUID refers to a project that
   only exists in Dependency-Track; nanobom refuses it with a message asking for the name, rather
   than guessing.
 - **`autoCreate` keeps its meaning.** Without it, a missing project is a `404`, as in
   Dependency-Track. With it, an organization token creates the project; a project token never
   does, whatever the request says ([Security model](security.md#upload-tokens)).
-- **The rest is ignored.** Tags, parent projects, the latest-version flag and the active flag have
-  no equivalent; they are accepted so that clients sending them still work.
+- **The rest is ignored.** Tags, parent projects and the active flag have no equivalent; they are
+  accepted so that clients sending them still work.
 
 ## Processing status
 

@@ -8,4 +8,5 @@ mod interface;
 mod operations;
 mod read_api;
 mod upload;
+mod versions;
 mod vex;

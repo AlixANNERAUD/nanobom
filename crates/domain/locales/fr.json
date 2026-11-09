@@ -62,7 +62,9 @@
     "unknown_license_id": "« {license} » n’est pas un identifiant de licence SPDX (voir https://spdx.org/licenses) ni LicenseRef- suivi de lettres, de chiffres, de « . » ou de « - »",
     "unknown_license_action": "action de licence « {action} » inconnue ; actions possibles : allow, warn ou forbid",
     "conflicting_license_rule": "« {license} » figure avec deux actions différentes",
-    "too_many_license_rules": "une politique de licences compte au plus {maximum} règles"
+    "too_many_license_rules": "une politique de licences compte au plus {maximum} règles",
+    "invalid_version_name": "la version doit compter 1 à {maximum} caractères : lettres, chiffres, « . », « _ », « + », « / » ou « - »",
+    "too_many_versions": "ce projet a déjà {maximum} versions actives : envoyez plutôt vers une version existante"
   },
   "email": {
     "new_findings_subject": {
@@ -80,6 +82,8 @@
     },
     "component_in_project": "{component} dans {project}",
     "introduced_via": "Introduit par {names}",
+    "versions": "Versions : {names}",
+    "unnamed_version": "version sans nom",
     "more_names": {
       "one": "{count} autre",
       "other": "{count} autres"

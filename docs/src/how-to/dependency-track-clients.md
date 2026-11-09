@@ -19,7 +19,15 @@ is explained in [Dependency-Track compatibility](../explanation/dependency-track
 - **Identify projects by name, not by UUID.** nanobom has no project UUIDs: a client configured
   with a project UUID only gets a `400`.
 
-The project version is recorded as the upload's image tag, shown in the project's upload history.
+- **Send a version that names a release, not a build.** `projectVersion` is the
+  [project version](../explanation/concepts.md#versions) the SBOM goes to; a project keeps at
+  most 50 active versions, so a build number or a commit hash, new at every build, soon fills
+  it. Use a release or branch name, or leave `projectVersion` out to keep one version per
+  project. Version names are 1 to 64 letters, digits, `.`, `_`, `+`, `/` or `-`.
+
+Earlier nanobom releases recorded `projectVersion` as the upload's image tag and kept one
+inventory per project. Since project versions, each `projectVersion` is a version of its own
+([what changed](../explanation/dependency-track.md#what-maps-and-how)).
 
 ## GitHub Actions, with gh-upload-sbom
 
@@ -33,6 +41,9 @@ The project version is recorded as the upload's image tag, shown in the project'
     auto-create: true
     bom-filename: bom.json
 ```
+
+Run it on the default and release branches only: on every pull request branch, `ref_name` would
+create a version per branch.
 
 `auto-create: true` is required even when the project exists: without it, the action sends the
 project's UUID instead of its name. For an instance on another port or over plain HTTP, set
@@ -49,8 +60,11 @@ pipeline:
 
 ```groovy
 dependencyTrackPublisher artifact: 'target/bom.json', projectName: 'web',
-    projectVersion: env.BUILD_NUMBER, synchronous: false
+    projectVersion: env.BRANCH_NAME, synchronous: false
 ```
+
+`env.BRANCH_NAME` is set in multibranch pipelines; avoid `env.BUILD_NUMBER`, which would create
+a version per build.
 
 Keep **synchronous publishing** off: in synchronous mode the plugin fetches findings and policy
 violations through Dependency-Track endpoints that nanobom does not have, and fails the build. For
@@ -73,7 +87,8 @@ mvn org.cyclonedx:cyclonedx-maven-plugin:2.9.3:makeAggregateBom -DoutputFormat=j
 
 The project name defaults to the artifact ID and the version to the Maven version; set
 `dependency-track.projectName` when the artifact ID is not a valid slug. The plugin creates
-missing projects.
+missing projects. With a `-SNAPSHOT` version, every snapshot of a release uploads to the same
+version, as wanted; set `dependency-track.projectVersion` to override it.
 
 After the upload, the `upload-bom` goal looks the project up and refreshes its metrics through
 Dependency-Track endpoints that nanobom does not have, and logs an error. The SBOM is stored all

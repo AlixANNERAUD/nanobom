@@ -52,7 +52,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     access::{Actor, Permission},
-    chat::{clipped, one_line, utc},
+    chat::{self, clipped, one_line, utc},
     deliveries::{self, Attempt, Channel},
     error::{Error, Result},
     notifications::{
@@ -593,6 +593,23 @@ pub fn new_findings(payload: &NewFindingsPayload, language: Language) -> Message
                     ("project", &value(&finding.project, NAME_LIMIT)),
                 ],
             ));
+            if let Some((names, more)) = chat::versions(
+                finding,
+                translate!(locale = locale, "email.unnamed_version"),
+            ) {
+                let mut names: Vec<String> =
+                    names.iter().map(|name| value(name, NAME_LIMIT)).collect();
+                if more > 0 {
+                    names.push(plural(
+                        translate_plural!(locale = locale, "email.more_names", more),
+                        more,
+                    ));
+                }
+                lines.push(Line::new(
+                    translate!(locale = locale, "email.versions"),
+                    &[("names", &names.join(", "))],
+                ));
+            }
             if let Some(summary) = &finding.summary {
                 lines.push(Line::new(
                     "{summary}",
