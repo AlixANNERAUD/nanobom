@@ -10,6 +10,10 @@ ignore = [
   # Timing attack on private-key RSA operations; openidconnect only verifies ID token signatures
   # with the provider's public key.
   { id = "RUSTSEC-2023-0071", reason = "rsa is only used for public-key signature verification" },
+  # SQLite bundled by libsqlite3-sys up to 0.38.2; sqlx-sqlite 0.9.0 requires <0.38, so the fixed
+  # 0.39 cannot be used yet (#73). Exploiting it needs a database file and its -wal written by a
+  # less trusted party: nanobom only opens its own database, or a backup the operator restores.
+  { id = "RUSTSEC-2026-0459", reason = "nanobom only opens its own database; upgrade tracked in #73" },
 ]
 
 [licenses]
