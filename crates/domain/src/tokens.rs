@@ -1,5 +1,12 @@
-//! Upload tokens, used by CI to send SBOMs. A token is scoped to one project, or to a whole
-//! organization, in which case it may also create projects on their first upload.
+//! API tokens. A token reaches one project, or a whole organization, and has a [`Scope`]:
+//!
+//! - [`Scope::Upload`] tokens are used by CI to send SBOMs and VEX documents; an organization
+//!   token may also create projects on their first upload. They can read too.
+//! - [`Scope::Read`] tokens only read, through the read API: scripts and dashboards get a
+//!   token that cannot change anything.
+//!
+//! Whatever the scope, a token reads like a viewer of what it reaches
+//! ([`crate::access::Reader`]). The table keeps its historical name, `upload_tokens`.
 //!
 //! Tokens are 256-bit random values shown once at creation. Only their SHA-256 digest is stored:
 //! a slow password hash is unnecessary for random secrets of this length and would slow every
@@ -25,11 +32,63 @@ use crate::{
 pub const PREFIX: &str = "nanobom_";
 const DISPLAYED_CHARACTERS: usize = PREFIX.len() + 6;
 
-/// An upload token as shown in the interface; the secret itself is never stored.
+/// What a token may do within its reach. Stored as [`Scope::as_str`] in `upload_tokens.scope`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Scope {
+    /// Uploads SBOMs and VEX documents, and reads.
+    #[default]
+    Upload,
+    /// Reads only.
+    Read,
+}
+
+impl Scope {
+    /// Every scope, the default first.
+    pub const ALL: [Scope; 2] = [Scope::Upload, Scope::Read];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Scope::Upload => "upload",
+            Scope::Read => "read",
+        }
+    }
+
+    /// Parses a name produced by [`Scope::as_str`]; anything else is
+    /// [`Problem::UnknownTokenScope`].
+    pub fn parse(value: &str) -> Result<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|scope| scope.as_str() == value.trim())
+            .ok_or_else(|| {
+                Error::invalid(Problem::UnknownTokenScope {
+                    scope: value.to_owned(),
+                })
+            })
+    }
+
+    /// The scope of a stored token. An unknown value, never written, reads as
+    /// [`Scope::Read`], so it can never upload.
+    pub fn of(token: &upload_tokens::Model) -> Self {
+        Self::parse(&token.scope).unwrap_or(Scope::Read)
+    }
+}
+
+/// Refuses tokens that may not upload with [`Error::Forbidden`]. Every path through which a
+/// token changes data calls it: SBOM uploads (which may also create projects) and VEX imports.
+pub(crate) fn require_upload_scope(token: &upload_tokens::Model) -> Result<()> {
+    match Scope::of(token) {
+        Scope::Upload => Ok(()),
+        Scope::Read => Err(Error::Forbidden),
+    }
+}
+
+/// A token as shown in the interface; the secret itself is never stored.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UploadToken {
     pub id: i64,
     pub name: String,
+    pub scope: Scope,
     /// The first characters of the token (the prefix and six hexadecimal digits), to recognize
     /// it.
     pub prefix: String,
@@ -66,6 +125,7 @@ pub(crate) fn digest(secret: &str) -> String {
 fn view(model: upload_tokens::Model, project_slug: Option<String>) -> UploadToken {
     UploadToken {
         id: model.id,
+        scope: Scope::of(&model),
         name: model.name,
         prefix: model.token_prefix,
         project_slug,
@@ -75,15 +135,35 @@ fn view(model: upload_tokens::Model, project_slug: Option<String>) -> UploadToke
     }
 }
 
-/// Creates a token for an organization, or for one of its projects when `project_slug` is set.
-/// Requires [`Permission::ManageUploadTokens`]; an unknown project is
-/// [`Problem::UnknownProject`].
+/// Creates an upload token; see [`create_with_scope`].
 pub async fn create(
     database: &impl ConnectionTrait,
     actor: &Actor,
     organization_id: i64,
     project_slug: Option<&str>,
     name: &str,
+) -> Result<CreatedToken> {
+    create_with_scope(
+        database,
+        actor,
+        organization_id,
+        project_slug,
+        name,
+        Scope::Upload,
+    )
+    .await
+}
+
+/// Creates a token for an organization, or for one of its projects when `project_slug` is set.
+/// Requires [`Permission::ManageUploadTokens`], for read tokens too: a read token sees
+/// everything its reach covers; an unknown project is [`Problem::UnknownProject`].
+pub async fn create_with_scope(
+    database: &impl ConnectionTrait,
+    actor: &Actor,
+    organization_id: i64,
+    project_slug: Option<&str>,
+    name: &str,
+    scope: Scope,
 ) -> Result<CreatedToken> {
     actor
         .authorize(database, organization_id, Permission::ManageUploadTokens)
@@ -93,6 +173,7 @@ pub async fn create(
         organization_id,
         project_slug,
         name,
+        scope,
         Some(actor.user_id),
     )
     .await
@@ -103,6 +184,7 @@ async fn insert(
     organization_id: i64,
     project_slug: Option<&str>,
     name: &str,
+    scope: Scope,
     created_by: Option<i64>,
 ) -> Result<CreatedToken> {
     let name = names::display_name(Field::TokenName, name)?;
@@ -123,6 +205,7 @@ async fn insert(
         organization_id: Set(organization_id),
         project_id: Set(project.as_ref().map(|project| project.id)),
         name: Set(name),
+        scope: Set(scope.as_str().to_owned()),
         token_hash: Set(digest(&secret)),
         token_prefix: Set(secret[..DISPLAYED_CHARACTERS].to_owned()),
         created_by_user_id: Set(created_by),
@@ -161,9 +244,10 @@ pub async fn create_from_command_line(
     organization_slug: &str,
     project_slug: Option<&str>,
     name: &str,
+    scope: Scope,
 ) -> Result<CreatedToken> {
     let organization = organization_by_slug(database, organization_slug).await?;
-    insert(database, organization.id, project_slug, name, None).await
+    insert(database, organization.id, project_slug, name, scope, None).await
 }
 
 /// Lists the tokens of an organization from the command line.
@@ -245,12 +329,23 @@ async fn mark_revoked(database: &impl ConnectionTrait, token: upload_tokens::Mod
     Ok(())
 }
 
-/// Finds the active token matching a secret and records its use in `last_used_at`.
+/// How stale `last_used_at` may get before [`authenticate`] writes it again.
+///
+/// The read API authenticates every request: writing each time would turn reads into writes,
+/// which contend for SQLite's single writer lock. The settings page shows the value to the
+/// minute at best, so a minute of imprecision costs nothing.
+const LAST_USED_RESOLUTION: chrono::Duration = chrono::Duration::minutes(1);
+
+/// Finds the active token matching a secret and records its use in `last_used_at`, when the
+/// stored value is a minute old or more (or unset).
 ///
 /// Returns `None` for anything that is not an active token, without saying why, so callers
 /// answer every failure the same way. The lookup is by digest, so it does not compare secrets
 /// in a timing-sensitive way. The token only authenticates the caller: what it may upload to is
-/// checked by [`crate::inventory::ingest`].
+/// checked by [`crate::inventory::ingest`], what it may read by [`crate::access::Reader`].
+///
+/// Failing to record the use does not fail the request: it is bookkeeping, and a busy database
+/// should not turn a valid token away.
 pub async fn authenticate(
     database: &impl ConnectionTrait,
     secret: &str,
@@ -266,7 +361,20 @@ pub async fn authenticate(
     else {
         return Ok(None);
     };
+    let now = Utc::now();
+    let recent = token
+        .last_used_at
+        .is_some_and(|used| now.signed_duration_since(used) < LAST_USED_RESOLUTION);
+    if recent {
+        return Ok(Some(token));
+    }
     let mut active: upload_tokens::ActiveModel = token.clone().into();
-    active.last_used_at = Set(Some(Utc::now().fixed_offset()));
-    Ok(Some(active.update(database).await?))
+    active.last_used_at = Set(Some(now.fixed_offset()));
+    match active.update(database).await {
+        Ok(updated) => Ok(Some(updated)),
+        Err(error) => {
+            tracing::warn!(%error, token = token.id, "cannot record the use of a token");
+            Ok(Some(token))
+        }
+    }
 }

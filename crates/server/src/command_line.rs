@@ -65,7 +65,7 @@ pub enum Command {
     },
     /// Create a local instance administrator, typically the first one.
     CreateAdministrator(CreateAdministratorOptions),
-    /// Manage upload tokens.
+    /// Manage API tokens (upload and read).
     #[command(subcommand)]
     Token(TokenCommand),
     /// Exit successfully when the running server reports itself healthy; for container health
@@ -120,7 +120,7 @@ pub struct CreateAdministratorOptions {
 
 #[derive(Debug, Subcommand)]
 pub enum TokenCommand {
-    /// Create an upload token and print it; it cannot be shown again.
+    /// Create a token and print it; it cannot be shown again.
     Create {
         /// Organization slug.
         #[arg(long, env = "NANOBOM_TOKEN_ORGANIZATION")]
@@ -132,19 +132,39 @@ pub enum TokenCommand {
         /// A name to recognize the token by.
         #[arg(long, env = "NANOBOM_TOKEN_NAME")]
         name: String,
+        /// What the token may do: `upload` sends SBOMs and VEX documents and reads, `read` only
+        /// reads, through the read API.
+        #[arg(long, env = "NANOBOM_TOKEN_SCOPE", value_enum, default_value_t = TokenScope::Upload)]
+        scope: TokenScope,
     },
-    /// List the upload tokens of an organization.
+    /// List the tokens of an organization.
     List {
         /// Organization slug.
         #[arg(long, env = "NANOBOM_TOKEN_ORGANIZATION")]
         organization: String,
     },
-    /// Revoke an upload token.
+    /// Revoke a token.
     Revoke {
         /// Token identifier, as listed.
         #[arg(long)]
         id: i64,
     },
+}
+
+/// The scope of a new token, [`nanobom_domain::tokens::Scope`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum TokenScope {
+    Upload,
+    Read,
+}
+
+impl From<TokenScope> for nanobom_domain::tokens::Scope {
+    fn from(scope: TokenScope) -> Self {
+        match scope {
+            TokenScope::Upload => Self::Upload,
+            TokenScope::Read => Self::Read,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Args)]

@@ -826,6 +826,66 @@ async fn project_tokens_only_reach_their_project() {
     ));
 }
 
+/// A search says whether the cap cut it: exactly the cap is complete, one more is not.
+#[tokio::test]
+async fn search_says_when_results_were_cut() {
+    let fixture = setup().await;
+    let database = &fixture.database;
+    let created = tokens::create(database, &fixture.owner, fixture.organization, None, "CI")
+        .await
+        .unwrap();
+    let token = tokens::authenticate(database, &created.secret)
+        .await
+        .unwrap()
+        .unwrap();
+    let upload = |count: usize| {
+        let components: Vec<_> = (0..count)
+            .map(|index| {
+                serde_json::json!({
+                    "type": "library",
+                    "name": format!("widget-{index:03}"),
+                    "version": "1.0.0",
+                    "purl": format!("pkg:npm/widget-{index:03}@1.0.0")
+                })
+            })
+            .collect();
+        serde_json::json!({
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.5",
+            "version": 1,
+            "components": components
+        })
+        .to_string()
+    };
+    let maximum = inventory::MAXIMUM_SEARCH_RESULTS;
+    for (count, truncated) in [(maximum, false), (maximum + 1, true)] {
+        inventory::ingest(
+            database,
+            &token,
+            "acme",
+            "web",
+            inventory::parse(upload(count).as_bytes()).unwrap(),
+            UploadSource::default(),
+        )
+        .await
+        .unwrap();
+        let found = inventory::search_results(database, &fixture.viewer, "widget")
+            .await
+            .unwrap();
+        assert_eq!(found.matches.len(), maximum, "{count} components");
+        assert_eq!(found.truncated, truncated, "{count} components");
+        assert_eq!(found.matches[0].name, "widget-000");
+        let plain = inventory::search(database, &fixture.viewer, "widget")
+            .await
+            .unwrap();
+        assert_eq!(plain, found.matches);
+    }
+    let none = inventory::search_results(database, &fixture.viewer, "  ")
+        .await
+        .unwrap();
+    assert!(none.matches.is_empty() && !none.truncated);
+}
+
 #[tokio::test]
 async fn search_ignores_the_case_of_versions_too() {
     let fixture = setup().await;

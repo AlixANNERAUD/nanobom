@@ -15,25 +15,35 @@ owners everywhere.
 
 Shared data is limited to what is not organization-specific: cached OSV records and exploitation
 data per CVE. The error message of a failed instance-wide run can name packages of any
-organization, so it is shown to instance administrators only, and the failure webhook should
+organization, and its counts of new and fixed findings span all of them, so both are shown to
+instance administrators only, and the failure webhook should
 reach operators rather than an organization's channel.
 
-## Upload tokens
+## API tokens
 
 - 256 bits of randomness, prefixed with `nanobom_` so secret scanners (and you) can recognize
   them in logs and repositories.
 - Stored as a SHA-256 digest. A slow password hash is unnecessary for random values of that
   length, and would slow every upload down.
-- Scoped to an organization or one project; they reach the upload and VEX APIs only, never the
-  interface. A project token limits a leak to one project, and cannot create projects. Through
-  the VEX API, a token can read the findings of the projects it reaches and ignore findings by
-  importing statements: a leaked token can hide vulnerabilities, so treat it like the SBOM
-  pipeline it belongs to.
-- Shown once; revocable; their last use is recorded.
+- Limited to an organization or one project; they reach the upload, VEX and read APIs only,
+  never the interface. A project token limits a leak to one project, and cannot create
+  projects. Every token reads the findings of the projects it reaches, as a viewer, through the
+  same checks as the interface.
+- An `upload` token can also replace components and ignore findings by importing VEX
+  statements: a leaked upload token can hide vulnerabilities, so treat it like the SBOM pipeline
+  it belongs to. A `read` token cannot change anything: every write path refuses it, in the
+  server and again in the domain layer. Give tools that only read a read token
+  ([Tokens and scopes](tokens.md)).
+- Shown once; revocable; their last use is recorded, to the minute: a token used again within
+  a minute does not write to the database, so reads stay reads.
 
 The upload API is not exposed to cross-site request forgery: it is authenticated by the
 `Authorization` header (`X-Api-Key` for the Dependency-Track API), which browsers never add on
-their own.
+their own. The read API also accepts the session cookie, so the interface's pages can use it;
+it only answers `GET` requests and changes nothing, and since it sends no CORS headers, a page
+of another site cannot read its answers. Its responses are `Cache-Control: private, no-cache`
+and vary on the cookie and token headers, so a shared proxy cannot serve what one caller
+obtained to another.
 
 ## Sessions and cookies
 

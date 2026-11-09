@@ -13,7 +13,7 @@ the [logs reference](../reference/metrics.md#log-messages).
 
 - Check that the CI secret is set and reaches the job. On GitHub, workflows triggered by pull
   requests from forks get no secrets, so the header is `Bearer ` with nothing after it.
-- Check the token in **Settings → Upload tokens**: its first characters, whether it is revoked,
+- Check the token in **Settings → API tokens**: its first characters, whether it is revoked,
   and when it was last used. A token that was never used never reached nanobom.
 - Tokens are shown once. If in doubt, create a new one and revoke the old one.
 
@@ -21,6 +21,10 @@ the [logs reference](../reference/metrics.md#log-messages).
 
 `this token does not allow uploads to this project`: a project token was used for another project
 of the organization. Fix the project slug in the URL, or use the token of that project.
+
+`this token is read-only: uploads need a token with the upload scope`: the token was created
+with the **Read only** scope, for the [read API](../reference/read-api.md). Create a token with
+the **Upload and read** scope for CI.
 
 ### Upload answers 404
 

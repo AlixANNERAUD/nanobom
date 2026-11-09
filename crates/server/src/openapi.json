@@ -1,0 +1,1611 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "nanobom read API",
+    "version": "1",
+    "description": "Read what nanobom knows about organizations, projects, findings, components and runs. Every endpoint is read-only and checks access as the interface does: anything out of the caller's reach is 404, like something missing. Changes are additive (new endpoints, query parameters and response fields), so clients must ignore fields they do not know; see the guide for the stability promise."
+  },
+  "externalDocs": {
+    "description": "Read API reference",
+    "url": "https://alixanneraud.github.io/nanobom/reference/read-api.html"
+  },
+  "servers": [
+    {
+      "url": "/"
+    }
+  ],
+  "security": [
+    {
+      "bearer": []
+    },
+    {
+      "apiKey": []
+    },
+    {
+      "session": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "read",
+      "description": "Read-only endpoints."
+    }
+  ],
+  "paths": {
+    "/api/openapi.json": {
+      "get": {
+        "operationId": "getOpenApi",
+        "summary": "This description",
+        "description": "The OpenAPI description of the read API. It needs no authentication.",
+        "tags": [
+          "read"
+        ],
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "This document.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/organizations": {
+      "get": {
+        "operationId": "listOrganizations",
+        "summary": "Organizations",
+        "description": "The organizations the caller sees, by name. A token sees its own organization.",
+        "tags": [
+          "read"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IfNoneMatch"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The organizations.",
+            "headers": {
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationList"
+                }
+              }
+            }
+          },
+          "304": {
+            "$ref": "#/components/responses/NotModified"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/organizations/{organization}/projects": {
+      "get": {
+        "operationId": "listProjects",
+        "summary": "Projects",
+        "description": "The organization's projects by slug, with their open findings by severity. A project token sees its project only.",
+        "tags": [
+          "read"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IfNoneMatch"
+          },
+          {
+            "$ref": "#/components/parameters/Organization"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The projects.",
+            "headers": {
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProjectList"
+                }
+              }
+            }
+          },
+          "304": {
+            "$ref": "#/components/responses/NotModified"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/organizations/{organization}/projects/{project}/findings": {
+      "get": {
+        "operationId": "listFindings",
+        "summary": "Findings of a project",
+        "description": "The project's findings in the project page's order: known exploited first, then by severity, EPSS score, CVSS score, component and vulnerability.",
+        "tags": [
+          "read"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IfNoneMatch"
+          },
+          {
+            "$ref": "#/components/parameters/Organization"
+          },
+          {
+            "$ref": "#/components/parameters/Project"
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "example": "open",
+            "description": "`all`, or a comma-separated list of `open`, `ignored` and `fixed`. Without it, open and ignored findings, as on the project page."
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "example": "critical,high",
+            "description": "A comma-separated list of `critical`, `high`, `medium`, `low` and `unknown`."
+          },
+          {
+            "name": "exploited",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            },
+            "description": "`true` for findings with a known exploited CVE only."
+          },
+          {
+            "name": "ecosystem",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Only findings of this ecosystem: the package URL type (`npm`, `cargo`, `pypi`...)."
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Offset"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of findings.",
+            "headers": {
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingPage"
+                }
+              }
+            }
+          },
+          "304": {
+            "$ref": "#/components/responses/NotModified"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          }
+        }
+      }
+    },
+    "/api/organizations/{organization}/projects/{project}/components": {
+      "get": {
+        "operationId": "listComponents",
+        "summary": "Components of a project",
+        "description": "The project's components from its latest SBOM, by package URL.",
+        "tags": [
+          "read"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IfNoneMatch"
+          },
+          {
+            "$ref": "#/components/parameters/Organization"
+          },
+          {
+            "$ref": "#/components/parameters/Project"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Offset"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of components.",
+            "headers": {
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComponentPage"
+                }
+              }
+            }
+          },
+          "304": {
+            "$ref": "#/components/responses/NotModified"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          }
+        }
+      }
+    },
+    "/api/organizations/{organization}/runs": {
+      "get": {
+        "operationId": "listRuns",
+        "summary": "Recent runs",
+        "description": "The latest runs that covered the organization (whole-instance runs, and runs of the organization or one of its projects), newest first. A project token sees whole-instance runs and runs of its project. Errors of whole-instance runs are shown to instance administrators only. Finding counts of whole-instance runs, which span every organization, are null for callers that are not instance administrators. There is no pagination: `offset` is refused with 422, and `limit` caps the list.",
+        "tags": [
+          "read"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IfNoneMatch"
+          },
+          {
+            "$ref": "#/components/parameters/Organization"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "How many runs, from 1 to 100.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The runs.",
+            "headers": {
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunList"
+                }
+              }
+            }
+          },
+          "304": {
+            "$ref": "#/components/responses/NotModified"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          }
+        }
+      }
+    },
+    "/api/findings/{finding}": {
+      "get": {
+        "operationId": "getFinding",
+        "summary": "One finding",
+        "description": "A finding with its vulnerability, history, dependency paths and the other projects it affects.",
+        "tags": [
+          "read"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IfNoneMatch"
+          },
+          {
+            "name": "finding",
+            "in": "path",
+            "required": true,
+            "description": "The finding's `id`.",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The finding.",
+            "headers": {
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FindingDetail"
+                }
+              }
+            }
+          },
+          "304": {
+            "$ref": "#/components/responses/NotModified"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/components": {
+      "get": {
+        "operationId": "searchComponents",
+        "summary": "Search components",
+        "description": "Components whose name contains `q`, across the projects the caller sees, by name then version, at most 200. `truncated` says when more matched.",
+        "tags": [
+          "read"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IfNoneMatch"
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "lodash@4.17",
+            "description": "A name (`openssl`), optionally followed by a space or `@` and a version prefix (`openssl 3.`)."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The matching components.",
+            "headers": {
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComponentMatchList"
+                }
+              }
+            }
+          },
+          "304": {
+            "$ref": "#/components/responses/NotModified"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearer": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "A token of either scope (upload or read), from the organization's settings or `nanobom token create`."
+      },
+      "apiKey": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-Api-Key",
+        "description": "The same token, in the header Dependency-Track clients use."
+      },
+      "session": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "nanobom_session",
+        "description": "The interface's session, for pages of the same instance."
+      }
+    },
+    "parameters": {
+      "Organization": {
+        "name": "organization",
+        "in": "path",
+        "required": true,
+        "description": "Organization slug.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "Project": {
+        "name": "project",
+        "in": "path",
+        "required": true,
+        "description": "Project slug.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "Limit": {
+        "name": "limit",
+        "in": "query",
+        "description": "Items per page, from 1 to 500.",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500,
+          "default": 100
+        }
+      },
+      "Offset": {
+        "name": "offset",
+        "in": "query",
+        "description": "Items to skip.",
+        "schema": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 0
+        }
+      },
+      "IfNoneMatch": {
+        "name": "If-None-Match",
+        "in": "header",
+        "description": "The `ETag` of an earlier response: `304` while the data is unchanged.",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "headers": {
+      "ETag": {
+        "description": "A weak validator of the response body.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "CacheControl": {
+        "description": "`private, no-cache`: shared caches must not store the response, and clients revalidate it with `If-None-Match`.",
+        "schema": {
+          "type": "string"
+        }
+      }
+    },
+    "responses": {
+      "BadRequest": {
+        "description": "A path segment that is not valid percent-encoded UTF-8.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "NotModified": {
+        "description": "The data still matches `If-None-Match`."
+      },
+      "Unauthorized": {
+        "description": "No valid token, and no session.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "NotFound": {
+        "description": "Missing, or out of the caller's reach.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      },
+      "Invalid": {
+        "description": "An invalid query parameter.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "What went wrong, in English."
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "Organization": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "viewer",
+              "member",
+              "admin",
+              "owner"
+            ],
+            "description": "The caller's role. Tokens read as viewers; instance administrators are owners everywhere."
+          }
+        },
+        "required": [
+          "slug",
+          "name",
+          "role"
+        ]
+      },
+      "SeverityCounts": {
+        "type": "object",
+        "properties": {
+          "critical": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "high": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "medium": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "low": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "unknown": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "critical",
+          "high",
+          "medium",
+          "low",
+          "unknown"
+        ]
+      },
+      "Project": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "last_upload_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "The latest SBOM upload; null before the first one."
+          },
+          "stale": {
+            "type": "boolean",
+            "description": "No SBOM for longer than the stale threshold (NANOBOM_STALE_AFTER_DAYS)."
+          },
+          "open": {
+            "$ref": "#/components/schemas/SeverityCounts"
+          },
+          "ignored": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Ignored findings."
+          },
+          "known_exploited": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Open findings with a CVE in the CISA KEV catalog."
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The project's page in the interface."
+          }
+        },
+        "required": [
+          "slug",
+          "name",
+          "last_upload_at",
+          "stale",
+          "open",
+          "ignored",
+          "known_exploited",
+          "url"
+        ]
+      },
+      "Component": {
+        "type": "object",
+        "properties": {
+          "purl": {
+            "type": "string",
+            "description": "Package URL."
+          },
+          "name": {
+            "type": "string",
+            "description": "Package name, with its namespace when it has one."
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ecosystem": {
+            "type": "string",
+            "description": "The package URL type (`npm`, `cargo`, `pypi`...)."
+          }
+        },
+        "required": [
+          "purl",
+          "name",
+          "version",
+          "ecosystem"
+        ]
+      },
+      "ComponentRef": {
+        "type": "object",
+        "properties": {
+          "purl": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "purl",
+          "name",
+          "version"
+        ]
+      },
+      "ComponentMatch": {
+        "type": "object",
+        "properties": {
+          "organization": {
+            "type": "string",
+            "description": "Organization slug."
+          },
+          "project": {
+            "type": "string",
+            "description": "Project slug."
+          },
+          "purl": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ecosystem": {
+            "type": "string",
+            "description": "The package URL type (`npm`, `cargo`, `pypi`...)."
+          }
+        },
+        "required": [
+          "organization",
+          "project",
+          "purl",
+          "name",
+          "version",
+          "ecosystem"
+        ]
+      },
+      "Exploitation": {
+        "type": "object",
+        "properties": {
+          "known_exploited": {
+            "type": "boolean",
+            "description": "A CVE of the finding is in the CISA KEV catalog."
+          },
+          "kev_date_added": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "kev_due_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          },
+          "kev_ransomware": {
+            "type": "boolean",
+            "description": "CISA lists the CVE as used in ransomware campaigns."
+          },
+          "epss_score": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1,
+            "description": "Probability of exploitation in the next 30 days (FIRST EPSS)."
+          },
+          "epss_percentile": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0,
+            "maximum": 1
+          },
+          "epss_date": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date"
+          }
+        },
+        "required": [
+          "known_exploited",
+          "kev_date_added",
+          "kev_due_date",
+          "kev_ransomware",
+          "epss_score",
+          "epss_percentile",
+          "epss_date"
+        ],
+        "description": "Aggregated over the finding's CVEs; empty when nothing is known."
+      },
+      "Ignore": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "justification": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "code_not_present",
+              "code_not_reachable",
+              "requires_configuration",
+              "requires_dependency",
+              "requires_environment",
+              "protected_by_compiler",
+              "protected_at_runtime",
+              "protected_at_perimeter",
+              "protected_by_mitigating_control",
+              "false_positive",
+              null
+            ]
+          },
+          "expires_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "reason",
+          "justification",
+          "expires_at"
+        ]
+      },
+      "Finding": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "project": {
+            "type": "string",
+            "description": "Project slug."
+          },
+          "vulnerability_id": {
+            "type": "string",
+            "description": "The OSV identifier (GHSA-..., CVE-..., RUSTSEC-...)."
+          },
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "summary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "component": {
+            "$ref": "#/components/schemas/Component"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low",
+              "unknown"
+            ],
+            "description": "The highest severity among the vulnerability's aliases."
+          },
+          "cvss_score": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "ignored",
+              "fixed"
+            ]
+          },
+          "exploitation": {
+            "$ref": "#/components/schemas/Exploitation"
+          },
+          "introduced_via": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComponentRef"
+            },
+            "description": "The project's direct dependencies that lead to the component; empty when the SBOM's dependency graph does not say."
+          },
+          "first_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fixed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "ignore": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Ignore"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the finding is ignored, while it is; null otherwise."
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The finding's page in the interface."
+          }
+        },
+        "required": [
+          "id",
+          "project",
+          "vulnerability_id",
+          "aliases",
+          "summary",
+          "component",
+          "severity",
+          "cvss_score",
+          "status",
+          "exploitation",
+          "introduced_via",
+          "first_seen_at",
+          "last_seen_at",
+          "fixed_at",
+          "ignore",
+          "url"
+        ]
+      },
+      "Reference": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "url"
+        ]
+      },
+      "Event": {
+        "type": "object",
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "opened",
+              "fixed",
+              "reopened",
+              "ignored",
+              "restored",
+              "ignore_expired"
+            ]
+          },
+          "user": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The member who ignored or restored the finding."
+          },
+          "token": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The token that imported a VEX statement."
+          },
+          "reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "justification": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              "code_not_present",
+              "code_not_reachable",
+              "requires_configuration",
+              "requires_dependency",
+              "requires_environment",
+              "protected_by_compiler",
+              "protected_at_runtime",
+              "protected_at_perimeter",
+              "protected_by_mitigating_control",
+              "false_positive",
+              null
+            ]
+          },
+          "run_id": {
+            "type": [
+              "integer",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "created_at",
+          "kind",
+          "user",
+          "token",
+          "reason",
+          "justification",
+          "run_id"
+        ]
+      },
+      "DependencyPaths": {
+        "type": "object",
+        "properties": {
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/ComponentRef"
+              }
+            },
+            "description": "From a direct dependency to the component, shortest first."
+          },
+          "more": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "How many more direct dependencies lead to the component."
+          },
+          "partial": {
+            "type": "boolean",
+            "description": "The SBOM has links the graph could not keep: other paths may exist."
+          }
+        },
+        "required": [
+          "paths",
+          "more",
+          "partial"
+        ]
+      },
+      "AffectedComponent": {
+        "type": "object",
+        "properties": {
+          "finding_id": {
+            "type": "integer"
+          },
+          "organization": {
+            "type": "string"
+          },
+          "project": {
+            "type": "string"
+          },
+          "purl": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "ignored",
+              "fixed"
+            ]
+          }
+        },
+        "required": [
+          "finding_id",
+          "organization",
+          "project",
+          "purl",
+          "status"
+        ]
+      },
+      "Run": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "trigger": {
+            "type": "string",
+            "enum": [
+              "scheduled",
+              "manual",
+              "upload"
+            ]
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "all",
+              "organization",
+              "project"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "running",
+              "succeeded",
+              "failed"
+            ]
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "new_findings": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "Null for a whole-instance run, unless the caller is an instance administrator: the counts span every organization."
+          },
+          "fixed_findings": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0,
+            "description": "Null for a whole-instance run, unless the caller is an instance administrator."
+          }
+        },
+        "required": [
+          "id",
+          "trigger",
+          "scope",
+          "status",
+          "started_at",
+          "finished_at",
+          "error",
+          "new_findings",
+          "fixed_findings"
+        ]
+      },
+      "FindingDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer"
+          },
+          "project": {
+            "type": "string",
+            "description": "Project slug."
+          },
+          "vulnerability_id": {
+            "type": "string",
+            "description": "The OSV identifier (GHSA-..., CVE-..., RUSTSEC-...)."
+          },
+          "aliases": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "summary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "component": {
+            "$ref": "#/components/schemas/Component"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "critical",
+              "high",
+              "medium",
+              "low",
+              "unknown"
+            ],
+            "description": "The highest severity among the vulnerability's aliases."
+          },
+          "cvss_score": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "ignored",
+              "fixed"
+            ]
+          },
+          "exploitation": {
+            "$ref": "#/components/schemas/Exploitation"
+          },
+          "introduced_via": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComponentRef"
+            },
+            "description": "The project's direct dependencies that lead to the component; empty when the SBOM's dependency graph does not say."
+          },
+          "first_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "last_seen_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "fixed_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "ignore": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Ignore"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the finding is ignored, while it is; null otherwise."
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "description": "The finding's page in the interface."
+          },
+          "organization": {
+            "type": "string",
+            "description": "Organization slug."
+          },
+          "details": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The advisory's description, in Markdown."
+          },
+          "published": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "modified": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "cvss_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cvss_vector": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "fixed_versions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Versions of the package that fix the vulnerability."
+          },
+          "references": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Reference"
+            }
+          },
+          "ignored_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The member who ignored the finding, while it is ignored."
+          },
+          "ignored_by_token": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The token that ignored the finding from a VEX document, while it is ignored."
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Event"
+            },
+            "description": "The finding's history, oldest first."
+          },
+          "dependency_paths": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DependencyPaths"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null when the latest SBOM did not say which components the project depends on directly."
+          },
+          "affected_components": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AffectedComponent"
+            },
+            "description": "Other findings of the same vulnerability, in projects the caller sees."
+          }
+        },
+        "required": [
+          "id",
+          "project",
+          "vulnerability_id",
+          "aliases",
+          "summary",
+          "component",
+          "severity",
+          "cvss_score",
+          "status",
+          "exploitation",
+          "introduced_via",
+          "first_seen_at",
+          "last_seen_at",
+          "fixed_at",
+          "ignore",
+          "url",
+          "organization",
+          "details",
+          "published",
+          "modified",
+          "cvss_version",
+          "cvss_vector",
+          "fixed_versions",
+          "references",
+          "ignored_by",
+          "ignored_by_token",
+          "events",
+          "dependency_paths",
+          "affected_components"
+        ]
+      },
+      "OrganizationList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Organization"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "ProjectList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Project"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      },
+      "FindingPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Finding"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Items in the whole list, across pages."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ]
+      },
+      "ComponentPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Component"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Items in the whole list, across pages."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset"
+        ]
+      },
+      "ComponentMatchList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ComponentMatch"
+            }
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "More components matched than the 200 returned: narrow the search (add a version prefix, or a longer name)."
+          }
+        },
+        "required": [
+          "items",
+          "truncated"
+        ]
+      },
+      "RunList": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Run"
+            }
+          }
+        },
+        "required": [
+          "items"
+        ]
+      }
+    }
+  }
+}

@@ -1,4 +1,4 @@
-//! Organization settings (members, upload tokens, webhook) and instance administration.
+//! Organization settings (members, API tokens, webhook) and instance administration.
 
 use leptos::prelude::*;
 use leptos_meta::Title;
@@ -165,6 +165,9 @@ fn Tokens(page: SettingsData) -> impl IntoView {
                                                     <td class=TABLE_CELL>
                                                         {token.project_slug.clone().unwrap_or_else(|| t!("settings.whole_organization").to_owned())}
                                                     </td>
+                                                    <td class=TABLE_CELL>
+                                                        {if token.read_only { t!("settings.scope_read") } else { t!("settings.scope_upload") }}
+                                                    </td>
                                                     <td class=format!("{TABLE_CELL} text-muted-foreground whitespace-nowrap")>
                                                         {token.last_used_at.map_or_else(|| t!("common.never").to_owned(), format_time)}
                                                     </td>
@@ -214,6 +217,7 @@ fn Tokens(page: SettingsData) -> impl IntoView {
                                 <thead>
                                     <tr class=TABLE_HEAD_ROW>
                                         <th scope="col" class=TABLE_HEAD>{t!("settings.token_name_column")}</th>
+                                        <th scope="col" class=TABLE_HEAD>{t!("settings.token_project")}</th>
                                         <th scope="col" class=TABLE_HEAD>{t!("settings.scope")}</th>
                                         <th scope="col" class=TABLE_HEAD>{t!("settings.last_used")}</th>
                                         <th scope="col" class=TABLE_HEAD><span class="sr-only">{t!("common.actions")}</span></th>
@@ -229,13 +233,13 @@ fn Tokens(page: SettingsData) -> impl IntoView {
                     <form
                         method="post"
                         action={action::<CreateToken>()}
-                        class="grid gap-4 sm:grid-cols-[2fr_1fr_auto] sm:items-end"
+                        class="grid gap-4 sm:grid-cols-[2fr_1fr_1fr_auto] sm:items-end"
                     >
                         <input type="hidden" name="organization" value=organization.clone() />
                         <Field label=t!("settings.token_name") input_id="token-name">
                             <input id="token-name" name="name" class=INPUT required placeholder="GitHub Actions" />
                         </Field>
-                        <Field label=t!("settings.scope") input_id="token-project">
+                        <Field label=t!("settings.token_project") input_id="token-project">
                             <select id="token-project" name="project" class=SELECT>
                                 <option value="">{t!("settings.whole_organization")}</option>
                                 {page
@@ -243,6 +247,12 @@ fn Tokens(page: SettingsData) -> impl IntoView {
                                     .into_iter()
                                     .map(|project| view! { <option value=project.clone()>{project.clone()}</option> })
                                     .collect_view()}
+                            </select>
+                        </Field>
+                        <Field label=t!("settings.scope") input_id="token-scope">
+                            <select id="token-scope" name="scope" class=SELECT>
+                                <option value="upload">{t!("settings.scope_upload")}</option>
+                                <option value="read">{t!("settings.scope_read")}</option>
                             </select>
                         </Field>
                         <Button>{t!("settings.create_token")}</Button>

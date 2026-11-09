@@ -1,4 +1,4 @@
-//! Command line administration: the first administrator and upload tokens.
+//! Command line administration: the first administrator and API tokens.
 //!
 //! These commands use the database directly, without an actor: whoever can run them can read
 //! the database anyway. A new token's secret is printed on standard output alone: logs go to
@@ -51,7 +51,8 @@ pub async fn create_administrator(
 }
 
 /// Runs a `token` subcommand. `list` prints one tab-separated line per token: identifier,
-/// prefix, name, project, last use and status.
+/// prefix, name, project, last use, status and scope (last, so scripts written before scopes
+/// keep their columns).
 pub async fn token(
     database: &DatabaseConnection,
     command: TokenCommand,
@@ -61,19 +62,22 @@ pub async fn token(
             organization,
             project,
             name,
+            scope,
         } => {
             let created = tokens::create_from_command_line(
                 database,
                 &organization,
                 project.as_deref(),
                 &name,
+                scope.into(),
             )
             .await?;
             tracing::info!(
                 organization = %organization,
                 project = project.as_deref().unwrap_or("(all)"),
+                scope = created.token.scope.as_str(),
                 id = created.token.id,
-                "upload token created"
+                "token created"
             );
             // The secret goes to standard output alone, so scripts can capture it.
             println!("{}", created.secret);
@@ -81,7 +85,7 @@ pub async fn token(
         TokenCommand::List { organization } => {
             for token in tokens::list_from_command_line(database, &organization).await? {
                 println!(
-                    "{}\t{}\t{}\t{}\t{}\t{}",
+                    "{}\t{}\t{}\t{}\t{}\t{}\t{}",
                     token.id,
                     token.prefix,
                     token.name,
@@ -94,12 +98,13 @@ pub async fn token(
                     } else {
                         "active"
                     },
+                    token.scope.as_str(),
                 );
             }
         }
         TokenCommand::Revoke { id } => {
             tokens::revoke_from_command_line(database, id).await?;
-            tracing::info!(id, "upload token revoked");
+            tracing::info!(id, "token revoked");
         }
     }
     Ok(())

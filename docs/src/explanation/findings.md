@@ -34,8 +34,8 @@ runs**, counted by `nanobom_run_failures_total`, and sent to `NANOBOM_FAILURE_WE
 
 **Recent runs** on an organization page lists the runs of that organization and its projects,
 and the instance-wide scheduled runs. The error message of an instance-wide run can name other
-organizations' packages, so only instance administrators see it; others read "the run could not
-complete".
+organizations' packages, and its counts of new and fixed findings span every organization, so
+only instance administrators see them; others read "the run could not complete" and no counts.
 
 A run that stops before it can record its end is recorded as failed with the error "the run
 stopped unexpectedly", counted and sent to the failure webhook like any failed run. That happens

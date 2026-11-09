@@ -43,6 +43,7 @@
     "unknown_role": "unknown role \"{role}\"; expected viewer, member, admin or owner",
     "unknown_severity": "unknown severity",
     "unknown_justification": "unknown justification \"{justification}\"",
+    "unknown_token_scope": "unknown token scope \"{scope}\"; expected upload or read",
     "reason_required": "a reason is required to ignore a finding",
     "reason_too_long": "the reason must be at most {maximum} characters",
     "expiry_not_in_future": "the expiry date must be in the future",

@@ -2,7 +2,7 @@
 
 ## Organizations
 
-An **organization** owns projects, upload tokens, a webhook and members. Organizations are
+An **organization** owns projects, API tokens, a webhook and members. Organizations are
 isolated: a member of one sees nothing of the others, and an organization you do not belong to
 answers "not found" rather than "forbidden", so its name does not leak.
 

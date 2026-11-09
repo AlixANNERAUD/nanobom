@@ -12,14 +12,14 @@ the browser runs it.
 
 | Crate | Role |
 | --- | --- |
-| `domain` | Everything with business rules: SBOM parsing and the inventory, runs and findings, exploitation data, notifications, organizations, memberships, tokens, users. All database access goes through it, and every function touching organization data takes an `Actor` and checks its permission (`access.rs`). |
+| `domain` | Everything with business rules: SBOM parsing and the inventory, runs and findings, exploitation data, notifications, organizations, memberships, tokens, users. All database access goes through it, and every function touching organization data takes an `Actor` (a `Reader`, user or token, for reads) and checks its permission (`access.rs`). |
 | `osv` | The OSV client (batch queries, record details, retries) and CVSS-based severity. |
 | `authentication` | Sessions stored in the database, password and OpenID Connect sign-in, claims and group mapping, cross-site request checks. |
 | `entity` | SeaORM entities, generated from the migrations by `mise run entities`; never edited by hand. |
 | `migration` | The database schema, as SeaORM migrations. |
 | `app` | The Leptos interface: pages, components, server functions, translations. |
 | `frontend` | The WebAssembly entry point of the interface. |
-| `server` | The `nanobom` binary: command line, HTTP server, upload API, run queue, metrics. |
+| `server` | The `nanobom` binary: command line, HTTP server, upload and read APIs, run queue, metrics. |
 
 ```text
                     ┌──────────────────── server: the nanobom binary ───────────────────┐

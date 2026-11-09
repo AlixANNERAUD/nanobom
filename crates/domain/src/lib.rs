@@ -6,14 +6,15 @@
 //! instance-wide metric in the server). That keeps one rule in one place: **isolation between
 //! organizations**. Functions that read or change organization data take an [`access::Actor`]
 //! and check its [`access::Role`] in the organization before touching anything (see [`access`]
-//! for the role and permission table). A resource of an organization the actor does not belong
-//! to is reported as [`Error::NotFound`], never [`Error::Forbidden`], so its existence does not
-//! leak.
+//! for the role and permission table). Functions that only read take an [`access::Reader`]: an
+//! actor, or a token of the read API, which reads as a viewer of what it reaches. A resource of an
+//! organization the actor does not belong to is reported as [`Error::NotFound`], never
+//! [`Error::Forbidden`], so its existence does not leak.
 //!
 //! Functions without an actor fall in three groups:
 //!
 //! - the caller is authenticated by other means: an upload token ([`tokens::authenticate`],
-//!   then [`inventory::ingest`] and [`findings::open_for_upload_token`]), a password or an
+//!   then [`inventory::ingest`] and [`vex::import`], which also check its scope), a password or an
 //!   identity provider at sign-in ([`users`], [`memberships::synchronize`]), or the operator on
 //!   the command line (the `*_from_command_line` functions of [`tokens`]);
 //! - background work of the server over the whole instance: runs ([`evaluation::Evaluator`],

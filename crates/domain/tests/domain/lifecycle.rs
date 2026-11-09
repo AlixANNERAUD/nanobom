@@ -672,7 +672,7 @@ async fn filters_and_overview_count_by_severity() {
 }
 
 #[tokio::test]
-async fn recent_runs_cover_the_organization_and_hide_instance_errors() {
+async fn recent_runs_cover_the_organization_and_hide_instance_wide_details() {
     let fixture = Fixture::new().await;
     let project = fixture.upload(&[LODASH]).await;
     fixture.run().await;
@@ -701,6 +701,79 @@ async fn recent_runs_cover_the_organization_and_hide_instance_errors() {
     );
     assert_eq!(runs[1].scope, "project");
     assert_eq!(runs[1].trigger, "manual");
+    // The counts of a whole-instance run span every organization: hidden like its error.
+    for run in runs.iter().filter(|run| run.scope == "all") {
+        assert_eq!(run.new_findings, None);
+        assert_eq!(run.fixed_findings, None);
+    }
+    assert_eq!(runs[1].new_findings, Some(0));
+    assert_eq!(runs[1].fixed_findings, Some(0));
+
+    // Give a whole-instance run counts to hide.
+    let counted = runs.iter().find(|run| run.scope == "all").unwrap().id;
+    runs::ActiveModel {
+        id: Set(counted),
+        new_findings: Set(5),
+        fixed_findings: Set(2),
+        ..Default::default()
+    }
+    .update(&fixture.database)
+    .await
+    .unwrap();
+    let hidden =
+        evaluation::recent_runs(&fixture.database, &fixture.viewer, fixture.organization, 10)
+            .await
+            .unwrap();
+    assert_eq!(
+        hidden
+            .iter()
+            .find(|run| run.id == counted)
+            .unwrap()
+            .new_findings,
+        None
+    );
+
+    let administrator = users::create(
+        &fixture.database,
+        NewUser {
+            username: "root".to_owned(),
+            is_instance_administrator: true,
+            ..NewUser::default()
+        },
+        false,
+    )
+    .await
+    .unwrap();
+    let runs = evaluation::recent_runs(
+        &fixture.database,
+        &Actor::from_user(&administrator),
+        fixture.organization,
+        10,
+    )
+    .await
+    .unwrap();
+    assert!(
+        runs.iter()
+            .all(|run| run.new_findings.is_some() && run.fixed_findings.is_some()),
+        "instance administrators see the counts"
+    );
+    let counted_run = runs.iter().find(|run| run.id == counted).unwrap();
+    assert_eq!(counted_run.new_findings, Some(5));
+    assert_eq!(counted_run.fixed_findings, Some(2));
+    for run in &runs {
+        let stored = runs::Entity::find_by_id(run.id)
+            .one(&fixture.database)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(run.new_findings, Some(stored.new_findings));
+        assert_eq!(run.fixed_findings, Some(stored.fixed_findings));
+    }
+    assert_ne!(
+        runs[0].error.as_deref(),
+        Some("the run could not complete"),
+        "nor the error"
+    );
     let other = organizations::create(&fixture.database, &fixture.owner, "other", "Other")
         .await
         .unwrap();

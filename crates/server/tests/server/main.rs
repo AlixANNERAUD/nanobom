@@ -6,5 +6,6 @@ mod common;
 mod dependency_track;
 mod interface;
 mod operations;
+mod read_api;
 mod upload;
 mod vex;

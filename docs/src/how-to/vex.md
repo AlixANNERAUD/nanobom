@@ -21,7 +21,8 @@ choose a **Justification** as well as the reason:
 From the interface: on the project page, select **Export VEX**. Any member, viewers included,
 can download it.
 
-From a script or CI, with an upload token of the project or its organization:
+From a script or CI, with a token of the project or its organization, of either scope (a
+[read token](../explanation/tokens.md) is enough to export):
 
 ```sh
 curl -fsS -H "Authorization: Bearer $NANOBOM_TOKEN" \

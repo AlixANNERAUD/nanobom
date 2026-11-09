@@ -220,8 +220,10 @@ pub struct Run {
     /// For instance-wide runs, a generic message unless the viewer is an instance
     /// administrator.
     pub error: Option<String>,
-    pub new_findings: i64,
-    pub fixed_findings: i64,
+    /// `None` for instance-wide runs, unless the viewer is an instance administrator: the
+    /// counts span every organization.
+    pub new_findings: Option<i64>,
+    pub fixed_findings: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -405,6 +407,8 @@ pub struct UploadToken {
     pub name: String,
     pub prefix: String,
     pub project_slug: Option<String>,
+    /// A read token, which cannot upload.
+    pub read_only: bool,
     pub created_at: DateTime<FixedOffset>,
     pub last_used_at: Option<DateTime<FixedOffset>>,
     pub revoked: bool,

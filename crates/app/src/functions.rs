@@ -68,7 +68,7 @@ pub async fn load_sign_in_options() -> Result<SignInOptions, ServerFnError> {
     })
 }
 
-#[server(endpoint = "organizations")]
+#[server(endpoint = "load_organizations")]
 pub async fn load_organizations() -> Result<Vec<Organization>, ServerFnError> {
     let actor = actor().await?;
     let context = context()?;
@@ -356,6 +356,7 @@ pub async fn load_settings(organization: String) -> Result<SettingsData, ServerF
                 name: token.name,
                 prefix: token.prefix,
                 project_slug: token.project_slug,
+                read_only: token.scope == tokens::Scope::Read,
                 created_at: token.created_at,
                 last_used_at: token.last_used_at,
                 revoked: token.revoked_at.is_some(),
@@ -635,13 +636,19 @@ pub async fn create_token(
     organization: String,
     name: String,
     project: Option<String>,
+    scope: Option<String>,
 ) -> Result<(), ServerFnError> {
+    use nanobom_domain::tokens::{self, Scope};
     let actor = actor().await?;
     let database = &context()?.database;
     let result = async {
         let id = organization_id(database, &actor, &organization).await?;
         let project = project.as_deref().filter(|project| !project.is_empty());
-        nanobom_domain::tokens::create(database, &actor, id, project, &name).await
+        let scope = match scope.as_deref() {
+            None | Some("") => Scope::Upload,
+            Some(scope) => Scope::parse(scope)?,
+        };
+        tokens::create_with_scope(database, &actor, id, project, &name, scope).await
     }
     .await;
     match result {

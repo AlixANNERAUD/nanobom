@@ -23,7 +23,7 @@ use sea_orm::DatabaseConnection;
 use crate::{
     api, authentication,
     command_line::ServeOptions,
-    deliveries, dependency_track, http, metrics, operations,
+    deliveries, dependency_track, http, metrics, operations, read_api,
     runner::{self, NotificationSettings, RunRequest, Runner},
     state::AppState,
     vex,
@@ -83,8 +83,13 @@ pub fn router(state: AppState) -> Router {
         >(
             move || provide_context(fallback_context.clone()), shell
         ));
-    // The VEX export reads the session, so it sits behind the session layer.
-    let interface = authentication::layer(interface.merge(vex::router(&state)), &state);
+    // The VEX export and the read API read the session, so they sit behind the session layer.
+    let interface = authentication::layer(
+        interface
+            .merge(vex::router(&state))
+            .merge(read_api::router()),
+        &state,
+    );
     http::layers(
         Router::new()
             .merge(api::router(&state))
