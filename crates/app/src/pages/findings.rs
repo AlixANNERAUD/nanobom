@@ -89,8 +89,7 @@ fn finding_rows(findings: Vec<FindingRow>) -> impl IntoView {
                 let title = finding
                     .exploitation
                     .kev_due_date
-                    .map(|date| tf!("project.known_exploited_due", date = date.to_string()))
-                    .unwrap_or_default();
+                    .map(|date| tf!("project.known_exploited_due", date = date.to_string()));
                 view! {
                     <span title=title class="mt-1 block">
                         <Badge variant=BadgeVariant::Destructive>{t!("project.known_exploited")}</Badge>
@@ -647,7 +646,11 @@ pub fn FindingPage() -> impl IntoView {
                     let exploitation = finding.exploitation.clone();
                     let known_exploited = exploitation.known_exploited;
                     let exploitation_body = if known_exploited || exploitation.epss_score.is_some() {
-                        let yes_no = |value: bool| if value { t!("finding.yes") } else { t!("finding.no") };
+                        let ransomware = if exploitation.kev_ransomware {
+                            t!("finding.ransomware_known")
+                        } else {
+                            t!("finding.ransomware_unknown")
+                        };
                         let kev = known_exploited.then(|| {
                             view! {
                                 <dt class="text-muted-foreground">{t!("finding.kev_added")}</dt>
@@ -655,7 +658,7 @@ pub fn FindingPage() -> impl IntoView {
                                 <dt class="text-muted-foreground">{t!("finding.kev_due")}</dt>
                                 <dd>{exploitation.kev_due_date.map(|date| date.to_string())}</dd>
                                 <dt class="text-muted-foreground">{t!("finding.ransomware")}</dt>
-                                <dd>{yes_no(exploitation.kev_ransomware)}</dd>
+                                <dd>{ransomware}</dd>
                             }
                         });
                         let epss = exploitation.epss_score.map(|score| {

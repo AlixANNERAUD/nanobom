@@ -868,6 +868,39 @@ async fn health_and_metrics_are_served() {
 }
 
 #[tokio::test]
+async fn each_scrape_counts_the_projects_gone_stale_since_the_last_run() {
+    let server = server(&["--stale-after-days", "30", "--schedule", "off"]).await;
+    let owner = user(&server.database, "owner").await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let project = projects::create(&server.database, &owner, organization.id, "web", "Web")
+        .await
+        .unwrap();
+    let scrape = async || {
+        let response = server
+            .send(Request::get("/metrics").body(Body::empty()).unwrap())
+            .await;
+        body_text(response).await
+    };
+    let text = scrape().await;
+    assert!(
+        text.contains("nanobom_stale_projects 0\n"),
+        "a fresh project is not stale:\n{text}"
+    );
+
+    // Time passes without any run or upload.
+    let mut active: nanobom_entity::projects::ActiveModel = project.into();
+    active.created_at = Set((Utc::now() - chrono::Duration::days(31)).fixed_offset());
+    active.update(&server.database).await.unwrap();
+    let text = scrape().await;
+    assert!(
+        text.contains("nanobom_stale_projects 1\n"),
+        "the project is stale on the next scrape:\n{text}"
+    );
+}
+
+#[tokio::test]
 async fn the_healthcheck_command_asks_a_running_server() {
     let server = server(&[]).await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

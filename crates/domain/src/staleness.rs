@@ -13,7 +13,8 @@ use std::collections::BTreeMap;
 use chrono::{DateTime, Duration, FixedOffset, Utc};
 use nanobom_entity::{organization_webhooks, projects};
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, EntityTrait, ExprTrait, QueryFilter, QueryOrder,
+    ColumnTrait, ConnectionTrait, EntityTrait, ExprTrait, PaginatorTrait, QueryFilter, QueryOrder,
+    Select,
     sea_query::{Expr, Func},
 };
 
@@ -34,10 +35,6 @@ pub fn is_stale(
 }
 
 /// Every stale project of the instance, in creation order.
-///
-/// Filtered in SQL, like [`is_stale`] (`COALESCE(last_upload_at, created_at)` older than the
-/// threshold). PostgreSQL compares the timestamps as such; SQLite stores them as text in one
-/// format, always written in UTC, so comparing them as text orders them in time too.
 pub async fn stale_projects(
     database: &impl ConnectionTrait,
     stale_after_days: u32,
@@ -45,23 +42,33 @@ pub async fn stale_projects(
     if stale_after_days == 0 {
         return Ok(Vec::new());
     }
-    let cutoff = Utc::now().fixed_offset() - Duration::days(i64::from(stale_after_days));
-    Ok(projects::Entity::find()
-        .filter(
-            Expr::expr(Func::coalesce([
-                Expr::col(projects::Column::LastUploadAt),
-                Expr::col(projects::Column::CreatedAt),
-            ]))
-            .lt(cutoff),
-        )
+    Ok(stale(stale_after_days)
         .order_by_asc(projects::Column::Id)
         .all(database)
         .await?)
 }
 
-/// How many projects are stale, for the metrics.
-pub async fn stale_count(database: &impl ConnectionTrait, stale_after_days: u32) -> Result<usize> {
-    Ok(stale_projects(database, stale_after_days).await?.len())
+/// How many projects are stale, for the metrics. A single `COUNT`, since `/metrics` runs it on
+/// every scrape.
+pub async fn stale_count(database: &impl ConnectionTrait, stale_after_days: u32) -> Result<u64> {
+    if stale_after_days == 0 {
+        return Ok(0);
+    }
+    Ok(stale(stale_after_days).count(database).await?)
+}
+
+/// The stale projects, filtered in SQL like [`is_stale`] (`COALESCE(last_upload_at, created_at)`
+/// older than the threshold). PostgreSQL compares the timestamps as such; SQLite stores them as
+/// text in one format, always written in UTC, so comparing them as text orders them in time too.
+fn stale(stale_after_days: u32) -> Select<projects::Entity> {
+    let cutoff = Utc::now().fixed_offset() - Duration::days(i64::from(stale_after_days));
+    projects::Entity::find().filter(
+        Expr::expr(Func::coalesce([
+            Expr::col(projects::Column::LastUploadAt),
+            Expr::col(projects::Column::CreatedAt),
+        ]))
+        .lt(cutoff),
+    )
 }
 
 /// The stale projects not yet notified for their current stale period (never notified, or
