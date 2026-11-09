@@ -178,10 +178,16 @@ or SPDX `versionInfo`).
   the new SBOM, like any findings: those whose component is gone are fixed. They are never
   announced as new. Fixed findings are not copied
   ([why](../explanation/concepts.md#versions)).
-- A project has at most **50 active versions**. An upload that would create the 51st is refused
-  with a `409` and nothing is stored; uploads to existing versions are still accepted.
+- An upload to an [inactive version](versions.md#states) makes it active again.
+- A project has at most **50 active versions**. An upload that would create the 51st, or make
+  an inactive version active past 50, first makes the active version uploaded to the longest
+  ago inactive (never the latest one), and proceeds ([the cap](versions.md#the-cap)). Nothing
+  is deleted.
 
-The run after an upload evaluates every version of the project; the [evaluation](#the-evaluation-object)
+Versions are also made inactive, marked latest and deleted in the interface
+([Project versions](versions.md#changes)).
+
+The run after an upload evaluates every active version of the project; the [evaluation](#the-evaluation-object)
 returned, and `fail_on`, judge the version uploaded only.
 
 ### `fail_on` thresholds
@@ -330,15 +336,13 @@ not of this SBOM.
 | `403` | A project token used for another existing project, or a read token | Use that project's slug, or an organization token; upload with a token of the upload scope |
 | `404` | The organization does not exist or is not the token's; or a project token used for a project that does not exist | Check the organization slug in the URL; create the project first (with an organization token) |
 | `409` | With `fail_on`: the evaluation succeeded and open findings reach a threshold, or, with `license`, a component has a forbidden license | Fix or triage the findings listed in `evaluation.findings`; replace the components listed in `evaluation.licenses.violations`, or change the policy |
-| `409` | The upload would create a 51st active version; nothing was stored | Upload to an existing version |
 | `413` | The body is larger than `NANOBOM_MAXIMUM_SBOM_SIZE` (16 MiB by default) | Raise the limit, or split the SBOM; this error's body is plain text, not JSON |
 | `422` | Invalid parameter, invalid project slug, or invalid document (not JSON, neither CycloneDX nor SPDX, unsupported version) | Read `error` |
 | `500` | A database error | See the server's logs |
 | `503` | With a `fail_on` threshold other than `license`: the evaluation failed or timed out, so the findings are not up to date | Retry later; see [Troubleshoot](../how-to/troubleshoot.md#upload-answers-503) |
 | `503` | With `wait` or `fail_on`: `NANOBOM_MAX_WAITING_UPLOADS` uploads are already waiting; the response has a `Retry-After` header (in seconds) | Send the upload again after `Retry-After`; nothing was stored |
 
-The `409` and `503` responses still stored the SBOM, except a `503` for too many waiting uploads
-and a `409` for too many versions:
+The `409` and `503` responses still stored the SBOM, except a `503` for too many waiting uploads:
 the inventory is up to date even when the gate fails. So did a `401` for a token revoked while
 the upload waited. A `422` for a parameter is answered before anything is stored.
 
@@ -354,7 +358,6 @@ cut to 200 characters, followed by `…`.
 | `403` | `this token does not allow uploads to this project` |
 | `403` | `this token is read-only: uploads need a token with the upload scope` |
 | `404` | `not found` |
-| `409` | `this project already has 50 active versions: upload to an existing version instead` |
 | `422` | `wait must be true or false` (or `latest must be …`) |
 | `422` | `the version must be 1 to 64 characters: letters, digits, '.', '_', '+', '/' or '-'` |
 | `422` | `fail_on must be critical, high, medium, low, exploited or license, or several of them separated by commas` |
@@ -402,7 +405,7 @@ organization is the token's.
 | `autoCreate` | `true` or `false` (default) | Create the project if it does not exist (organization tokens only). Without it, a missing project is a `404` |
 | `bom` | base64 text (`PUT`), file or text part (`POST`) | The CycloneDX or SPDX JSON [document](#the-document). In `PUT`, line breaks in the base64 text are ignored. A UTF-8 byte order mark is removed. In `POST`, only the first `bom` part is read |
 | `project` | UUID | Refused with a `400` when `projectName` is missing; ignored otherwise |
-| `projectTags`, `parentUUID`, `parentName`, `parentVersion`, `isActive` | | Accepted and ignored |
+| `projectTags`, `parentUUID`, `parentName`, `parentVersion`, `isActive` | | Accepted and ignored; an upload makes its version active whatever `isActive` says |
 
 In `PUT`, the body is parsed as JSON whatever its `Content-Type`; `autoCreate` and
 `isLatestProjectVersion` may be booleans or strings (`"true"`). In `POST`, `autoCreate` and
@@ -452,7 +455,6 @@ problems (`Content-Type: application/problem+json`):
 | `403` | A read token | `This nanobom token is read-only: uploads need a token with the upload scope.` |
 | `404` | A missing project without `autoCreate`, or with a project token | `The project could not be found.` |
 | `409` | `autoCreate` and another upload created the same project first: send the upload again | `the project "…" already exists` |
-| `409` | The upload would create a 51st active version | `this project already has 50 active versions: upload to an existing version instead` |
 | `413` | An SBOM larger than `NANOBOM_MAXIMUM_SBOM_SIZE` | Plain text |
 | `500` | A database error | `internal error` |
 

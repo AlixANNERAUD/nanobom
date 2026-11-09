@@ -59,9 +59,26 @@ they share) is announced once per affected component, with the list of versions 
 finding is fixed, so they carry nothing the new version needs, and a vulnerability fixed in the
 latest version but present in the new one is announced as new for it.
 
-Versions also keep the database small: a project has at most 50 active versions. Organization
-pages count a vulnerability of a package once per project, at its highest severity, however
-many versions have it; the gate of an upload (`fail_on`) judges the version uploaded only.
+Organization pages count a vulnerability of a package once per project, at its highest
+severity, however many versions have it; the gate of an upload (`fail_on`) judges the version
+uploaded only. A finding's page lists every version of its project with where it stands with
+the vulnerability (open, ignored, fixed or not affected), which answers "which of our releases
+need the fix?" without opening each one.
+
+A version that is no longer shipped can be made **inactive**, Dependency-Track's "active" flag:
+runs stop evaluating it, and it no longer counts, shows up in searches or sends notifications,
+while its findings and triage stay readable and exportable as they were. A release that went out
+of support is history worth keeping, not something to be alerted about. An upload to an inactive
+version makes it active again, since something still builds it. A version can also be deleted
+with everything it holds, which is never done automatically.
+
+Inactive versions keep the database and the runs small: a project has at most 50 active
+versions. Rather than refusing the upload of a 51st, nanobom makes the version uploaded to the
+longest ago inactive. Dependency-Track has no cap, and its clients often send a build number as
+the version; refusing uploads would break those pipelines at the 51st build, while retiring the
+oldest version keeps them working and only puts aside builds nobody uploads anymore. The latest
+version is never retired that way, and is always active: it is the version everything shows by
+default ([rules](../reference/versions.md)).
 
 ## Uploads
 

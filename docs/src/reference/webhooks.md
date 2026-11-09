@@ -232,6 +232,8 @@ versions share is one entry, not five. Two components hit by one advisory, such 
 `pkg:npm/lodash@4.17.20` and a nested `pkg:npm/lodash@4.17.15`, stay two entries, each with its
 own `introduced_via`; a project that never names versions gets one entry per finding. Findings
 a new version inherits from the latest one when it is created are not new, and are never sent.
+[Inactive versions](versions.md#states) are not evaluated, so they send nothing, known exploited
+findings included; made active again, a version's next run sends what it missed.
 
 Rarely, a run already in progress when an upload creates a version announces an advisory for
 both versions though the new one inherited the finding, or announces again, for the new

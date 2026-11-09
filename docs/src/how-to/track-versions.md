@@ -25,8 +25,9 @@ curl --fail-with-body --silent --show-error \
   `release/2.4` and `2.4.x` are fine; a name with a space is refused with a `422`. Encode `/` as
   `%2F` and `+` as `%2B` in the URL.
 - Name a version after something that lasts: a release branch or a release line. A build number
-  or a commit hash creates a new version at every build, and a project keeps at most 50 active
-  versions.
+  or a commit hash creates a new version at every build; past 50 active versions, each new one
+  makes the version uploaded to the longest ago inactive
+  ([the cap](../reference/versions.md#the-cap)).
 - Projects that never name a version keep their single, unnamed version: nothing changes for
   them. Uploads without `version` keep going to the unnamed version.
 
@@ -92,6 +93,52 @@ every `v2.4.*` tag.
 - **VEX documents** are exported from and imported into one version with the same parameter
   ([VEX API](../reference/vex-api.md)).
 
+## Compare a vulnerability across versions
+
+Open a finding: **Versions of this project** lists every version of the project, newest first,
+with where it stands with that vulnerability (open, ignored, fixed or not affected, aliases
+included) and a link to its finding. Use it to see which releases still need a fix. The read
+API's finding has the same list in `versions`
+([reference](../reference/read-api.md#one-finding)).
+
+The component search lists a package once per version that has it, with the version's name.
+
+## Retire a version
+
+When a release is no longer supported, make its version inactive rather than deleting it: runs
+stop checking it, and it no longer counts on the organization page, shows up in searches or
+sends notifications, while its findings and triage stay readable and exportable
+([what changes](../reference/versions.md#states)).
+
+1. Open the project page; the **Versions** table lists every version with its open findings.
+2. Select **Make inactive** on the version's row. The latest version has no such button: make
+   another version latest first.
+
+The project page shows an inactive version on request, marked inactive. To check it again,
+select **Make active**: a run starts at once. An upload to an inactive version also makes it
+active again.
+
+These buttons, and the ones below, are for organization admins and owners.
+
+## Change the latest version
+
+Select **Make latest** on the version's row. Pipelines usually keep the flag where it belongs
+(`latest=true` from the main branch); use the button to fix it after a wrong upload, or when
+the main line moves to another version without an upload yet. An inactive version cannot be the
+latest: make it active first.
+
+## Delete a version
+
+Deleting a version deletes its components, upload history and findings, with their triage and
+history, for good; other versions keep what they inherited from it. To keep the history, make
+the version inactive instead.
+
+1. On the version's row, select **Delete**.
+2. Tick the box confirming what is deleted, and select **Delete version**.
+
+The latest version cannot be deleted (make another one latest first), nor the only version of a
+project: delete the project instead.
+
 ## What to expect
 
 - **The gate judges the version uploaded.** `fail_on` counts the findings of the version the
@@ -103,6 +150,6 @@ every `v2.4.*` tag.
   share is announced once, with the list of the versions it affects; findings a new version
   inherits are never announced ([payloads](../reference/webhooks.md#findingsnew)).
 - **Counts are per issue.** The organization page counts a vulnerability of a package once per
-  project, at its highest severity, however many versions have it.
+  project, at its highest severity, however many active versions have it.
 - **Dependency-Track clients** already send a version: `projectVersion` is the version, and
   `isLatest` the latest flag ([Upload with Dependency-Track clients](dependency-track-clients.md)).

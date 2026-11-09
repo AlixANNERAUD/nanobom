@@ -21,7 +21,7 @@ Every endpoint is a `GET`.
 | `/api/organizations/{organization}/projects/{project}/components` | The components of a project version from its latest SBOM, by package URL | ✓ |
 | `/api/organizations/{organization}/runs` | The latest runs that covered the organization, newest first | |
 | `/api/findings/{finding}` | One finding with its vulnerability, history and dependency paths | |
-| `/api/components?q={name}&license={license}` | Components by name, license or both across the projects the caller sees | |
+| `/api/components?q={name}&license={license}` | Components by name, license or both across the active versions of the projects the caller sees | |
 | `/api/organizations/{organization}/license-policy` | The organization's [license policy](license-policy.md) | |
 | `/api/organizations/{organization}/projects/{project}/license-violations` | The components of a project version whose license the policy forbids or warns about, forbidden first | ✓ |
 | `/api/openapi.json` | The OpenAPI description | |
@@ -40,7 +40,7 @@ uploads without a version go to. An unknown version is `404`, like an unknown pr
 GET /api/organizations/{organization}/projects/{project}/findings?version=2.4
 ```
 
-`/versions` lists them, newest first:
+`/versions` lists them, newest first, [inactive](versions.md#states) ones included:
 
 ```json
 {
@@ -69,7 +69,7 @@ GET /api/organizations/{organization}/projects/{project}/findings?version=2.4
 | --- | --- |
 | `name` | The version name; `""` for the unnamed version |
 | `latest` | Whether it is the latest version, the one read when a request names none; exactly one version of a project is |
-| `active` | Whether runs evaluate it |
+| `active` | Whether runs evaluate it; an inactive version is not counted, searched or notified, and stays readable ([states](versions.md#states)) |
 | `last_upload_at` | The version's latest upload; `null` before the first |
 | `open` | The version's open findings by severity |
 
@@ -205,7 +205,8 @@ in a list, plus:
 | `ignored_by`, `ignored_by_token` | The member, or the token of a VEX import, that ignored the finding, while it is ignored |
 | `events` | The history, oldest first: `kind` (`opened`, `fixed`, `reopened`, `ignored`, `restored`, `ignore_expired`, `inherited`), `created_at`, `user` or `token`, `reason`, `justification`, `run_id`. An `inherited` event starts the history of a finding copied into a new version: its `reason` is the name of the version it was copied from (`""` for the unnamed version), and `token` the token of the upload that created the version |
 | `dependency_paths` | `{"paths": [[…]], "more": 0, "partial": false}`, each path from a direct dependency to the component; `null` when the SBOM does not say which components are direct dependencies |
-| `affected_components` | The same vulnerability in other projects the caller sees: `finding_id`, `organization`, `project`, `purl`, `status` |
+| `affected_components` | The same vulnerability in the active versions of the projects the caller sees, other findings of the finding's own project included: `finding_id`, `organization`, `project`, `version` (the project version, `""` for the unnamed one), `purl`, `status` |
+| `versions` | Every version of the finding's project, newest first, inactive ones included, with where it stands with the vulnerability or any of its aliases: `name`, `latest`, `active`, `current` (the finding's own version), `status` and `finding_id`. `status` is `open` when one of the version's findings for the vulnerability is open, else `ignored` when one is ignored, else `fixed`; `not_affected` when the version never had one, with a `null` `finding_id`. `finding_id` is the finding that decides the status, the one of the same component when there is one |
 
 ## Projects, components, runs and search
 
@@ -230,15 +231,18 @@ A component is `purl`, `name`, `version` (of the package), `ecosystem` and `lice
 license expression as the SBOM gave it, possibly with free-text license names (`MIT`,
 `Apache-2.0 OR MIT`, `LicenseRef-Acme`); it is `null` when the SBOM gives none, and for
 components uploaded before nanobom read licenses until their project's next upload
-([how licenses are read](upload-api.md#the-document)). A search result adds `organization` and
-`project`.
+([how licenses are read](upload-api.md#the-document)). A search result adds `organization`,
+`project`, `project_version` (`""` for the unnamed version) and `project_version_active`: a
+package in several versions of a project is one result per version.
 
 A search takes `q`, `license` or both, and refuses a request with neither (`422`):
 
 - `q` is a name, matched anywhere in the component's name, optionally followed by a space or
   `@` and a version prefix (`openssl 3.`, `lodash@4.17`), both ignoring case;
 - `license` is matched anywhere in the component's license, ignoring case: `GPL` finds
-  `GPL-3.0-only` and `MIT OR LGPL-2.1-or-later`. Components without a license never match.
+  `GPL-3.0-only` and `MIT OR LGPL-2.1-or-later`. Components without a license never match;
+- `inactive=true` also searches [inactive versions](versions.md#states), left out by default
+  (`true` or `false`, anything else is `422`).
 
 A run is `id`, `trigger` (`scheduled`, `manual`, `upload`), `scope` (`all`, `organization`,
 `project`), `status` (`running`, `succeeded`, `failed`), `started_at`, `finished_at`, `error`,
