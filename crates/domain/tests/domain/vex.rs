@@ -278,7 +278,7 @@ async fn exports_each_status_with_its_impact_analysis() {
     .await
     .unwrap();
 
-    let document = vex::export(database, &fixture.owner, "acme", "web")
+    let document = vex::export(database, &fixture.owner, "acme", "web", None)
         .await
         .unwrap();
     let document = serde_json::to_value(&document).unwrap();
@@ -361,7 +361,9 @@ async fn an_export_imports_back_after_its_analysis_changes() {
     .await;
     let token = token(database, &fixture.owner, fixture.organization, None).await;
 
-    let document = vex::export(database, &token, "acme", "web").await.unwrap();
+    let document = vex::export(database, &token, "acme", "web", None)
+        .await
+        .unwrap();
     let mut document = serde_json::to_value(&document).unwrap();
     document["vulnerabilities"][0]["analysis"] = json!({
         "state": "not_affected",
@@ -369,7 +371,7 @@ async fn an_export_imports_back_after_its_analysis_changes() {
         "detail": "template compilation is disabled",
     });
     let statements = vex::parse(&serde_json::to_vec(&document).unwrap()).unwrap();
-    let outcome = vex::import(database, &token, "acme", "web", &statements)
+    let outcome = vex::import(database, &token, "acme", "web", None, &statements)
         .await
         .unwrap();
     assert_eq!(outcome.ignored, 1);
@@ -400,7 +402,7 @@ async fn an_export_imports_back_after_its_analysis_changes() {
         Some(Justification::RequiresConfiguration)
     );
 
-    let exported = vex::export(database, &fixture.owner, "acme", "web")
+    let exported = vex::export(database, &fixture.owner, "acme", "web", None)
         .await
         .unwrap();
     let exported = serde_json::to_value(&exported).unwrap();
@@ -449,7 +451,7 @@ async fn statements_match_aliases_and_package_urls_without_qualifiers() {
         &["lodash"],
     )]))
     .unwrap();
-    let outcome = vex::import(database, &token, "acme", "web", &statements)
+    let outcome = vex::import(database, &token, "acme", "web", None, &statements)
         .await
         .unwrap();
     assert_eq!(outcome.ignored, 1);
@@ -475,7 +477,7 @@ async fn statements_match_aliases_and_package_urls_without_qualifiers() {
         &["pkg:npm/lodash@4.17.19"],
     )]))
     .unwrap();
-    let outcome = vex::import(database, &token, "acme", "web", &statements)
+    let outcome = vex::import(database, &token, "acme", "web", None, &statements)
         .await
         .unwrap();
     assert_eq!(outcome.ignored, 1);
@@ -505,7 +507,7 @@ async fn bom_links_resolve_through_their_fragment() {
         &["urn:cdx:3e671687-395b-41f5-a30f-a58921a69b79/1#pkg%3Anpm%2F%2540angular%2Fcore%401.0.0"],
     )]))
     .unwrap();
-    let outcome = vex::import(database, &token, "acme", "web", &statements)
+    let outcome = vex::import(database, &token, "acme", "web", None, &statements)
         .await
         .unwrap();
     assert_eq!(outcome.ignored, 1, "{outcome:?}");
@@ -600,7 +602,7 @@ async fn imports_are_idempotent_and_report_what_they_skip() {
         ),
     ]);
     let statements = vex::parse(&document).unwrap();
-    let first = vex::import(database, &token, "acme", "web", &statements)
+    let first = vex::import(database, &token, "acme", "web", None, &statements)
         .await
         .unwrap();
     assert_eq!(first.statements, 7);
@@ -622,7 +624,7 @@ async fn imports_are_idempotent_and_report_what_they_skip() {
     );
     assert_eq!(status(database, fixed).await.status, "fixed");
 
-    let second = vex::import(database, &token, "acme", "web", &statements)
+    let second = vex::import(database, &token, "acme", "web", None, &statements)
         .await
         .unwrap();
     assert_eq!(second.ignored, 0);
@@ -673,11 +675,11 @@ async fn tokens_and_members_reach_only_their_projects() {
         (&api_token, "acme"),
     ] {
         assert!(matches!(
-            vex::import(database, token, organization, "web", &statements).await,
+            vex::import(database, token, organization, "web", None, &statements).await,
             Err(Error::NotFound)
         ));
         assert!(matches!(
-            vex::export(database, token, organization, "web").await,
+            vex::export(database, token, organization, "web", None).await,
             Err(Error::NotFound)
         ));
     }
@@ -695,13 +697,17 @@ async fn tokens_and_members_reach_only_their_projects() {
     )
     .await
     .unwrap();
-    assert!(vex::export(database, &viewer, "acme", "web").await.is_ok());
+    assert!(
+        vex::export(database, &viewer, "acme", "web", None)
+            .await
+            .is_ok()
+    );
     assert!(matches!(
-        vex::export(database, &outsider, "acme", "web").await,
+        vex::export(database, &outsider, "acme", "web", None).await,
         Err(Error::NotFound)
     ));
     assert!(matches!(
-        vex::export(database, &viewer, "acme", "missing").await,
+        vex::export(database, &viewer, "acme", "missing", None).await,
         Err(Error::NotFound)
     ));
 }

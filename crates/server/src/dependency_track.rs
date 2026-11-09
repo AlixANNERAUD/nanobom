@@ -11,9 +11,11 @@
 //!
 //! The upload token travels in `X-Api-Key` (a bearer `Authorization` header works too) and gives
 //! the organization. `projectName` is the project slug, normalized like the native endpoint;
-//! `projectVersion` is recorded as the upload's image tag. A project UUID (`project`) means
-//! nothing to nanobom and is refused unless `projectName` comes with it. Other fields (tags,
-//! parent, `isLatest`, `isActive`) are accepted and ignored. The SBOM goes through the same
+//! `projectVersion` is the project version, as in Dependency-Track (the native `version`
+//! parameter: a blank one is the unnamed version), and `isLatest` (`isLatestProjectVersion` in
+//! JSON) the native `latest`. A project
+//! UUID (`project`) means nothing to nanobom and is refused unless `projectName` comes with it.
+//! Other fields (tags, parent, `isActive`) are accepted and ignored. The SBOM goes through the same
 //! parsing, ingestion and run after upload as [`crate::api`], with the same size limit, applied to
 //! the decoded SBOM.
 //!
@@ -49,7 +51,7 @@ use nanobom_domain::{
     inventory::{self, UploadSource},
     names,
     problem::Field,
-    tokens,
+    tokens, versions,
 };
 use nanobom_entity::upload_tokens;
 use serde::{Deserialize, Serialize};
@@ -245,6 +247,9 @@ struct SubmitRequest {
     /// A boolean, or a string as Dependency-Track's JSON parser also accepts.
     #[serde(default)]
     auto_create: Value,
+    /// Like `auto_create`. Dependency-Track's JSON name; its form field is `isLatest`.
+    #[serde(default, rename = "isLatestProjectVersion", alias = "isLatest")]
+    is_latest: Value,
     bom: Option<String>,
 }
 
@@ -254,6 +259,8 @@ struct Submission {
     project_name: Option<String>,
     project_version: Option<String>,
     auto_create: bool,
+    /// `None` when the client did not say.
+    is_latest: Option<bool>,
     bom: Bytes,
 }
 
@@ -270,11 +277,8 @@ async fn upload_json(
 ) -> Result<Json<UploadResponse>, Error> {
     let token = upload_token(&state, &headers).await?;
     let (request, bom) = decode_request(body)?;
-    let auto_create = match &request.auto_create {
-        Value::Bool(value) => *value,
-        Value::String(value) => value.trim().eq_ignore_ascii_case("true"),
-        _ => false,
-    };
+    let auto_create = flag(&request.auto_create).unwrap_or(false);
+    let is_latest = flag(&request.is_latest);
     submit(
         &state,
         &token,
@@ -283,10 +287,26 @@ async fn upload_json(
             project_name: request.project_name,
             project_version: request.project_version,
             auto_create,
+            is_latest,
             bom,
         },
     )
     .await
+}
+
+/// A boolean of the JSON request, also sent as a string; `None` when absent or null.
+fn flag(value: &Value) -> Option<bool> {
+    match value {
+        Value::Bool(value) => Some(*value),
+        Value::String(value) => Some(text_flag(value)),
+        _ => None,
+    }
+}
+
+/// A boolean sent as text, as Dependency-Track reads it: `true` in any case, anything else
+/// false.
+fn text_flag(value: &str) -> bool {
+    value.trim().eq_ignore_ascii_case("true")
 }
 
 /// Reads the request and decodes its SBOM. Takes the raw body by value so that it is freed before
@@ -319,6 +339,7 @@ async fn upload_form(
         project_name: None,
         project_version: None,
         auto_create: false,
+        is_latest: None,
         bom: Bytes::new(),
     };
     let mut bom = None;
@@ -339,7 +360,8 @@ async fn upload_form(
             "project" => submission.project = Some(value),
             "projectName" => submission.project_name = Some(value),
             "projectVersion" => submission.project_version = Some(value),
-            "autoCreate" => submission.auto_create = value.trim().eq_ignore_ascii_case("true"),
+            "autoCreate" => submission.auto_create = text_flag(&value),
+            "isLatest" => submission.is_latest = Some(text_flag(&value)),
             _ => {}
         }
     }
@@ -370,6 +392,10 @@ async fn submit(
         }
         None => return Err(Error::bad_request("projectName is required")),
     };
+    // Checked before the SBOM is parsed, as on the native endpoint.
+    let version = nonblank(submission.project_version)
+        .map(|version| versions::validate_name(&version))
+        .transpose()?;
     let sbom = sbom_document(submission.bom);
     if sbom.is_empty() {
         return Err(Error::bad_request("No BOM file provided."));
@@ -395,7 +421,9 @@ async fn submit(
         sbom,
         UploadSource {
             source_commit: None,
-            image_tag: submission.project_version,
+            image_tag: None,
+            version,
+            latest: submission.is_latest,
         },
         submission.auto_create,
     )

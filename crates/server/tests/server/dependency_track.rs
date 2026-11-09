@@ -8,7 +8,7 @@ use axum::{
     http::{Request, StatusCode, header},
 };
 use base64::Engine;
-use nanobom_domain::{access::Actor, inventory, organizations, projects, tokens};
+use nanobom_domain::{access::Actor, inventory, organizations, projects, tokens, versions};
 use serde_json::json;
 
 /// The boundary undici (Node's `fetch`) uses, which gh-upload-sbom sends with.
@@ -138,7 +138,13 @@ async fn gh_upload_sbom_requests_create_the_project() {
         .await
         .unwrap();
     assert_eq!(uploads.len(), 1);
-    assert_eq!(uploads[0].image_tag.as_deref(), Some("1.4.0"));
+    // `projectVersion` is the project version, as in Dependency-Track.
+    let version = versions::find(&server.database, &owner, project.id, Some("1.4.0"))
+        .await
+        .unwrap();
+    assert!(version.latest);
+    assert_eq!(uploads[0].version_id, Some(version.id));
+    assert_eq!(uploads[0].image_tag, None);
     assert_eq!(uploads[0].component_count, 3);
 }
 
@@ -170,7 +176,11 @@ async fn base64_json_uploads_are_accepted() {
     let uploads = inventory::uploads(&server.database, &owner, project.id)
         .await
         .unwrap();
-    assert_eq!(uploads[0].image_tag.as_deref(), Some("2.0.0-SNAPSHOT"));
+    let version = versions::find(&server.database, &owner, project.id, None)
+        .await
+        .unwrap();
+    assert_eq!(version.name, "2.0.0-SNAPSHOT");
+    assert_eq!(uploads[0].version_id, Some(version.id));
 
     // A wrapped encoding, a byte order mark and a string `autoCreate` are tolerated.
     let mut document = b"\xEF\xBB\xBF".to_vec();
@@ -578,5 +588,59 @@ async fn tokens_are_done_at_once_without_runs_after_uploads() {
             &token
         )
         .await
+    );
+}
+
+#[tokio::test]
+async fn project_versions_follow_is_latest() {
+    let Setup {
+        server,
+        owner,
+        organization_id,
+        token,
+    } = setup(&[]).await;
+    let upload = |version: &str, latest: Option<bool>| {
+        let mut request = json!({"projectName": "web", "projectVersion": version,
+            "autoCreate": true, "bom": encoded(&sbom_document("cyclonedx-py.json"))});
+        if let Some(latest) = latest {
+            request["isLatestProjectVersion"] = json!(latest);
+        }
+        put_json(Some(&token), &request)
+    };
+    for (version, latest) in [("1.0", None), ("2.0", None), ("1.1", Some(false))] {
+        let response = server.send(upload(version, latest)).await;
+        assert_eq!(response.status(), StatusCode::OK, "{version}");
+    }
+    let project = projects::find(&server.database, &owner, organization_id, "web")
+        .await
+        .unwrap();
+    let latest = || async {
+        versions::find(&server.database, &owner, project.id, None)
+            .await
+            .unwrap()
+            .name
+    };
+    assert_eq!(latest().await, "2.0");
+    // The form field, as gh-upload-sbom sends it.
+    let body = gh_upload_sbom_form(
+        &sbom_document("cyclonedx-py.json"),
+        &[
+            ("projectName", "web"),
+            ("projectVersion", "1.1"),
+            ("isLatest", "true"),
+        ],
+    );
+    let response = server.send(post_form(Some(&token), body)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(latest().await, "1.1");
+    // A blank version is the unnamed one; one nanobom cannot name is refused before parsing.
+    let response = server.send(upload(" ", None)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(latest().await, "");
+    let response = server.send(upload("1.0 final", None)).await;
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(
+        body_text(response).await,
+        "the version must be 1 to 64 characters: letters, digits, '.', '_', '+', '/' or '-'"
     );
 }

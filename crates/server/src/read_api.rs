@@ -51,7 +51,7 @@ use nanobom_domain::{
     findings::{self, EventKind, Filter, Finding, FindingDetail, Justification, Status},
     inventory,
     licenses::{self, Action},
-    notifications, organizations, projects, tokens,
+    notifications, organizations, projects, tokens, versions,
 };
 use nanobom_osv::Severity;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -72,7 +72,7 @@ const DEFAULT_RUNS: u64 = 20;
 const MAXIMUM_RUNS: u64 = 100;
 
 /// Every path of the read API, as routed and as described in [`OPENAPI`].
-pub const PATHS: [&str; 10] = [
+pub const PATHS: [&str; 11] = [
     "/api/openapi.json",
     "/api/organizations",
     "/api/organizations/{organization}/projects",
@@ -83,6 +83,7 @@ pub const PATHS: [&str; 10] = [
     "/api/components",
     "/api/organizations/{organization}/license-policy",
     "/api/organizations/{organization}/projects/{project}/license-violations",
+    "/api/organizations/{organization}/projects/{project}/versions",
 ];
 
 pub fn router() -> Router<AppState> {
@@ -97,6 +98,7 @@ pub fn router() -> Router<AppState> {
         .route(PATHS[7], get(search_components))
         .route(PATHS[8], get(license_policy))
         .route(PATHS[9], get(list_license_violations))
+        .route(PATHS[10], get(list_versions))
         .layer(middleware::map_response(private_response))
 }
 
@@ -238,7 +240,7 @@ fn invalid(message: impl Into<String>) -> ApiError {
 }
 
 /// A query string that does not deserialize (a parameter given twice), as JSON.
-fn query_error(rejection: QueryRejection) -> ApiError {
+pub(crate) fn query_error(rejection: QueryRejection) -> ApiError {
     invalid(rejection.body_text())
 }
 
@@ -263,6 +265,19 @@ struct Page<T> {
     total: usize,
     limit: usize,
     offset: usize,
+}
+
+/// `version`, the project version a request is about; the latest when absent.
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct VersionParameter {
+    version: Option<String>,
+}
+
+impl VersionParameter {
+    /// The version named, trimmed. An empty value names the unnamed version.
+    pub(crate) fn version(&self) -> Option<&str> {
+        self.version.as_deref().map(str::trim)
+    }
 }
 
 /// `limit` and `offset`, as sent.
@@ -491,6 +506,8 @@ struct IgnoreBody {
 struct FindingBody {
     id: i64,
     project: String,
+    /// The project version; empty for the unnamed version.
+    version: String,
     vulnerability_id: String,
     aliases: Vec<String>,
     summary: Option<String>,
@@ -522,6 +539,7 @@ fn finding_body(state: &AppState, finding: Finding) -> FindingBody {
         ),
         id: finding.id,
         project: finding.project_slug,
+        version: finding.version,
         vulnerability_id: finding.vulnerability_id,
         aliases: finding.aliases,
         summary: finding.summary,
@@ -554,6 +572,17 @@ struct FindingParameters {
     severity: Option<String>,
     exploited: Option<String>,
     ecosystem: Option<String>,
+    #[serde(flatten)]
+    version: VersionParameter,
+    #[serde(flatten)]
+    pagination: Pagination,
+}
+
+/// `version` with `limit` and `offset`.
+#[derive(Debug, Default, Deserialize)]
+struct VersionPagination {
+    #[serde(flatten)]
+    version: VersionParameter,
     #[serde(flatten)]
     pagination: Pagination,
 }
@@ -618,7 +647,14 @@ async fn list_findings(
     let filter = parameters.filter()?;
     let reader = reader(&state, &headers, &session).await?;
     let project = project(&state, reader, &organization, &project_slug).await?;
-    let findings = findings::list(&state.database, reader, project.id, &filter).await?;
+    let findings = findings::list_in_version(
+        &state.database,
+        reader,
+        project.id,
+        parameters.version.version(),
+        &filter,
+    )
+    .await?;
     let page = parameters.pagination.page(findings)?;
     let page = Page {
         items: page
@@ -769,29 +805,33 @@ async fn finding(
     Ok(respond(&headers, &finding_detail_body(&state, detail)))
 }
 
-/// `GET /api/organizations/{organization}/projects/{project}/components`: the project's
-/// current components, by package URL.
+/// `GET /api/organizations/{organization}/projects/{project}/components`: the current
+/// components of a project version, by package URL.
 async fn list_components(
     State(state): State<AppState>,
     ApiPath((organization, project_slug)): ApiPath<(String, String)>,
-    pagination: Result<Query<Pagination>, QueryRejection>,
+    parameters: Result<Query<VersionPagination>, QueryRejection>,
     headers: HeaderMap,
     session: AuthenticationSession,
 ) -> Result<Response, ApiError> {
-    let Query(pagination) = pagination.map_err(query_error)?;
+    let Query(VersionPagination {
+        version,
+        pagination,
+    }) = parameters.map_err(query_error)?;
     let reader = reader(&state, &headers, &session).await?;
     let project = project(&state, reader, &organization, &project_slug).await?;
-    let components = inventory::components(&state.database, reader, project.id)
-        .await?
-        .into_iter()
-        .map(|component| ComponentBody {
-            purl: component.purl,
-            name: component.name,
-            version: component.version,
-            ecosystem: component.ecosystem,
-            license: component.license,
-        })
-        .collect();
+    let components =
+        inventory::components_in_version(&state.database, reader, project.id, version.version())
+            .await?
+            .into_iter()
+            .map(|component| ComponentBody {
+                purl: component.purl,
+                name: component.name,
+                version: component.version,
+                ecosystem: component.ecosystem,
+                license: component.license,
+            })
+            .collect();
     Ok(respond(&headers, &pagination.page(components)?))
 }
 
@@ -972,20 +1012,31 @@ struct LicenseViolationPage {
 }
 
 /// `GET /api/organizations/{organization}/projects/{project}/license-violations`: the
-/// project's components that the license policy forbids or warns about, forbidden first.
+/// components of a project version that the license policy forbids or warns about, forbidden
+/// first.
 async fn list_license_violations(
     State(state): State<AppState>,
     ApiPath((organization, project_slug)): ApiPath<(String, String)>,
-    pagination: Result<Query<Pagination>, QueryRejection>,
+    parameters: Result<Query<VersionPagination>, QueryRejection>,
     headers: HeaderMap,
     session: AuthenticationSession,
 ) -> Result<Response, ApiError> {
-    let Query(pagination) = pagination.map_err(query_error)?;
+    let Query(VersionPagination {
+        version,
+        pagination,
+    }) = parameters.map_err(query_error)?;
     let (limit, offset) = pagination.bounds()?;
     let reader = reader(&state, &headers, &session).await?;
     let project = project(&state, reader, &organization, &project_slug).await?;
-    let violations =
-        licenses::violations(&state.database, reader, project.id, offset, limit).await?;
+    let violations = licenses::violations_in_version(
+        &state.database,
+        reader,
+        project.id,
+        version.version(),
+        offset,
+        limit,
+    )
+    .await?;
     let total = usize::try_from(violations.total()).unwrap_or(usize::MAX);
     Ok(respond(
         &headers,
@@ -1015,4 +1066,46 @@ async fn list_license_violations(
             },
         },
     ))
+}
+
+#[derive(Serialize)]
+struct VersionBody {
+    /// Empty for the unnamed version.
+    name: String,
+    latest: bool,
+    active: bool,
+    created_at: DateTime<FixedOffset>,
+    last_upload_at: Option<DateTime<FixedOffset>>,
+    open: SeverityCountsBody,
+}
+
+/// `GET /api/organizations/{organization}/projects/{project}/versions`: the project's versions,
+/// newest first, with their open findings by severity.
+async fn list_versions(
+    State(state): State<AppState>,
+    ApiPath((organization, project_slug)): ApiPath<(String, String)>,
+    headers: HeaderMap,
+    session: AuthenticationSession,
+) -> Result<Response, ApiError> {
+    let reader = reader(&state, &headers, &session).await?;
+    let project = project(&state, reader, &organization, &project_slug).await?;
+    let items = versions::list(&state.database, reader, project.id)
+        .await?
+        .into_iter()
+        .map(|version| VersionBody {
+            name: version.name,
+            latest: version.latest,
+            active: version.active,
+            created_at: version.created_at,
+            last_upload_at: version.last_upload_at,
+            open: SeverityCountsBody {
+                critical: version.open.critical,
+                high: version.open.high,
+                medium: version.open.medium,
+                low: version.open.low,
+                unknown: version.open.unknown,
+            },
+        })
+        .collect();
+    Ok(respond(&headers, &Items { items }))
 }

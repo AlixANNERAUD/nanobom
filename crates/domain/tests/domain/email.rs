@@ -55,6 +55,8 @@ fn finding(organization: i64, severity: Severity, id: &str) -> NewFinding {
         organization_slug: "acme".to_owned(),
         project_id: 0,
         project_slug: "web".to_owned(),
+        version_id: 0,
+        version: String::new(),
         purl: "pkg:npm/lodash@4.17.20".to_owned(),
         vulnerability_id: id.to_owned(),
         aliases: vec![],
@@ -583,6 +585,7 @@ fn findings_payload(project: &str, summary: &str) -> notifications::NewFindingsP
                 epss: None,
                 epss_percentile: None,
                 introduced_via: vec!["express".to_owned()],
+                versions: vec![String::new()],
                 url: "https://nanobom.example.org/findings/1".to_owned(),
             },
             PayloadFinding {
@@ -600,6 +603,7 @@ fn findings_payload(project: &str, summary: &str) -> notifications::NewFindingsP
                 epss: None,
                 epss_percentile: None,
                 introduced_via: vec![],
+                versions: vec![String::new()],
                 url: "https://nanobom.example.org/findings/2".to_owned(),
             },
         ],
@@ -687,6 +691,21 @@ async fn emails_render_in_both_languages_and_escape_the_data() {
     assert_eq!(
         email::new_findings(&single, Language::English).subject,
         "nanobom: 1 new vulnerability in acme/web"
+    );
+
+    // The versions of a project that names some; nothing for one that never does.
+    assert!(!english.text.contains("Versions"));
+    let mut versioned = findings_payload("web", "summary");
+    versioned.findings[0].versions = vec![String::new(), "2.4".to_owned()];
+    assert!(
+        email::new_findings(&versioned, Language::English)
+            .text
+            .contains("Versions: unnamed version, 2.4")
+    );
+    assert!(
+        email::new_findings(&versioned, Language::French)
+            .text
+            .contains("Versions : version sans nom, 2.4")
     );
 
     let stale = email::stale_projects(&stale_payload(), Language::English);

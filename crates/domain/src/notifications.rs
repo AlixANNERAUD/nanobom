@@ -5,7 +5,9 @@
 //!
 //! - `findings.new`: new and reopened findings of one organization, at or above the webhook's
 //!   minimum severity, and open findings that became known exploited since the last run
-//!   (whatever their severity);
+//!   (whatever their severity). A vulnerability found in several versions of a project is one
+//!   entry listing the versions. Findings a new version inherits from the latest one
+//!   ([`crate::versions`]) are not new, so they are never announced;
 //! - `projects.stale`: projects of one organization whose SBOM stopped coming;
 //! - `run.failed`: a run that could not complete, sent to the instance's failure webhook.
 //!
@@ -46,13 +48,13 @@ use std::{
 
 use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 use nanobom_entity::{
-    findings, organization_webhooks, organizations, projects, webhook_deliveries,
+    findings, organization_webhooks, organizations, project_versions, projects, webhook_deliveries,
 };
 use nanobom_osv::Severity;
 use reqwest::Url;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseConnection,
-    EntityTrait, ModelTrait, QueryFilter, QueryOrder, QuerySelect,
+    EntityTrait, ModelTrait, QueryFilter, QueryOrder,
 };
 use serde::{Deserialize, Serialize};
 
@@ -263,6 +265,12 @@ pub struct PayloadFinding {
     /// The names of the project's direct dependencies that lead to the component, per the
     /// dependency graph of its latest SBOM; empty when the graph does not say.
     pub introduced_via: Vec<String>,
+    /// The project versions this entry stands for, by name (empty for the unnamed version): a
+    /// vulnerability found in several versions of a project at once is one entry. `component`,
+    /// `introduced_via` and `url` are those of one of them, the latest version when it is
+    /// among them.
+    #[serde(default)]
+    pub versions: Vec<String>,
     pub url: String,
 }
 
@@ -458,6 +466,7 @@ async fn destinations(
 struct Entry {
     finding_id: i64,
     organization_id: i64,
+    project_id: i64,
     /// The version whose dependency graph tells how the component is pulled in.
     version_id: Option<i64>,
     project_slug: String,
@@ -471,8 +480,9 @@ struct Entry {
     exploitation: Exploitation,
 }
 
-/// Why a finding is delivered, sent as `PayloadFinding::reason`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Why a finding is delivered, sent as `PayloadFinding::reason`. Ordered by precedence: an entry
+/// standing for several findings takes the first reason among them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum Reason {
     New,
     Reopened,
@@ -487,6 +497,93 @@ impl Reason {
             Self::Exploited => "exploited",
         }
     }
+}
+
+/// The entries of one vulnerability in one project, across its versions, delivered as one.
+struct Group {
+    /// The entry whose component, dependency graph and link are sent.
+    entry: Entry,
+    /// Whether the representative entry is in the project's latest version.
+    in_latest: bool,
+    versions: BTreeSet<String>,
+}
+
+impl Group {
+    /// Adds an entry of the same vulnerability and project.
+    fn add(&mut self, entry: Entry, in_latest: bool) {
+        let representative = &mut self.entry;
+        representative.severity = representative.severity.max(entry.severity);
+        representative.cvss_score = match (representative.cvss_score, entry.cvss_score) {
+            (Some(left), Some(right)) => Some(left.max(right)),
+            (left, right) => left.or(right),
+        };
+        representative.reason = representative.reason.min(entry.reason);
+        if entry.exploitation.known_exploited && !representative.exploitation.known_exploited {
+            representative.exploitation = entry.exploitation.clone();
+        }
+        if in_latest && !self.in_latest {
+            self.in_latest = true;
+            let Entry {
+                finding_id,
+                version_id,
+                purl,
+                ..
+            } = entry;
+            representative.finding_id = finding_id;
+            representative.version_id = version_id;
+            representative.purl = purl;
+        }
+    }
+}
+
+/// Groups entries per project and vulnerability, keeping the order of their first entry.
+/// `versions` gives the name of each version and whether it is the latest.
+fn group(entries: Vec<Entry>, versions: &HashMap<i64, (String, bool)>) -> Vec<Group> {
+    let mut groups: Vec<Group> = Vec::new();
+    let mut index: HashMap<(i64, String), usize> = HashMap::new();
+    for entry in entries {
+        let (name, in_latest) = entry
+            .version_id
+            .and_then(|id| versions.get(&id).cloned())
+            .unwrap_or_default();
+        match index.entry((entry.project_id, entry.vulnerability_id.clone())) {
+            std::collections::hash_map::Entry::Occupied(position) => {
+                let group = &mut groups[*position.get()];
+                group.versions.insert(name);
+                group.add(entry, in_latest);
+            }
+            std::collections::hash_map::Entry::Vacant(vacant) => {
+                vacant.insert(groups.len());
+                groups.push(Group {
+                    entry,
+                    in_latest,
+                    versions: BTreeSet::from([name]),
+                });
+            }
+        }
+    }
+    groups
+}
+
+/// The name of each of these versions and whether it is its project's latest.
+async fn version_names(
+    database: &impl ConnectionTrait,
+    identifiers: impl Iterator<Item = i64>,
+) -> Result<HashMap<i64, (String, bool)>> {
+    let identifiers: Vec<i64> = identifiers.collect::<BTreeSet<_>>().into_iter().collect();
+    let mut names = HashMap::new();
+    for chunk in identifiers.chunks(QUERY_CHUNK) {
+        names.extend(
+            project_versions::Entity::find()
+                .filter(project_versions::Column::Id.is_in(chunk.iter().copied()))
+                .order_by_asc(project_versions::Column::Id)
+                .all(database)
+                .await?
+                .into_iter()
+                .map(|version| (version.id, (version.name, version.latest))),
+        );
+    }
+    Ok(names)
 }
 
 /// What an open finding needs to be notified.
@@ -625,30 +722,14 @@ pub async fn new_findings_deliveries(
         .collect();
     let exploitation = exploitation::for_findings(database, &keyed).await?;
     let exploitation_of = |id: i64| exploitation.get(&id).cloned().unwrap_or_default();
-    let opened_ids: Vec<i64> = opened.iter().copied().collect();
-    let mut version_of: HashMap<i64, i64> = HashMap::new();
-    for chunk in opened_ids.chunks(QUERY_CHUNK) {
-        let rows: Vec<(i64, Option<i64>)> = findings::Entity::find()
-            .select_only()
-            .column(findings::Column::Id)
-            .column(findings::Column::VersionId)
-            .filter(findings::Column::Id.is_in(chunk.iter().copied()))
-            .into_tuple()
-            .all(database)
-            .await?;
-        version_of.extend(
-            rows.into_iter()
-                .filter_map(|(id, version_id)| Some((id, version_id?))),
-        );
-    }
-
     let mut entries: Vec<Entry> = outcome
         .new_findings
         .iter()
         .map(|finding| Entry {
             finding_id: finding.finding_id,
             organization_id: finding.organization_id,
-            version_id: version_of.get(&finding.finding_id).copied(),
+            project_id: finding.project_id,
+            version_id: Some(finding.version_id),
             project_slug: finding.project_slug.clone(),
             purl: finding.purl.clone(),
             vulnerability_id: finding.vulnerability_id.clone(),
@@ -681,6 +762,7 @@ pub async fn new_findings_deliveries(
         entries.push(Entry {
             finding_id: candidate.finding.id,
             organization_id: candidate.organization_id,
+            project_id: candidate.finding.project_id,
             version_id: candidate.finding.version_id,
             project_slug: candidate.project_slug,
             purl: candidate.finding.purl,
@@ -698,17 +780,22 @@ pub async fn new_findings_deliveries(
         });
     }
 
-    let mut by_organization: BTreeMap<i64, Vec<Entry>> = BTreeMap::new();
-    for entry in entries {
+    let versions = version_names(
+        database,
+        entries.iter().filter_map(|entry| entry.version_id),
+    )
+    .await?;
+    let mut by_organization: BTreeMap<i64, Vec<Group>> = BTreeMap::new();
+    for group in group(entries, &versions) {
         by_organization
-            .entry(entry.organization_id)
+            .entry(group.entry.organization_id)
             .or_default()
-            .push(entry);
+            .push(group);
     }
     let mut deliveries = Vec::new();
     let mut graphs: HashMap<i64, Graph> = HashMap::new();
     let empty = Graph::default();
-    for (organization_id, entries) in by_organization {
+    for (organization_id, groups) in by_organization {
         let destinations = destinations(database, organization_id, email).await?;
         if destinations.is_empty() {
             continue;
@@ -720,15 +807,17 @@ pub async fn new_findings_deliveries(
             continue;
         };
         for destination in destinations {
-            let entries: Vec<&Entry> = entries
+            let groups: Vec<&Group> = groups
                 .iter()
-                .filter(|entry| destination.accepts(entry))
+                .filter(|group| destination.accepts(&group.entry))
                 .collect();
-            if entries.is_empty() {
+            if groups.is_empty() {
                 continue;
             }
+            let entries: Vec<&Entry> = groups.iter().map(|group| &group.entry).collect();
             let mut findings = Vec::with_capacity(entries.len());
-            for entry in &entries {
+            for group in &groups {
+                let entry = &group.entry;
                 let graph: &Graph = match entry.version_id {
                     None => &empty,
                     Some(version_id) => match graphs.entry(version_id) {
@@ -760,6 +849,7 @@ pub async fn new_findings_deliveries(
                     epss: entry.exploitation.epss_score,
                     epss_percentile: entry.exploitation.epss_percentile,
                     introduced_via,
+                    versions: group.versions.iter().cloned().collect(),
                 });
             }
             let payload = NewFindingsPayload {

@@ -106,6 +106,8 @@ pub enum Problem {
     UnknownLicenseAction { action: String },
     ConflictingLicenseRule { license: String },
     TooManyLicenseRules { maximum: usize },
+    InvalidVersionName { maximum: usize },
+    TooManyVersions { maximum: u64 },
 }
 
 impl Problem {
@@ -369,6 +371,18 @@ impl Problem {
                 output,
                 locale = locale,
                 "problems.too_many_license_rules",
+                maximum = maximum
+            ),
+            P::InvalidVersionName { maximum } => translate_write!(
+                output,
+                locale = locale,
+                "problems.invalid_version_name",
+                maximum = maximum
+            ),
+            P::TooManyVersions { maximum } => translate_write!(
+                output,
+                locale = locale,
+                "problems.too_many_versions",
                 maximum = maximum
             ),
         }

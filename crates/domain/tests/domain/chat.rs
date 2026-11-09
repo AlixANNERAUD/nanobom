@@ -39,6 +39,7 @@ fn finding(id: &str) -> PayloadFinding {
         epss: None,
         epss_percentile: None,
         introduced_via: Vec::new(),
+        versions: vec![String::new()],
         url: "https://nanobom.example.org/findings/7".to_owned(),
     }
 }
@@ -429,6 +430,8 @@ fn run_with(organization: i64) -> RunOutcome {
             organization_slug: "acme".to_owned(),
             project_id: 0,
             project_slug: "web".to_owned(),
+            version_id: 0,
+            version: String::new(),
             purl: "pkg:npm/lodash@4.17.20".to_owned(),
             vulnerability_id: "GHSA-35jh-r3h4-6jhm".to_owned(),
             aliases: vec!["CVE-2021-23337".to_owned()],

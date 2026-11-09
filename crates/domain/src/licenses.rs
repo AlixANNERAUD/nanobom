@@ -895,15 +895,28 @@ pub async fn violations(
     offset: usize,
     limit: usize,
 ) -> Result<Violations> {
+    violations_in_version(database, reader, project_id, None, offset, limit).await
+}
+
+/// Like [`violations`], for the version named `version` (`None`: the latest); a missing version
+/// is [`Error::NotFound`], even when the organization has no active policy.
+pub async fn violations_in_version(
+    database: &impl ConnectionTrait,
+    reader: impl Into<Reader>,
+    project_id: i64,
+    version: Option<&str>,
+    offset: usize,
+    limit: usize,
+) -> Result<Violations> {
     let project =
         crate::projects::authorize(database, reader, project_id, Permission::View).await?;
+    let version_id = crate::versions::select(database, project_id, version)
+        .await?
+        .id;
     let policy = load(database, project.organization_id).await?;
     if !policy.is_active() {
         return Ok(Violations::default());
     }
-    let version_id = crate::versions::select(database, project_id, None)
-        .await?
-        .id;
     let matcher = Matcher::new(&policy);
     let grouped = verdicts_by_version(database, &matcher, &[version_id])
         .await?

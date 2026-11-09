@@ -703,7 +703,7 @@ async fn organization_tokens_create_projects_and_uploads_replace_components() {
         inventory::parse(&sbom_document("cyclonedx-npm.json")).unwrap(),
         UploadSource {
             source_commit: Some("0123abcd".to_owned()),
-            image_tag: None,
+            ..UploadSource::default()
         },
     )
     .await

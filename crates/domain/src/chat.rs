@@ -39,6 +39,8 @@ const COMPONENT_LIMIT: usize = 250;
 const SUMMARY_LIMIT: usize = 300;
 /// Direct dependencies named in an "introduced via" line; the others are counted.
 const VIA_NAMES: usize = 5;
+/// How chat messages name the unnamed version of a project, next to named ones.
+const UNNAMED_VERSION: &str = "unnamed version";
 
 /// Writes `text` with each character mapped through `piece`, clipped to `limit` characters
 /// (the escaped text counts) and ended with `...` if anything was left out.
@@ -114,6 +116,28 @@ fn via(finding: &PayloadFinding) -> Option<(Vec<&str>, usize)> {
         names,
         finding.introduced_via.len().saturating_sub(VIA_NAMES),
     ))
+}
+
+/// The project versions of a finding, at most [`VIA_NAMES`] of them, the unnamed version as
+/// `unnamed`; `None` when the project has no named version among them, which is how a project
+/// that never names versions reads.
+pub(crate) fn versions(finding: &PayloadFinding, unnamed: &str) -> Option<(Vec<String>, usize)> {
+    if finding.versions.iter().all(String::is_empty) {
+        return None;
+    }
+    let names = finding
+        .versions
+        .iter()
+        .take(VIA_NAMES)
+        .map(|name| {
+            if name.is_empty() {
+                unnamed.to_owned()
+            } else {
+                name.clone()
+            }
+        })
+        .collect();
+    Some((names, finding.versions.len().saturating_sub(VIA_NAMES)))
 }
 
 fn headline(payload: &NewFindingsPayload) -> String {
@@ -202,6 +226,20 @@ fn slack_finding(finding: &PayloadFinding) -> Value {
         slack_code(&finding.component, COMPONENT_LIMIT),
         slack(&finding.project, NAME_LIMIT),
     ));
+    if let Some((names, more)) = versions(finding, UNNAMED_VERSION) {
+        let mut line = format!(
+            "Versions: {}",
+            names
+                .iter()
+                .map(|name| slack_code(name, NAME_LIMIT))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        if more > 0 {
+            line.push_str(&format!(" and {more} more"));
+        }
+        lines.push(line);
+    }
     if let Some(summary) = &finding.summary {
         lines.push(slack(summary, SUMMARY_LIMIT));
     }
@@ -339,6 +377,20 @@ fn teams_finding(finding: &PayloadFinding) -> Value {
         ),
         json!({"spacing": "None"}),
     ));
+    if let Some((names, more)) = versions(finding, UNNAMED_VERSION) {
+        let mut line = format!(
+            "Versions: {}",
+            names
+                .iter()
+                .map(|name| markdown(name, NAME_LIMIT))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        if more > 0 {
+            line.push_str(&format!(" and {more} more"));
+        }
+        items.push(text_block(line, json!({"spacing": "None"})));
+    }
     if let Some(summary) = &finding.summary {
         items.push(text_block(
             markdown(summary, SUMMARY_LIMIT),

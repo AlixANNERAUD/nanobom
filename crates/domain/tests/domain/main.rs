@@ -11,6 +11,7 @@ mod inventory;
 mod licenses;
 mod lifecycle;
 mod notifications;
+mod project_versions;
 mod staleness;
 mod tokens;
 mod versions;

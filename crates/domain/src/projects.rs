@@ -92,14 +92,15 @@ pub(crate) async fn authorize(
     Ok(project)
 }
 
-/// Inserts a project with its unnamed version, without checking any permission; the name
-/// defaults to the slug. Callers pass a transaction, or a project could be seen without its
-/// version.
+/// Inserts a project with its first version (see [`crate::versions::insert_first`]), without
+/// checking any permission; the name defaults to the slug. Callers pass a transaction, or a
+/// project could be seen without its version.
 pub(crate) async fn insert(
     database: &impl ConnectionTrait,
     organization_id: i64,
     slug: &str,
     name: Option<&str>,
+    first_version: &str,
 ) -> Result<projects::Model> {
     let slug = names::slug(Field::ProjectSlug, slug)?;
     let name = match name {
@@ -123,7 +124,7 @@ pub(crate) async fn insert(
     }
     .insert(database)
     .await?;
-    crate::versions::insert_unnamed(database, project.id, true, now).await?;
+    crate::versions::insert_first(database, project.id, first_version, now).await?;
     Ok(project)
 }
 
@@ -141,7 +142,14 @@ pub async fn create(
         .authorize(database, organization_id, Permission::ManageProjects)
         .await?;
     let transaction = crate::database::begin_write(database).await?;
-    let project = insert(&transaction, organization_id, slug, Some(name)).await?;
+    let project = insert(
+        &transaction,
+        organization_id,
+        slug,
+        Some(name),
+        crate::versions::UNNAMED,
+    )
+    .await?;
     transaction.commit().await?;
     Ok(project)
 }
