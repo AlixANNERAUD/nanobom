@@ -32,8 +32,8 @@ use std::{
 
 use nanobom_entity::{components, license_rules, organizations};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
-    QueryOrder, QuerySelect, TransactionSession, TransactionTrait,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, Condition, ConnectionTrait, EntityTrait,
+    QueryFilter, QueryOrder, QuerySelect, TransactionSession, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use spdx::{
@@ -657,8 +657,83 @@ impl Violations {
     }
 }
 
-/// Components read at a time while looking for a page of violations.
+/// Components read at a time by [`section`] when it scans a project.
 const SCAN_BATCH: u64 = 500;
+
+/// The components of a project whose license gets `verdict` (`verdicts` has the verdict on
+/// each of its distinct licenses): `limit` of them from `skip`, by name, package URL, then
+/// identifier, so pages neither overlap nor miss a component.
+///
+/// The database selects them by license. Past [`QUERY_CHUNK`] licenses, too many for one
+/// query, the components of the project are read in batches and filtered here instead:
+/// splitting the list would mean merging the sorted results of each part, each as long as the
+/// offset, and that many distinct licenses with one verdict in one project is rare.
+async fn section(
+    database: &impl ConnectionTrait,
+    project_id: i64,
+    verdicts: &HashMap<Option<String>, Verdict>,
+    verdict: Action,
+    skip: u64,
+    limit: u64,
+) -> Result<Vec<components::Model>> {
+    let licenses: Vec<&str> = verdicts
+        .iter()
+        .filter(|(_, found)| found.action == verdict)
+        .filter_map(|(license, _)| license.as_deref())
+        .collect();
+    let ordered = components::Entity::find()
+        .filter(components::Column::ProjectId.eq(project_id))
+        .order_by_asc(components::Column::Name)
+        .order_by_asc(components::Column::Purl)
+        .order_by_asc(components::Column::Id);
+    if licenses.len() <= QUERY_CHUNK {
+        let mut matching = Condition::any().add(components::Column::License.is_in(licenses));
+        if verdicts
+            .get(&None)
+            .is_some_and(|found| found.action == verdict)
+        {
+            matching = matching.add(components::Column::License.is_null());
+        }
+        return Ok(ordered
+            .filter(matching)
+            .offset(skip)
+            .limit(limit)
+            .all(database)
+            .await?);
+    }
+    let mut found = Vec::new();
+    let mut skip = skip;
+    let mut position = 0;
+    loop {
+        let batch = ordered
+            .clone()
+            .offset(position)
+            .limit(SCAN_BATCH)
+            .all(database)
+            .await?;
+        let read = batch.len() as u64;
+        for component in batch {
+            if verdicts
+                .get(&component.license)
+                .is_none_or(|found| found.action != verdict)
+            {
+                continue;
+            }
+            if skip > 0 {
+                skip -= 1;
+                continue;
+            }
+            found.push(component);
+            if found.len() as u64 >= limit {
+                return Ok(found);
+            }
+        }
+        if read < SCAN_BATCH {
+            return Ok(found);
+        }
+        position += read;
+    }
+}
 
 /// The verdict on each distinct license of the components of these projects, with how many
 /// components have it, by project. Each distinct license is evaluated once.
@@ -714,9 +789,9 @@ fn count(verdicts: &[(Option<String>, u64, Verdict)]) -> ViolationCounts {
 /// `limit` of them from `offset`, forbidden first (see [`Violations::items`]), with the counts
 /// of the whole project. Requires [`Permission::View`].
 ///
-/// Licenses are evaluated once per distinct value, counted by the database, and components are
-/// read in batches until the page is full, so memory stays bounded by the page and the
-/// distinct licenses, however many components the project has.
+/// Licenses are evaluated once per distinct value and counted by the database, which then
+/// selects the page of each verdict by its licenses, so memory stays bounded by the page and
+/// the distinct licenses, however many components the project has.
 pub async fn violations(
     database: &impl ConnectionTrait,
     reader: impl Into<Reader>,
@@ -754,46 +829,23 @@ pub async fn violations(
             skip -= total;
             continue;
         }
-        let mut position = 0;
-        'scan: loop {
-            let batch = components::Entity::find()
-                .filter(components::Column::ProjectId.eq(project_id))
-                .order_by_asc(components::Column::Name)
-                .order_by_asc(components::Column::Purl)
-                .offset(position)
-                .limit(SCAN_BATCH)
-                .all(database)
-                .await?;
-            let read = batch.len() as u64;
-            for component in batch {
-                let Some(found) = verdicts
+        let remaining = u64::try_from(limit - items.len()).unwrap_or(u64::MAX);
+        let found = section(database, project_id, &verdicts, verdict, skip, remaining).await?;
+        skip = 0;
+        items.extend(found.into_iter().map(|component| {
+            Violation {
+                licenses: verdicts
                     .get(&component.license)
-                    .filter(|found| found.action == verdict)
-                else {
-                    continue;
-                };
-                if skip > 0 {
-                    skip -= 1;
-                    continue;
-                }
-                items.push(Violation {
-                    licenses: found.licenses.clone(),
-                    purl: component.purl,
-                    name: component.name,
-                    version: component.version,
-                    ecosystem: component.ecosystem,
-                    license: component.license,
-                    verdict,
-                });
-                if items.len() >= limit {
-                    break 'scan;
-                }
+                    .map(|found| found.licenses.clone())
+                    .unwrap_or_default(),
+                purl: component.purl,
+                name: component.name,
+                version: component.version,
+                ecosystem: component.ecosystem,
+                license: component.license,
+                verdict,
             }
-            if read < SCAN_BATCH {
-                break;
-            }
-            position += read;
-        }
+        }));
     }
     Ok(Violations {
         active: true,

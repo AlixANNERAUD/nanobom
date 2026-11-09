@@ -565,3 +565,88 @@ async fn pages_are_found_across_many_components() {
     assert_eq!(last.items.len(), 1);
     assert_eq!(last.items[0].name, "package-1198");
 }
+
+#[tokio::test]
+async fn pages_are_found_among_many_distinct_licenses() {
+    // More distinct forbidden licenses than one query lists: that section is scanned, the
+    // next one (components without a license) is selected by the database.
+    let fixture = setup().await;
+    let database = &fixture.database;
+    let names: Vec<String> = (0..1100)
+        .map(|index| format!("package-{index:04}"))
+        .collect();
+    let components: Vec<(&str, serde_json::Value)> = names
+        .iter()
+        .enumerate()
+        .map(|(index, name)| {
+            let license = match index % 4 {
+                0 | 2 => expression(&format!("LicenseRef-custom-{index}")),
+                1 => json!(null),
+                _ => expression("MIT"),
+            };
+            (name.as_str(), license)
+        })
+        .collect();
+    let project = upload(&fixture, &components).await;
+    licenses::set_policy(
+        database,
+        &fixture.admin,
+        fixture.organization,
+        &policy(Action::Forbid, Action::Warn, &[("MIT", Action::Allow)]),
+    )
+    .await
+    .unwrap();
+    let page = licenses::violations(database, &fixture.viewer, project, 545, 10)
+        .await
+        .unwrap();
+    assert_eq!(
+        page.counts,
+        ViolationCounts {
+            forbidden: 550,
+            warned: 275
+        }
+    );
+    let listed: Vec<(&str, Action, Vec<&str>)> = page
+        .items
+        .iter()
+        .map(|violation| {
+            (
+                violation.name.as_str(),
+                violation.verdict,
+                violation.licenses.iter().map(String::as_str).collect(),
+            )
+        })
+        .collect();
+    let forbidden: Vec<(String, String)> = (545..550)
+        .map(|index| {
+            (
+                format!("package-{:04}", index * 2),
+                format!("LicenseRef-custom-{}", index * 2),
+            )
+        })
+        .collect();
+    let warned: Vec<String> = (0..5)
+        .map(|index| format!("package-{:04}", index * 4 + 1))
+        .collect();
+    let mut expected: Vec<(&str, Action, Vec<&str>)> = forbidden
+        .iter()
+        .map(|(name, license)| (name.as_str(), Action::Forbid, vec![license.as_str()]))
+        .collect();
+    expected.extend(
+        warned
+            .iter()
+            .map(|name| (name.as_str(), Action::Warn, Vec::new())),
+    );
+    assert_eq!(listed, expected);
+    let first = licenses::violations(database, &fixture.viewer, project, 0, 3)
+        .await
+        .unwrap();
+    assert_eq!(
+        first
+            .items
+            .iter()
+            .map(|violation| violation.name.as_str())
+            .collect::<Vec<_>>(),
+        vec!["package-0000", "package-0002", "package-0004"]
+    );
+}
