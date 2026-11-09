@@ -84,7 +84,8 @@ Texts of the interface are in `crates/app/locales/en.json` and `fr.json`, used t
 
 1. Copy `en.json` to `<tag>.json` in both locale directories, and translate every message
    (`language.name` is the language's name in itself, shown in the language switch).
-2. Add the tag to `EMBEDDED_I18N_LOCALES` in `.cargo/config.toml`.
+2. Add the tag to `available_locales` in the `embedded_i18n::i18n!` call at the root of both
+   crates, `crates/app/src/lib.rs` and `crates/domain/src/lib.rs`.
 
 The upload API's messages stay in English on purpose: they are read in CI logs.
 

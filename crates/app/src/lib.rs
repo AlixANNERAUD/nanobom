@@ -28,6 +28,17 @@
 //! [`App`] lists the routes; [`functions`] holds everything that runs on the server;
 //! [`server`](mod@server) has the helpers those functions share.
 
+// Every embedded locale must translate every message (strict): a missing key fails the build
+// instead of showing English to French readers, so no fallback chain is ever consulted. Each
+// request translates into its own locale (`locale = ...`, see [`i18n`]); the global locale of
+// embedded-i18n stays unset, so concurrent requests cannot overwrite each other's language.
+embedded_i18n::i18n!(
+    "locales",
+    default_locale = "en",
+    available_locales = ["en", "fr"],
+    strict = true
+);
+
 pub mod components;
 pub mod functions;
 pub mod i18n;

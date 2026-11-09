@@ -180,8 +180,8 @@ pub fn LanguageSwitch() -> impl IntoView {
             </label>
             <select id="language" name="locale" class=format!("{SELECT} h-8 w-auto")>
                 {i18n::languages()
-                    .map(|(index, tag, name)| {
-                        let selected = index == current;
+                    .map(|(locale, tag, name)| {
+                        let selected = locale == current;
                         view! {
                             <option value=tag selected=selected lang=tag>
                                 {name}
