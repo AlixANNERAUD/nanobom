@@ -1011,3 +1011,245 @@ async fn search_finds_components_by_name_and_version_in_visible_organizations() 
             .is_empty()
     );
 }
+
+// Licenses.
+
+/// The license of each component of a parsed SBOM, by package URL.
+fn licenses(sbom: &ParsedSbom) -> Vec<(&str, Option<&str>)> {
+    sbom.components
+        .iter()
+        .map(|component| (component.purl.as_str(), component.license.as_deref()))
+        .collect()
+}
+
+/// A CycloneDX 1.7 document with one npm component per `licenses` value, named `a`, `b`…
+fn cyclonedx_with_licenses(licenses: &[serde_json::Value]) -> Vec<u8> {
+    let components: Vec<_> = licenses
+        .iter()
+        .zip('a'..)
+        .map(|(licenses, name)| {
+            let mut component = json!({
+                "type": "library",
+                "name": name.to_string(),
+                "version": "1.0.0",
+                "purl": format!("pkg:npm/{name}@1.0.0"),
+            });
+            if !licenses.is_null() {
+                component["licenses"] = licenses.clone();
+            }
+            component
+        })
+        .collect();
+    json!({"bomFormat": "CycloneDX", "specVersion": "1.7", "version": 1, "components": components})
+        .to_string()
+        .into_bytes()
+}
+
+#[test]
+fn cyclonedx_licenses_become_one_expression() {
+    let long_name = "x".repeat(inventory::MAXIMUM_LICENSE_LENGTH + 1);
+    let sbom = inventory::parse(&cyclonedx_with_licenses(&[
+        json!([{"expression": " MIT OR Apache-2.0 "}]),
+        json!([{"license": {"id": "MIT"}}]),
+        json!([{"license": {"name": "Acme Commercial License"}}]),
+        // Sorted and without duplicates, whatever the order of the document.
+        json!([
+            {"license": {"id": "MIT"}},
+            {"license": {"id": "Apache-2.0"}},
+            {"license": {"id": "MIT"}}
+        ]),
+        // CycloneDX 1.7 allows expressions next to licenses.
+        json!([{"license": {"id": "BSD-3-Clause"}}, {"expression": "MIT OR Apache-2.0"}]),
+        json!([]),
+        serde_json::Value::Null,
+        json!([{"license": {"name": long_name}}]),
+        // An expression written as a name keeps its meaning next to another license.
+        json!([{"license": {"id": "BSD-3-Clause"}}, {"license": {"name": "MIT OR Apache-2.0"}}]),
+        // Repeated entries count once towards the length bound.
+        serde_json::Value::Array(vec![json!({"license": {"id": "MIT"}}); 400]),
+    ]))
+    .unwrap();
+    assert_eq!(
+        licenses(&sbom),
+        [
+            ("pkg:npm/a@1.0.0", Some("MIT OR Apache-2.0")),
+            ("pkg:npm/b@1.0.0", Some("MIT")),
+            ("pkg:npm/c@1.0.0", Some("Acme Commercial License")),
+            ("pkg:npm/d@1.0.0", Some("Apache-2.0 AND MIT")),
+            (
+                "pkg:npm/e@1.0.0",
+                Some("BSD-3-Clause AND (MIT OR Apache-2.0)")
+            ),
+            ("pkg:npm/f@1.0.0", None),
+            ("pkg:npm/g@1.0.0", None),
+            ("pkg:npm/h@1.0.0", None),
+            (
+                "pkg:npm/i@1.0.0",
+                Some("BSD-3-Clause AND (MIT OR Apache-2.0)")
+            ),
+            ("pkg:npm/j@1.0.0", Some("MIT")),
+        ]
+    );
+}
+
+#[test]
+fn generators_licenses_are_read() {
+    let npm = inventory::parse(&sbom_document("cyclonedx-npm.json")).unwrap();
+    assert!(
+        npm.components
+            .iter()
+            .all(|component| component.license.as_deref() == Some("MIT"))
+    );
+    let python = inventory::parse(&sbom_document("cyclonedx-py.json")).unwrap();
+    assert_eq!(
+        licenses(&python),
+        [
+            (
+                "pkg:pypi/idna@3.6",
+                Some("License :: OSI Approved :: BSD License")
+            ),
+            ("pkg:pypi/urllib3@1.26.4", Some("MIT")),
+        ]
+    );
+    let github = inventory::parse(&sbom_document("github-dependency-graph.json")).unwrap();
+    assert!(
+        licenses(&github).contains(&("pkg:cargo/clap_derive@4.5.18", Some("MIT OR Apache-2.0"))),
+        "{:?}",
+        licenses(&github)
+    );
+    let syft = inventory::parse(&sbom_document("syft-cargo-spdx-2.2.json")).unwrap();
+    assert!(
+        syft.components
+            .iter()
+            .all(|component| component.license.is_none())
+    );
+}
+
+#[test]
+fn spdx_licenses_prefer_the_concluded_one() {
+    let package = |name: &str, concluded: serde_json::Value, declared: serde_json::Value| {
+        let mut package = spdx_package(
+            &format!("SPDXRef-{name}"),
+            name,
+            Some(&format!("pkg:npm/{name}@1.0")),
+        );
+        if !concluded.is_null() {
+            package["licenseConcluded"] = concluded;
+        }
+        if !declared.is_null() {
+            package["licenseDeclared"] = declared;
+        }
+        package
+    };
+    let null = serde_json::Value::Null;
+    let document = spdx(
+        json!([
+            package("a", json!("MIT"), json!("Apache-2.0")),
+            package("b", json!("NOASSERTION"), json!("Apache-2.0")),
+            package("c", json!("NONE"), json!("GPL-2.0-only OR MIT")),
+            package("d", null.clone(), json!("BSD-2-Clause")),
+            package("e", json!("NOASSERTION"), json!("NOASSERTION")),
+            package("f", json!("NONE"), json!("NONE")),
+            package("g", json!(" LicenseRef-Acme "), null.clone()),
+            // Not a string: ignored rather than refusing the document.
+            package("h", json!({"id": "MIT"}), json!("ISC")),
+            package("i", null.clone(), null),
+        ]),
+        json!([]),
+    );
+    let sbom = inventory::parse(&document).unwrap();
+    assert_eq!(
+        licenses(&sbom),
+        [
+            ("pkg:npm/a@1.0", Some("MIT")),
+            ("pkg:npm/b@1.0", Some("Apache-2.0")),
+            ("pkg:npm/c@1.0", Some("GPL-2.0-only OR MIT")),
+            ("pkg:npm/d@1.0", Some("BSD-2-Clause")),
+            ("pkg:npm/e@1.0", None),
+            ("pkg:npm/f@1.0", None),
+            ("pkg:npm/g@1.0", Some("LicenseRef-Acme")),
+            ("pkg:npm/h@1.0", Some("ISC")),
+            ("pkg:npm/i@1.0", None),
+        ]
+    );
+}
+
+/// How many components a search by name and license finds.
+async fn found(fixture: &Fixture, query: &str, license: &str) -> usize {
+    inventory::search_by_license(&fixture.database, &fixture.viewer, query, license)
+        .await
+        .unwrap()
+        .matches
+        .len()
+}
+
+#[tokio::test]
+async fn licenses_are_replaced_with_each_upload_and_searchable() {
+    let fixture = setup().await;
+    let database = &fixture.database;
+    let created = tokens::create(database, &fixture.owner, fixture.organization, None, "CI")
+        .await
+        .unwrap();
+    let token = tokens::authenticate(database, &created.secret)
+        .await
+        .unwrap()
+        .unwrap();
+    for (licenses, expected) in [
+        (json!([{"license": {"id": "MIT"}}]), Some("MIT")),
+        (
+            json!([{"expression": "GPL-3.0-only"}]),
+            Some("GPL-3.0-only"),
+        ),
+        (serde_json::Value::Null, None),
+    ] {
+        let outcome = inventory::ingest(
+            database,
+            &token,
+            "acme",
+            "web",
+            inventory::parse(&cyclonedx_with_licenses(&[licenses])).unwrap(),
+            UploadSource::default(),
+        )
+        .await
+        .unwrap();
+        let components = inventory::components(database, &fixture.viewer, outcome.project_id)
+            .await
+            .unwrap();
+        assert_eq!(components.len(), 1);
+        assert_eq!(components[0].license.as_deref(), expected);
+        assert_eq!(
+            found(&fixture, "", "gpl").await,
+            usize::from(expected == Some("GPL-3.0-only")),
+            "{expected:?}"
+        );
+    }
+
+    inventory::ingest(
+        database,
+        &token,
+        "acme",
+        "web",
+        inventory::parse(&cyclonedx_with_licenses(&[
+            json!([{"expression": "GPL-3.0-only"}]),
+        ]))
+        .unwrap(),
+        UploadSource::default(),
+    )
+    .await
+    .unwrap();
+    let matches = inventory::search_by_license(database, &fixture.viewer, "", "GPL")
+        .await
+        .unwrap()
+        .matches;
+    assert_eq!(matches[0].license.as_deref(), Some("GPL-3.0-only"));
+    // Name and license together.
+    assert_eq!(found(&fixture, "a", "gpl-3").await, 1);
+    assert_eq!(found(&fixture, "b", "gpl").await, 0);
+    assert_eq!(found(&fixture, "", "MIT").await, 0);
+    assert_eq!(
+        found(&fixture, "", "gp_").await,
+        0,
+        "wildcards match themselves"
+    );
+    assert_eq!(found(&fixture, " ", " ").await, 0);
+}

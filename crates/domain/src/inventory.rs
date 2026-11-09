@@ -13,6 +13,13 @@
 //!
 //! The SBOM's dependency graph is kept with the components, between the components stored: see
 //! [`crate::dependencies`] for what is derived from it and how incomplete graphs are handled.
+//!
+//! Each component keeps its license as one SPDX license expression string, read from the
+//! CycloneDX `licenses` (several entries are joined with `AND`, the conservative reading for a
+//! policy) or the SPDX `licenseConcluded` and `licenseDeclared` ([`spdx`]), and bounded by
+//! [`MAXIMUM_LICENSE_LENGTH`]. Expressions are only trimmed, not parsed or validated: free-text
+//! license names are kept as written, and whoever evaluates them must expect strings that are
+//! not valid SPDX.
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
@@ -25,6 +32,7 @@ use cyclonedx_bom::{
         bom::SpecVersion,
         component::{Classification, Component},
         dependency::Dependency,
+        license::{LicenseChoice, LicenseIdentifier, Licenses},
     },
     prelude::Bom,
 };
@@ -66,6 +74,11 @@ pub const SUPPORTED_VEX_VERSIONS: [&str; 4] = ["1.4", "1.5", "1.6", "1.7"];
 /// At most this many skipped components are listed in an upload's response; all are counted.
 const MAXIMUM_LISTED_SKIPPED_COMPONENTS: usize = 100;
 
+/// A component's license longer than this many characters is dropped (stored as unknown), so
+/// an SBOM cannot bloat the database with license texts pasted as names. It is dropped rather
+/// than cut: a truncated expression would name other licenses than the SBOM does.
+pub const MAXIMUM_LICENSE_LENGTH: usize = 1000;
+
 /// A component of an SBOM, identified by its package URL.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InventoryComponent {
@@ -79,6 +92,9 @@ pub struct InventoryComponent {
     pub name: String,
     /// The purl's version; components without one are kept but never matched.
     pub version: Option<String>,
+    /// The license, as an SPDX license expression (possibly with free-text names), at most
+    /// [`MAXIMUM_LICENSE_LENGTH`] characters; `None` when the SBOM does not give one.
+    pub license: Option<String>,
 }
 
 /// A component that cannot be tracked.
@@ -420,6 +436,67 @@ fn dependency_edges(
     (edges.into_iter().collect(), partial)
 }
 
+/// The license of a CycloneDX component, from its `licenses`: each entry gives an expression,
+/// an SPDX license identifier (`license.id`) or a free-text name (`license.name`).
+///
+/// One entry gives its value. Several are joined with `AND`, sorted and without duplicates so
+/// that the stored value does not change with the order a generator writes them in; compound
+/// expressions are put in parentheses. CycloneDX does not say whether several entries are
+/// alternatives or all apply, and `AND` is the conservative reading for a license policy: a
+/// component is only as acceptable as the most restrictive of its licenses.
+///
+/// `None` without entries, or when the result exceeds [`MAXIMUM_LICENSE_LENGTH`].
+fn cyclonedx_license(licenses: Option<&Licenses>) -> Option<String> {
+    let mut terms = BTreeSet::new();
+    let mut length = 0;
+    for choice in &licenses?.0 {
+        let term = match choice {
+            LicenseChoice::Expression(expression) => expression.to_string(),
+            LicenseChoice::License(license) => match &license.license_identifier {
+                LicenseIdentifier::SpdxId(identifier) => identifier.to_string(),
+                // Some generators write an expression here too.
+                LicenseIdentifier::Name(name) => name.to_string(),
+            },
+        };
+        let term = term.trim();
+        if term.is_empty() || terms.contains(term) {
+            continue;
+        }
+        // Checked as entries come, so a component with countless entries stops early.
+        length += term.chars().count();
+        if length > MAXIMUM_LICENSE_LENGTH {
+            return None;
+        }
+        terms.insert(term.to_owned());
+    }
+    let license = match terms.len() {
+        0 => return None,
+        1 => terms.pop_first()?,
+        _ => terms
+            .into_iter()
+            .map(|term| {
+                // `AND` binds tighter than `OR` and `WITH` terms read fine either way, so any
+                // term with a space is put in parentheses.
+                if term.contains(char::is_whitespace) {
+                    format!("({term})")
+                } else {
+                    term
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" AND "),
+    };
+    bounded_license(&license)
+}
+
+/// `license` trimmed, or `None` when it is empty or longer than [`MAXIMUM_LICENSE_LENGTH`]
+/// characters.
+fn bounded_license(license: &str) -> Option<String> {
+    let license = license.trim();
+    (!license.is_empty() && license.chars().count() <= MAXIMUM_LICENSE_LENGTH)
+        .then(|| license.to_owned())
+}
+
 fn collect(components: &[Component], collector: &mut Collector, references: &mut References) {
     for component in components {
         // Files and the operating system describe what was scanned; they are not packages.
@@ -430,7 +507,8 @@ fn collect(components: &[Component], collector: &mut Collector, references: &mut
         if is_package {
             let purl = component.purl.as_ref().map(ToString::to_string);
             let version = component.version.as_ref().map(ToString::to_string);
-            let kept = collector.add(&component.name, version, purl.as_deref());
+            let license = cyclonedx_license(component.licenses.as_ref());
+            let kept = collector.add(&component.name, version, purl.as_deref(), license);
             if let Some(reference) = &component.bom_ref {
                 match kept {
                     Some(purl) => references.keep(reference, &purl),
@@ -454,10 +532,18 @@ struct Collector {
 
 impl Collector {
     /// Adds a package, returning its package URL in canonical form when it can be tracked and
-    /// recording why otherwise.
-    fn add(&mut self, name: &str, version: Option<String>, purl: Option<&str>) -> Option<String> {
+    /// recording why otherwise. When several packages share a package URL, the first one's
+    /// license is kept.
+    fn add(
+        &mut self,
+        name: &str,
+        version: Option<String>,
+        purl: Option<&str>,
+        license: Option<String>,
+    ) -> Option<String> {
         match inventory_component(purl) {
-            Ok(inventory) => {
+            Ok(mut inventory) => {
+                inventory.license = license;
                 let purl = inventory.purl.clone();
                 self.by_purl.entry(purl.clone()).or_insert(inventory);
                 Some(purl)
@@ -527,6 +613,7 @@ fn inventory_component(purl: Option<&str>) -> std::result::Result<InventoryCompo
         ecosystem: parsed.ty().to_owned(),
         name,
         version: parsed.version().map(str::to_owned),
+        license: None,
     })
 }
 
@@ -698,6 +785,7 @@ async fn store(
             ecosystem: Set(component.ecosystem),
             name: Set(component.name),
             version: Set(component.version),
+            license: Set(component.license),
             ..Default::default()
         })
         .collect();
@@ -827,6 +915,7 @@ pub struct ComponentMatch {
     pub ecosystem: String,
     pub name: String,
     pub version: Option<String>,
+    pub license: Option<String>,
 }
 
 /// At most this many components are returned by a search.
@@ -861,13 +950,27 @@ pub async fn search_results(
     reader: impl Into<Reader>,
     query: &str,
 ) -> Result<SearchResults> {
+    search_by_license(database, reader, query, "").await
+}
+
+/// [`search_results`], also requiring the license to contain `license` (case-insensitively,
+/// `%` and `_` taken literally) when it is not blank: `GPL` finds `GPL-3.0-only` and
+/// `MIT OR GPL-2.0-or-later`. Either `query` or `license` may be blank, not both; a blank
+/// `query` matches every name.
+pub async fn search_by_license(
+    database: &impl ConnectionTrait,
+    reader: impl Into<Reader>,
+    query: &str,
+    license: &str,
+) -> Result<SearchResults> {
     let reader = reader.into();
     let query = query.trim();
+    let license = license.trim();
     let (name, version) = match query.split_once(['@', ' ']) {
         Some((name, version)) => (name.trim(), Some(version.trim())),
         None => (query, None),
     };
-    if name.is_empty() {
+    if name.is_empty() && license.is_empty() {
         return Ok(SearchResults {
             matches: Vec::new(),
             truncated: false,
@@ -894,12 +997,13 @@ pub async fn search_results(
     // case-sensitive on PostgreSQL (and on SQLite for non-ASCII letters), so both sides are
     // compared in lower case.
     let mut select = components::Entity::find()
-        .filter(components::Column::ProjectId.is_in(projects.keys().copied()))
-        .filter(
-            Expr::expr(Func::lower(Expr::col(components::Column::Name))).like(
-                LikeExpr::new(format!("%{}%", escape_like(&name.to_lowercase()))).escape('\\'),
-            ),
-        );
+        .filter(components::Column::ProjectId.is_in(projects.keys().copied()));
+    if !name.is_empty() {
+        select = select.filter(contains_text(components::Column::Name, name));
+    }
+    if !license.is_empty() {
+        select = select.filter(contains_text(components::Column::License, license));
+    }
     if let Some(version) = version.filter(|version| !version.is_empty()) {
         select = select.filter(
             Expr::expr(Func::lower(Expr::col(components::Column::Version))).like(
@@ -929,10 +1033,17 @@ pub async fn search_results(
                 ecosystem: component.ecosystem,
                 name: component.name,
                 version: component.version,
+                license: component.license,
             }
         })
         .collect();
     Ok(SearchResults { matches, truncated })
+}
+
+/// `column` contains `text`, both in lower case: see [`search_results`].
+fn contains_text(column: components::Column, text: &str) -> Expr {
+    Expr::expr(Func::lower(Expr::col(column)))
+        .like(LikeExpr::new(format!("%{}%", escape_like(&text.to_lowercase()))).escape('\\'))
 }
 
 /// Escapes the wildcards of a `LIKE` pattern, so `_` in a package name matches itself.

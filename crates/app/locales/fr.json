@@ -210,6 +210,8 @@
     "component": "Composant",
     "package": "Paquet",
     "version": "Version",
+    "license": "Licence",
+    "unknown_license": "Inconnue",
     "fixed_in": "Corrigée dans",
     "no_fixed_version": "Aucune version corrigée connue",
     "package_url": "URL du paquet",
@@ -245,17 +247,20 @@
   "search": {
     "title": "Recherche",
     "heading": "Rechercher des composants",
-    "subtitle": "Trouvez quels projets utilisent un paquet : un nom, éventuellement suivi du début d’une version (openssl 3.).",
+    "subtitle": "Trouvez quels projets utilisent un paquet : un nom, éventuellement suivi du début d’une version (openssl 3.), une partie d’une licence (GPL), ou les deux.",
     "label": "Composant",
+    "license_label": "Licence",
     "submit": "Rechercher",
     "empty_title": "Aucun composant trouvé",
-    "empty_text": "Essayez un nom plus court.",
+    "empty_text": "Essayez un nom ou une licence plus courts.",
     "caption": {
       "one": "{count} composant trouvé",
       "other": "{count} composants trouvés"
     },
     "component": "Composant",
     "version": "Version",
+    "license": "Licence",
+    "unknown_license": "Inconnue",
     "project": "Projet"
   },
   "settings": {

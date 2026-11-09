@@ -281,22 +281,29 @@ pub async fn load_finding(finding: i64) -> Result<FindingData, ServerFnError> {
 }
 
 #[server(endpoint = "search_components")]
-pub async fn search_components(query: String) -> Result<Vec<ComponentMatch>, ServerFnError> {
+pub async fn search_components(
+    query: String,
+    license: String,
+) -> Result<Vec<ComponentMatch>, ServerFnError> {
     let actor = actor().await?;
     let database = &context()?.database;
-    Ok(nanobom_domain::inventory::search(database, &actor, &query)
-        .await
-        .map_err(failure)?
-        .into_iter()
-        .map(|component| ComponentMatch {
-            organization_slug: component.organization_slug,
-            project_slug: component.project_slug,
-            purl: component.purl,
-            ecosystem: component.ecosystem,
-            name: component.name,
-            version: component.version,
-        })
-        .collect())
+    Ok(
+        nanobom_domain::inventory::search_by_license(database, &actor, &query, &license)
+            .await
+            .map_err(failure)?
+            .matches
+            .into_iter()
+            .map(|component| ComponentMatch {
+                organization_slug: component.organization_slug,
+                project_slug: component.project_slug,
+                purl: component.purl,
+                ecosystem: component.ecosystem,
+                name: component.name,
+                version: component.version,
+                license: component.license,
+            })
+            .collect(),
+    )
 }
 
 /// Session key of a token created by the previous request, shown once on the settings page.

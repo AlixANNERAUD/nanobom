@@ -420,6 +420,7 @@ struct ComponentBody {
     name: String,
     version: Option<String>,
     ecosystem: String,
+    license: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -515,6 +516,7 @@ fn finding_body(state: &AppState, finding: Finding) -> FindingBody {
             name: finding.component_name,
             version: finding.component_version,
             ecosystem: finding.ecosystem,
+            license: finding.license,
         },
         severity: finding.severity,
         cvss_score: finding.cvss_score,
@@ -773,6 +775,7 @@ async fn list_components(
             name: component.name,
             version: component.version,
             ecosystem: component.ecosystem,
+            license: component.license,
         })
         .collect();
     Ok(respond(&headers, &pagination.page(components)?))
@@ -786,10 +789,11 @@ struct ComponentMatchBody {
     name: String,
     version: Option<String>,
     ecosystem: String,
+    license: Option<String>,
 }
 
-/// `GET /api/components?q=…`: components by name (and version prefix) across the projects the
-/// caller sees, at most [`inventory::MAXIMUM_SEARCH_RESULTS`].
+/// `GET /api/components?q=…&license=…`: components by name (and version prefix), license or
+/// both across the projects the caller sees, at most [`inventory::MAXIMUM_SEARCH_RESULTS`].
 async fn search_components(
     State(state): State<AppState>,
     parameters: Result<Query<HashMap<String, String>>, QueryRejection>,
@@ -797,13 +801,15 @@ async fn search_components(
     session: AuthenticationSession,
 ) -> Result<Response, ApiError> {
     let Query(parameters) = parameters.map_err(query_error)?;
-    let query = parameters
-        .get("q")
-        .map(|query| query.trim())
-        .filter(|query| !query.is_empty())
-        .ok_or_else(|| invalid("q, the name to search for, is required"))?;
+    let text = |name: &str| parameters.get(name).map_or("", |value| value.trim());
+    let (query, license) = (text("q"), text("license"));
+    if query.is_empty() && license.is_empty() {
+        return Err(invalid(
+            "q, the name to search for, or license, the license to search for, is required",
+        ));
+    }
     let reader = reader(&state, &headers, &session).await?;
-    let found = inventory::search_results(&state.database, reader, query).await?;
+    let found = inventory::search_by_license(&state.database, reader, query, license).await?;
     let items = found
         .matches
         .into_iter()
@@ -814,6 +820,7 @@ async fn search_components(
             name: component.name,
             version: component.version,
             ecosystem: component.ecosystem,
+            license: component.license,
         })
         .collect();
     Ok(respond(

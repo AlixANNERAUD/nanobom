@@ -20,7 +20,7 @@ Every endpoint is a `GET`.
 | `/api/organizations/{organization}/projects/{project}/components` | The project's components from its latest SBOM, by package URL | ✓ |
 | `/api/organizations/{organization}/runs` | The latest runs that covered the organization, newest first | |
 | `/api/findings/{finding}` | One finding with its vulnerability, history and dependency paths | |
-| `/api/components?q={name}` | Components by name across the projects the caller sees | |
+| `/api/components?q={name}&license={license}` | Components by name, license or both across the projects the caller sees | |
 | `/api/openapi.json` | The OpenAPI description | |
 
 Slugs are case-insensitive. A project's findings as a CycloneDX VEX document come from the
@@ -100,7 +100,8 @@ A finding:
     "purl": "pkg:npm/lodash@4.17.20",
     "name": "lodash",
     "version": "4.17.20",
-    "ecosystem": "npm"
+    "ecosystem": "npm",
+    "license": "MIT"
   },
   "severity": "high",
   "cvss_score": 7.2,
@@ -131,6 +132,7 @@ A finding:
 
 | Field | |
 | --- | --- |
+| `component.license` | The component's license in the latest SBOM; `null` when it is not in it any more ([components](#projects-components-runs-and-search)) |
 | `severity` | The highest among the vulnerability's aliases at the latest run that reported it |
 | `exploitation` | Aggregated over the finding's CVEs; empty values when nothing is known, which is not the same as "not exploited" for a finding without a CVE |
 | `introduced_via` | The project's direct dependencies that lead to the component; empty when the SBOM's dependency graph does not say ([Dependency paths](../explanation/dependency-paths.md)) |
@@ -169,9 +171,19 @@ A project:
 | `known_exploited` | Open findings with a CVE in the CISA KEV catalog |
 | `url` | The project's page in the interface |
 
-A component is `purl`, `name`, `version` and `ecosystem`. A search result adds `organization`
-and `project`. `q` is a name, matched anywhere in the component's name, optionally followed by a
-space or `@` and a version prefix (`openssl 3.`, `lodash@4.17`), both ignoring case.
+A component is `purl`, `name`, `version`, `ecosystem` and `license`. `license` is an SPDX
+license expression as the SBOM gave it, possibly with free-text license names (`MIT`,
+`Apache-2.0 OR MIT`, `LicenseRef-Acme`); it is `null` when the SBOM gives none, and for
+components uploaded before nanobom read licenses until their project's next upload
+([how licenses are read](upload-api.md#the-document)). A search result adds `organization` and
+`project`.
+
+A search takes `q`, `license` or both, and refuses a request with neither (`422`):
+
+- `q` is a name, matched anywhere in the component's name, optionally followed by a space or
+  `@` and a version prefix (`openssl 3.`, `lodash@4.17`), both ignoring case;
+- `license` is matched anywhere in the component's license, ignoring case: `GPL` finds
+  `GPL-3.0-only` and `MIT OR LGPL-2.1-or-later`. Components without a license never match.
 
 A run is `id`, `trigger` (`scheduled`, `manual`, `upload`), `scope` (`all`, `organization`,
 `project`), `status` (`running`, `succeeded`, `failed`), `started_at`, `finished_at`, `error`,

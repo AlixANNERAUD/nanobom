@@ -210,6 +210,8 @@
     "component": "Component",
     "package": "Package",
     "version": "Version",
+    "license": "License",
+    "unknown_license": "Unknown",
     "fixed_in": "Fixed in",
     "no_fixed_version": "No fixed version known",
     "package_url": "Package URL",
@@ -245,17 +247,20 @@
   "search": {
     "title": "Search",
     "heading": "Search components",
-    "subtitle": "Find which projects use a package: a name, optionally followed by the start of a version (openssl 3.).",
+    "subtitle": "Find which projects use a package: a name, optionally followed by the start of a version (openssl 3.), part of a license (GPL), or both.",
     "label": "Component",
+    "license_label": "License",
     "submit": "Search",
     "empty_title": "No component found",
-    "empty_text": "Try a shorter name.",
+    "empty_text": "Try a shorter name or license.",
     "caption": {
       "one": "{count} component found",
       "other": "{count} components found"
     },
     "component": "Component",
     "version": "Version",
+    "license": "License",
+    "unknown_license": "Unknown",
     "project": "Project"
   },
   "settings": {

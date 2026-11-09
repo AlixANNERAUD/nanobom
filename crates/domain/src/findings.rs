@@ -25,13 +25,14 @@ use std::{collections::HashMap, str::FromStr};
 
 use chrono::{DateTime, FixedOffset, Utc};
 use nanobom_entity::{
-    finding_events, findings, organizations, projects, upload_tokens, users, vulnerabilities,
+    components, finding_events, findings, organizations, projects, upload_tokens, users,
+    vulnerabilities,
 };
 use nanobom_osv::{Severity, Vulnerability, schema::Reference};
 use packageurl::PackageUrl;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
-    QueryOrder, TransactionSession, TransactionTrait,
+    QueryOrder, QuerySelect, TransactionSession, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 
@@ -222,6 +223,9 @@ pub struct Finding {
     pub ecosystem: String,
     pub component_name: String,
     pub component_version: Option<String>,
+    /// The component's license per the latest SBOM; `None` when it does not give one, or when
+    /// the component is no longer in the project.
+    pub license: Option<String>,
     pub vulnerability_id: String,
     pub aliases: Vec<String>,
     pub summary: Option<String>,
@@ -280,6 +284,7 @@ fn view(
         project_slug,
         component_name,
         component_version,
+        license: None,
         ecosystem: finding.ecosystem,
         aliases: vulnerability
             .map(|vulnerability| vulnerability.aliases.clone())
@@ -381,14 +386,19 @@ async fn project_findings(
         })
         .collect();
     let mut exploitations = exploitation::for_findings(database, &keys).await?;
-    let graph = if findings.is_empty() {
-        Graph::default()
+    let (graph, licenses) = if findings.is_empty() {
+        (Graph::default(), HashMap::new())
     } else {
-        Graph::load(database, project_id).await?
+        (
+            Graph::load(database, project_id).await?,
+            licenses(database, project_id, None).await?,
+        )
     };
     for finding in &mut findings {
         finding.exploitation = exploitations.remove(&finding.id).unwrap_or_default();
         finding.introduced_via = graph.introduced_via(&finding.purl);
+        // Not `remove`: a component with several vulnerabilities has one finding for each.
+        finding.license = licenses.get(&finding.purl).cloned();
     }
     if filter.exploited_only {
         findings.retain(|finding| finding.exploitation.known_exploited);
@@ -416,6 +426,30 @@ async fn project_findings(
             .then(left.vulnerability_id.cmp(&right.vulnerability_id))
     });
     Ok(findings)
+}
+
+/// The licenses of a project's components, by package URL, of every component or of the one
+/// `purl` names; components without a license are left out.
+async fn licenses(
+    database: &impl ConnectionTrait,
+    project_id: i64,
+    purl: Option<&str>,
+) -> Result<HashMap<String, String>> {
+    let mut query = components::Entity::find()
+        .select_only()
+        .column(components::Column::Purl)
+        .column(components::Column::License)
+        .filter(components::Column::ProjectId.eq(project_id))
+        .filter(components::Column::License.is_not_null());
+    if let Some(purl) = purl {
+        query = query.filter(components::Column::Purl.eq(purl));
+    }
+    Ok(query
+        .into_tuple::<(String, String)>()
+        .all(database)
+        .await?
+        .into_iter()
+        .collect())
 }
 
 /// The ecosystems present among a project's findings, for filters. Requires
@@ -669,6 +703,9 @@ pub async fn detail(
             };
             let mut view = view(finding, project.slug, Some(&facts));
             view.introduced_via = graph.introduced_via(&view.purl);
+            view.license = licenses(database, project.id, Some(&view.purl))
+                .await?
+                .remove(&view.purl);
             view.exploitation = exploitation::for_cves(
                 database,
                 &exploitation::cve_ids(&view.vulnerability_id, &view.aliases),

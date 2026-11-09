@@ -16,6 +16,8 @@ pub struct Model {
     pub ecosystem: String,
     pub name: String,
     pub version: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub license: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

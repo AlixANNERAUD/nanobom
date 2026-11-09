@@ -74,6 +74,13 @@ In both formats:
 - The dependency graph is kept between the components stored. It is optional: without it, or
   without the project's own dependencies in it, findings show no path
   ([Dependency paths](../explanation/dependency-paths.md)).
+- Each component's license is kept as one SPDX license expression (`MIT`,
+  `Apache-2.0 OR MIT`), read as described below for each format. It is trimmed but neither
+  parsed nor validated, so it may hold free-text license names. A license longer than 1000
+  characters is dropped, and the component has no license, rather than cut into an expression
+  that names other licenses. When several components share a package URL, the first one's
+  license is kept. Licenses are replaced with the components at each upload; components
+  uploaded before nanobom read licenses have none until their project's next upload.
 
 ### CycloneDX
 
@@ -84,6 +91,14 @@ In both formats:
 - The graph comes from `dependencies`; the entry of `metadata.component` gives the project's
   direct dependencies.
 - The serial number (`serialNumber`) is recorded with the upload.
+- The license comes from the component's `licenses`. Each entry gives an `expression`, an SPDX
+  license identifier (`license.id`) or a free-text name (`license.name`, kept as written). One
+  entry gives the license. Several are joined with `AND`, sorted and without duplicates, with
+  compound expressions in parentheses: an `MIT` identifier and a `GPL-2.0-only OR BSD-3-Clause`
+  expression give `(GPL-2.0-only OR BSD-3-Clause) AND MIT`. CycloneDX does not say
+  whether several entries are alternatives or all apply; `AND` is the conservative reading,
+  since a component is then only as permissive as its most restrictive license. License
+  `text`, `url` and `evidence.licenses` are not read.
 - Entries of `vulnerabilities` with an `analysis.state` are VEX statements: they are imported
   into the project ([statements inside an SBOM](vex-api.md#statements-inside-an-sbom)). Entries
   without one, such as a scanner's results, are not read.
@@ -115,6 +130,10 @@ In both formats:
   package depends on ([why](../explanation/spdx.md#dependency-graph)).
 - An `SPDXID` given to several packages with different package URLs (or with and without
   one) is ambiguous: relationships naming it are ignored.
+- The license is the package's `licenseConcluded`, or its `licenseDeclared` when
+  `licenseConcluded` is missing, `NOASSERTION` or `NONE`. `NOASSERTION` or `NONE` in both means
+  no license is known. Expressions are kept as written, `LicenseRef-` identifiers included. A
+  license field that is not a string is ignored like a missing one.
 - The document namespace (`documentNamespace`) is recorded with the upload as its serial
   number.
 

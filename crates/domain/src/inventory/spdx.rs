@@ -1,8 +1,8 @@
 //! SPDX 2.2 and 2.3 JSON documents, mapped onto the same inventory as CycloneDX.
 //!
 //! The model below holds only the fields nanobom reads, and ignores the others: generators
-//! disagree on the rest of the schema (licenses, checksums, files), and a strict model would
-//! refuse documents for fields that do not matter here. For the same reason a `null` or
+//! disagree on the rest of the schema (checksums, files, license details), and a strict model
+//! would refuse documents for fields that do not matter here. For the same reason a `null` or
 //! missing field counts as absent, even where the specification requires it; a relationship
 //! missing one of its ends is ignored. No maintained crate parses SPDX leniently, and none
 //! parses SPDX 3.
@@ -12,6 +12,10 @@
 //!   first one when a package has several. Packages without one are skipped and counted, like CycloneDX
 //!   components without a purl. Files are not packages, and neither are packages whose
 //!   purpose is `FILE` or `OPERATING-SYSTEM`.
+//! - **Licenses** come from `licenseConcluded`, or `licenseDeclared` when the former is
+//!   missing, `NOASSERTION` or `NONE`. Either is already an SPDX license expression and is kept
+//!   as written, `LicenseRef-` identifiers included; `NOASSERTION` and `NONE` alone mean no
+//!   license is known. A value that is not a string is ignored, like a missing one.
 //! - **The project** is what the document describes (`DESCRIBES` relationships from the
 //!   document, `documentDescribes` in SPDX 2.2): a directory, an image or a repository. It is
 //!   not a component, like the CycloneDX `metadata.component`.
@@ -34,7 +38,9 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use serde::{Deserialize, Deserializer};
 
-use super::{Collector, DependencyEdge, ParsedSbom, SUPPORTED_SPDX_VERSIONS, capped};
+use super::{
+    Collector, DependencyEdge, ParsedSbom, SUPPORTED_SPDX_VERSIONS, bounded_license, capped,
+};
 use crate::{
     error::{Error, Result},
     problem::Problem,
@@ -67,6 +73,10 @@ struct Package {
     primary_package_purpose: Option<String>,
     #[serde(default, deserialize_with = "nullable")]
     external_refs: Vec<ExternalReference>,
+    #[serde(default, deserialize_with = "lenient_text")]
+    license_concluded: Option<String>,
+    #[serde(default, deserialize_with = "lenient_text")]
+    license_declared: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -92,6 +102,34 @@ where
     T: Deserialize<'de> + Default,
 {
     Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
+}
+
+/// Reads a string, and any other JSON value as absent.
+fn lenient_text<'de, D>(deserializer: D) -> std::result::Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    Ok(
+        match Option::<serde_json::Value>::deserialize(deserializer)? {
+            Some(serde_json::Value::String(text)) => Some(text),
+            _ => None,
+        },
+    )
+}
+
+/// The license of a package (see the [module](self)), within the bounds of
+/// [`super::MAXIMUM_LICENSE_LENGTH`].
+fn license(package: &Package) -> Option<String> {
+    fn known(value: Option<&str>) -> Option<&str> {
+        value.map(str::trim).filter(|value| {
+            !value.is_empty()
+                && !value.eq_ignore_ascii_case("NOASSERTION")
+                && !value.eq_ignore_ascii_case("NONE")
+        })
+    }
+    known(package.license_concluded.as_deref())
+        .or_else(|| known(package.license_declared.as_deref()))
+        .and_then(bounded_license)
 }
 
 /// Parses an SPDX JSON document whose `spdxVersion` is `version`.
@@ -133,7 +171,12 @@ pub(super) fn parse(document: &[u8], version: String) -> Result<ParsedSbom> {
                 ) && reference.reference_type.as_deref() == Some("purl")
             })
             .and_then(|reference| reference.reference_locator.as_deref());
-        let kept = collector.add(&package.name, package.version_info.clone(), purl);
+        let kept = collector.add(
+            &package.name,
+            package.version_info.clone(),
+            purl,
+            license(package),
+        );
         match (id, kept) {
             (Some(id), Some(purl)) => references.keep(id, purl),
             (Some(id), None) => references.discard(id, true),

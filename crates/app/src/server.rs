@@ -319,6 +319,7 @@ pub fn finding(value: nanobom_domain::findings::Finding) -> model::FindingRow {
         id: value.id,
         component_name: value.component_name,
         component_version: value.component_version,
+        license: value.license,
         ecosystem: value.ecosystem,
         purl: value.purl,
         vulnerability_id: value.vulnerability_id,
