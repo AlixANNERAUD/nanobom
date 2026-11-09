@@ -61,7 +61,8 @@ pub struct RunRequest {
     pub triggered_by: Option<i64>,
 }
 
-/// Longest time the exploitation data is refreshed for after a run, while uploads wait.
+/// Longest time the exploitation data is refreshed for after a run, while uploads wait. Each
+/// feed has its own, shorter budget within the refresh, so a stalled feed does not use it up.
 pub const EXPLOITATION_REFRESH_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Where notifications go, and how long the work after a run may hold waiting uploads.
@@ -300,9 +301,17 @@ impl<S: VulnerabilitySource + 'static> Worker<S> {
                     known_exploited = summary.known_exploited,
                     "exploitation data refreshed"
                 );
-                // EPSS was refreshed, but the KEV catalog is not current: still a failure.
-                if let Some(error) = summary.kev_error {
-                    tracing::warn!(%error, "refreshing exploitation data failed");
+                // One feed was stored, but the other is not current: still a failure, counted
+                // once per refresh.
+                let errors = [("KEV", summary.kev_error), ("EPSS", summary.epss_error)];
+                let mut failed = false;
+                for (feed, error) in errors {
+                    if let Some(error) = error {
+                        tracing::warn!(%error, feed, "refreshing exploitation data failed");
+                        failed = true;
+                    }
+                }
+                if failed {
                     metrics::record_exploitation_refresh_failure();
                 }
             }

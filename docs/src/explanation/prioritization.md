@@ -60,14 +60,19 @@ The two feeds fail separately:
 - when the KEV catalog cannot be downloaded, the copy in memory is used even if it is older than
   12 hours, and without one (just after a restart) the KEV data stored for each CVE is kept as it
   was; EPSS scores are refreshed either way;
-- when EPSS cannot be reached, nothing is written: the previous data is kept for every CVE.
+- when EPSS cannot be reached, the KEV data is still written from a freshly downloaded catalog,
+  so a newly exploited CVE is notified and fails `fail_on=exploited` gates during an EPSS
+  outage; the EPSS scores stored for each CVE are kept as they were;
+- when both fail, nothing is written: the previous data is kept for every CVE.
 
-The run itself is not affected by a failed refresh. Failures, including a KEV failure that still
-refreshed EPSS, are logged (`refreshing exploitation data failed`) and counted by
-`nanobom_exploitation_refresh_failures_total`.
+The run itself is not affected by a failed refresh. Failures, including a failure of one feed
+while the other was stored, are logged (`refreshing exploitation data failed`) and counted once
+per refresh by `nanobom_exploitation_refresh_failures_total`.
 
-Two bounds keep an outage of those services from slowing nanobom down:
+Three bounds keep an outage of those services from slowing nanobom down:
 
+- the KEV download and the EPSS requests each get 25 seconds, retries included; a feed that
+  does not answer in time has failed, and the other is still refreshed and stored;
 - a refresh taking more than 60 seconds is abandoned (and counted as failed), because uploads
   waiting for their evaluation are answered only after it;
 - after a failed download of the KEV catalog, it is not asked again for 5 minutes, so a series

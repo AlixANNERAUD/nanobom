@@ -226,6 +226,39 @@ async fn a_kev_outage_still_refreshes_epss_and_counts_as_a_failure() {
 }
 
 #[tokio::test]
+async fn an_epss_outage_still_stores_kev_and_counts_as_one_failure() {
+    let feeds = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/kev.json"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"vulnerabilities": [
+                {"cveID": "CVE-2021-23337", "dateAdded": "2022-03-01"}
+            ]})),
+        )
+        .mount(&feeds)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/epss"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&feeds)
+        .await;
+    let kev_url = format!("{}/kev.json", feeds.uri());
+    let epss_url = format!("{}/epss", feeds.uri());
+    let server = server_with_exploitation(&["--kev-url", &kev_url, "--epss-url", &epss_url]).await;
+    let failures = metric(&server, REFRESH_FAILURES).await;
+    upload_lodash(&server).await;
+
+    let row = exploitation::Entity::find_by_id("CVE-2021-23337")
+        .one(&server.database)
+        .await
+        .unwrap()
+        .expect("the KEV data is stored");
+    assert!(row.known_exploited);
+    assert_eq!(row.epss_checked_at, None, "EPSS was not checked");
+    assert_eq!(metric(&server, REFRESH_FAILURES).await, failures + 1.0);
+}
+
+#[tokio::test]
 async fn gauges_count_known_exploited_findings_and_stale_projects() {
     let feeds = MockServer::start().await;
     Mock::given(method("GET"))
