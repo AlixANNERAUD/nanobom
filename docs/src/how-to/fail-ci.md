@@ -8,9 +8,10 @@ codes are in the [upload API reference](../reference/upload-api.md#fail_on-thres
 
 Add the threshold to the upload:
 
-- with the GitHub Action, the input `fail-on: high`;
+- with the GitHub Action or the [GitLab CI template](upload-from-ci.md#gitlab-ci), the input
+  `fail-on: high`;
 - with any other client, the query parameter `fail_on=high`, as in the
-  [curl and GitLab examples](upload-from-ci.md#any-ci-with-curl).
+  [curl example](upload-from-ci.md#any-ci-with-curl).
 
 `exploited` fails on known exploited findings whatever their severity; it needs exploitation data,
 and is refused with a `422` on an instance with `NANOBOM_EXPLOITATION_DATA=false` rather than
@@ -21,8 +22,8 @@ fails on components whose license the organization forbids
 ([Enforce a license policy](license-policy.md#fail-ci-on-forbidden-licenses)).
 
 The client must treat any status from 400 as a failure while printing the body, which lists the
-findings that crossed the threshold in `evaluation.findings`: the action does it, and so do
-`curl --fail-with-body` and `wget --content-on-error`.
+findings that crossed the threshold in `evaluation.findings`: the action and the GitLab template
+do it, and so do `curl --fail-with-body` and `wget --content-on-error`.
 
 ## Before turning it on
 

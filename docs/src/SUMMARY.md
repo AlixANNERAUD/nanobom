@@ -36,6 +36,7 @@
 - [Configuration](reference/configuration.md)
 - [Command line](reference/command-line.md)
 - [Upload API](reference/upload-api.md)
+- [GitLab CI template](reference/gitlab-template.md)
 - [Project versions](reference/versions.md)
 - [VEX API](reference/vex-api.md)
 - [Read API](reference/read-api.md)

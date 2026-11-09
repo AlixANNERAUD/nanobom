@@ -1,21 +1,34 @@
-# Uploads the SBOM of a container image to nanobom from GitLab CI, with Syft.
+# Uploads the SBOM of the container image built for each tag to nanobom from GitLab CI, with the
+# nanobom template: https://alixanneraud.github.io/nanobom/reference/gitlab-template.html
 # CI/CD variables: NANOBOM_URL, and NANOBOM_TOKEN (masked) holding an upload token.
 #
-# fail_on=high makes the job fail (HTTP 409) when the image has open findings of high
-# severity or above once evaluated; use critical, medium, low or exploited (known exploited
-# only) instead. Remove fail_on from the URL to only record the SBOM.
-sbom:
-  stage: deploy
-  image:
-    name: anchore/syft:latest
-    entrypoint: [""]
+# Replace vX.Y.Z with a nanobom release. fail-on: high makes the job fail when the image has
+# open findings of high severity or above once evaluated; use critical, medium, low, exploited
+# (known exploited only) or license (a forbidden license), or several separated by commas.
+# Remove it to only record the SBOM.
+include:
+  - remote: https://raw.githubusercontent.com/AlixANNERAUD/nanobom/vX.Y.Z/ci/gitlab/nanobom.yml
+    inputs:
+      organization: acme
+      scan-image: $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG
+      stage: deploy
+      fail-on: high
+
+stages: [build, deploy]
+
+build-image:
+  stage: build
+  image: docker:28
+  services: [docker:28-dind]
   rules:
     - if: $CI_COMMIT_TAG
   script:
-    - syft "$CI_REGISTRY_IMAGE:$CI_COMMIT_TAG" --output cyclonedx-json=sbom.json
-    - >
-      wget --quiet --output-document=- --content-on-error --method=PUT
-      --header="Authorization: Bearer $NANOBOM_TOKEN"
-      --header="Content-Type: application/json"
-      --body-file=sbom.json
-      "$NANOBOM_URL/api/organizations/acme/projects/$CI_PROJECT_NAME/sbom?source_commit=$CI_COMMIT_SHA&image_tag=$CI_COMMIT_TAG&fail_on=high"
+    - echo "$CI_REGISTRY_PASSWORD" | docker login --username "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - docker build --tag "$CI_REGISTRY_IMAGE:$CI_COMMIT_TAG" .
+    - docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_TAG"
+
+# The job the template adds, run for tags only, once the image is pushed.
+nanobom:
+  needs: [build-image]
+  rules:
+    - if: $CI_COMMIT_TAG
