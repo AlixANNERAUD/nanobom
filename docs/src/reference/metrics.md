@@ -22,7 +22,7 @@ about a particular organization.
 | `nanobom_run_failures_total` | counter | Runs that could not complete |
 | `nanobom_run_duration_seconds` | histogram | Duration of runs |
 | `nanobom_osv_request_errors_total{kind}` | counter | Failed requests to OSV, retries included; `kind` is `status` (an error status) or `request` (network error or unreadable answer) |
-| `nanobom_exploitation_refresh_failures_total` | counter | Refreshes of exploitation data that failed or were abandoned |
+| `nanobom_exploitation_refresh_failures_total` | counter | Refreshes of exploitation data that failed or were abandoned, including those where only one of KEV and EPSS failed; a refresh counts once even when both failed |
 | `nanobom_webhook_deliveries_total{outcome}` | counter | Webhook delivery attempts, by outcome: `delivered`, `retried` (the attempt failed and another is scheduled) or `abandoned` (the attempt failed and no retry follows: refused by the receiver, or the last retry) |
 
 Gauges are computed from the database at startup and after each run;
@@ -53,7 +53,8 @@ detail from nanobom's own crates.
 | `webhook delivery failed` | warn | A webhook (an organization's, or the failure webhook) did not answer with a `2xx`; `attempt` and `status` say which attempt and why. See [Delivery](webhooks.md#delivery) for retries |
 | `a stage of a run panicked; the worker continues` | error | A bug stopped a run, or the work after it; the run is recorded as failed |
 | `a run interrupted by a restart is recorded as failed` | warn | nanobom was stopped during a run; the run is closed at startup and sent to the failure webhook |
-| `refreshing exploitation data failed` | warn | KEV or EPSS could not be downloaded |
+| `refreshing exploitation data failed` | warn | KEV or EPSS could not be downloaded, or did not answer within its 25 seconds; `feed` names it when the other feed was still stored |
+| `the KEV catalog could not be downloaded; using the copy in memory` | warn | A KEV outage: the catalog downloaded `hours` ago is used instead |
 | `cross-site request refused` | warn | A form submission came from another origin, often a wrong `NANOBOM_PUBLIC_URL` |
 | `OpenID Connect sign-in refused` | warn | A single sign-on attempt failed; `error` says why |
 | `starting the OpenID Connect sign-in failed` | error | The sign-in could not start, for example because discovery failed; `error` says why |
