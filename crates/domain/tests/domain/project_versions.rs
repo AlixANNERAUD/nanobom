@@ -594,6 +594,139 @@ async fn a_new_version_inherits_the_triage_of_the_latest() {
     assert!(outcome.version_created);
 }
 
+/// The status of each finding of a version, by package URL.
+async fn statuses(fixture: &Fixture, project: i64, version: &str) -> Vec<(String, Status)> {
+    let mut statuses: Vec<(String, Status)> = fixture
+        .findings(project, version)
+        .await
+        .into_iter()
+        .map(|finding| (finding.purl, finding.status))
+        .collect();
+    statuses.sort_by(|left, right| left.0.cmp(&right.0));
+    statuses
+}
+
+/// Runs while `during` happens, once the run has listed what it evaluates and waits on the
+/// vulnerability source.
+async fn run_while(fixture: &Fixture, during: impl Future<Output = ()>) -> RunOutcome {
+    fixture.source.pause();
+    let (run, ()) = tokio::join!(fixture.run(), async {
+        fixture.source.query_started().await;
+        during.await;
+        fixture.source.resume();
+    });
+    run
+}
+
+#[tokio::test]
+async fn a_version_made_active_during_a_run_waits_for_the_next() {
+    let fixture = Fixture::new().await;
+    let project = fixture
+        .upload(Some("1.0"), None, &[LODASH, MINIMIST])
+        .await
+        .project_id;
+    fixture.upload(Some("2.0"), None, &[EXPRESS]).await;
+    fixture.run().await;
+    let minimist = fixture
+        .findings(project, "1.0")
+        .await
+        .into_iter()
+        .find(|finding| finding.purl == MINIMIST)
+        .unwrap();
+    findings::ignore(
+        &fixture.database,
+        &fixture.owner,
+        minimist.id,
+        "not reachable",
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    versions::set_active(&fixture.database, &fixture.owner, project, "1.0", false)
+        .await
+        .unwrap();
+    let before = statuses(&fixture, project, "1.0").await;
+    assert_eq!(
+        before,
+        [
+            (LODASH.to_owned(), Status::Open),
+            (MINIMIST.to_owned(), Status::Ignored)
+        ]
+    );
+
+    // The run listed its versions before 1.0 became active, so it has none of its components
+    // and leaves it alone rather than fixing every finding.
+    let run = run_while(&fixture, async {
+        versions::set_active(&fixture.database, &fixture.owner, project, "1.0", true)
+            .await
+            .unwrap();
+    })
+    .await;
+    assert!(run.succeeded(), "{:?}", run.error);
+    assert_eq!(run.new_findings, Vec::new());
+    assert_eq!(run.fixed_findings, 0);
+    assert_eq!(statuses(&fixture, project, "1.0").await, before);
+
+    // The next run evaluates it, finding the same, so announcing nothing.
+    let run = fixture.run().await;
+    assert_eq!(run.new_findings, Vec::new());
+    assert_eq!(run.fixed_findings, 0);
+    assert_eq!(statuses(&fixture, project, "1.0").await, before);
+}
+
+#[tokio::test]
+async fn a_version_created_during_a_run_waits_for_the_next() {
+    let fixture = Fixture::new().await;
+    let project = fixture
+        .upload(Some("1.0"), None, &[LODASH, MINIMIST])
+        .await
+        .project_id;
+    fixture.run().await;
+    let minimist = fixture
+        .findings(project, "1.0")
+        .await
+        .into_iter()
+        .find(|finding| finding.purl == MINIMIST)
+        .unwrap();
+    findings::ignore(
+        &fixture.database,
+        &fixture.owner,
+        minimist.id,
+        "not reachable",
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    let expected = [
+        (LODASH.to_owned(), Status::Open),
+        (MINIMIST.to_owned(), Status::Ignored),
+    ];
+
+    // 2.0 inherits the findings of 1.0 while the run waits; the run, which listed 1.0 only,
+    // leaves 2.0 alone instead of fixing what it inherited.
+    let run = run_while(&fixture, async {
+        assert!(
+            fixture
+                .upload(Some("2.0"), None, &[LODASH, MINIMIST])
+                .await
+                .version_created
+        );
+    })
+    .await;
+    assert!(run.succeeded(), "{:?}", run.error);
+    assert_eq!(run.new_findings, Vec::new());
+    assert_eq!(run.fixed_findings, 0);
+    assert_eq!(statuses(&fixture, project, "2.0").await, expected);
+
+    let run = fixture.run().await;
+    assert_eq!(run.new_findings, Vec::new());
+    assert_eq!(run.fixed_findings, 0);
+    assert_eq!(statuses(&fixture, project, "2.0").await, expected);
+    assert_eq!(statuses(&fixture, project, "1.0").await, expected);
+}
+
 /// Enables a JSON webhook for every finding.
 async fn webhook(fixture: &Fixture) {
     notifications::set(

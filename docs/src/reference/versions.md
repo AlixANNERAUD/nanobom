@@ -42,7 +42,9 @@ Staleness stays per project: an inactive version does not make its project stale
 Changing versions takes the permission to delete projects: admins and owners
 ([roles](accounts.md)); viewers and members see the **Versions** table without its actions.
 There is no API to change versions besides uploads. A version made active in the interface is
-checked at once by a run of its project; otherwise the next run catches up.
+checked at once by a run of its project; otherwise the next run catches up. A run evaluates the
+versions active when it starts: a version made active, or created by an upload, while a run is in
+progress waits for the next run, and keeps its findings as they are until then.
 
 Deleting a version deletes its components, dependency graph, upload history and findings with
 their history, in one transaction. Other versions keep theirs, including findings they

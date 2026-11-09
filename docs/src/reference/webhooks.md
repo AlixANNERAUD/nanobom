@@ -235,9 +235,11 @@ a new version inherits from the latest one when it is created are not new, and a
 [Inactive versions](versions.md#states) are not evaluated, so they send nothing, known exploited
 findings included; made active again, a version's next run sends what it missed.
 
-Rarely, a run already in progress when an upload creates a version announces an advisory for
-both versions though the new one inherited the finding, or announces again, for the new
-version, a finding that just became known exploited.
+Rarely, an advisory is announced twice when an upload creates a version during a run. The run
+in progress leaves the new version to the next run ([versions](versions.md#changes)),
+so an advisory it finds in the latest version after the new one inherited that version's
+findings is announced again, for the new version, by the next run; so is a finding that just
+became known exploited.
 
 ```json
 {
