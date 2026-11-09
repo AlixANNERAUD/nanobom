@@ -14,6 +14,7 @@
 - [Generate an SBOM](how-to/generate-sbom.md)
 - [Upload from CI](how-to/upload-from-ci.md)
 - [Upload with Dependency-Track clients](how-to/dependency-track-clients.md)
+- [Track several versions of a product](how-to/track-versions.md)
 - [Fail CI on vulnerabilities](how-to/fail-ci.md)
 - [Enforce a license policy](how-to/license-policy.md)
 - [Triage findings](how-to/triage.md)

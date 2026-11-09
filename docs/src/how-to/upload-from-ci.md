@@ -12,6 +12,8 @@ Upload from the builds that produce what you ship (the default branch, release t
 every pull request: each upload replaces the project's components, so an SBOM of a feature
 branch would hide the state of production until the next upload from `main`. To check a pull
 request without replacing anything, use a separate project (`web-pr`), or none at all.
+Maintenance branches that ship next to the default one upload to their own version of the
+project: see [Track several versions of a product](track-versions.md).
 
 ## Create an upload token
 

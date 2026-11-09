@@ -16,17 +16,62 @@ Every endpoint is a `GET`.
 | --- | --- | --- |
 | `/api/organizations` | The organizations the caller sees, by name | |
 | `/api/organizations/{organization}/projects` | The organization's projects, by slug, with their open findings by severity | |
-| `/api/organizations/{organization}/projects/{project}/findings` | The project's findings, filtered, in the project page's order | ✓ |
-| `/api/organizations/{organization}/projects/{project}/components` | The project's components from its latest SBOM, by package URL | ✓ |
+| `/api/organizations/{organization}/projects/{project}/versions` | The project's [versions](#versions), newest first | |
+| `/api/organizations/{organization}/projects/{project}/findings` | The findings of a project version, filtered, in the project page's order | ✓ |
+| `/api/organizations/{organization}/projects/{project}/components` | The components of a project version from its latest SBOM, by package URL | ✓ |
 | `/api/organizations/{organization}/runs` | The latest runs that covered the organization, newest first | |
 | `/api/findings/{finding}` | One finding with its vulnerability, history and dependency paths | |
 | `/api/components?q={name}&license={license}` | Components by name, license or both across the projects the caller sees | |
 | `/api/organizations/{organization}/license-policy` | The organization's [license policy](license-policy.md) | |
-| `/api/organizations/{organization}/projects/{project}/license-violations` | The project's components whose license the policy forbids or warns about, forbidden first | ✓ |
+| `/api/organizations/{organization}/projects/{project}/license-violations` | The components of a project version whose license the policy forbids or warns about, forbidden first | ✓ |
 | `/api/openapi.json` | The OpenAPI description | |
 
 Slugs are case-insensitive. A project's findings as a CycloneDX VEX document come from the
 [VEX API](vex-api.md), with the same authentication.
+
+## Versions
+
+Findings, components and license violations belong to one [version](../explanation/concepts.md#versions)
+of a project. Their endpoints take `version`, the version's name (case-sensitive); without it,
+they return the **latest** version. An empty `version=` names the unnamed version, the one
+uploads without a version go to. An unknown version is `404`, like an unknown project.
+
+```text
+GET /api/organizations/{organization}/projects/{project}/findings?version=2.4
+```
+
+`/versions` lists them, newest first:
+
+```json
+{
+  "items": [
+    {
+      "name": "2.4",
+      "latest": true,
+      "active": true,
+      "created_at": "2026-11-09T08:12:40Z",
+      "last_upload_at": "2026-11-09T08:12:40Z",
+      "open": {"critical": 0, "high": 1, "medium": 2, "low": 0, "unknown": 0}
+    },
+    {
+      "name": "",
+      "latest": false,
+      "active": true,
+      "created_at": "2026-10-02T14:03:11Z",
+      "last_upload_at": "2026-11-08T03:00:12Z",
+      "open": {"critical": 0, "high": 1, "medium": 3, "low": 1, "unknown": 0}
+    }
+  ]
+}
+```
+
+| Field | |
+| --- | --- |
+| `name` | The version name; `""` for the unnamed version |
+| `latest` | Whether it is the latest version, the one read when a request names none; exactly one version of a project is |
+| `active` | Whether runs evaluate it |
+| `last_upload_at` | The version's latest upload; `null` before the first |
+| `open` | The version's open findings by severity |
 
 ## Authentication
 
@@ -85,6 +130,7 @@ GET /api/organizations/{organization}/projects/{project}/findings?status=open&se
 | `severity` | A comma-separated list of `critical`, `high`, `medium`, `low`, `unknown` | Any |
 | `exploited` | `true`: only findings with a CVE in the CISA KEV catalog | `false` |
 | `ecosystem` | The package URL type: `npm`, `cargo`, `pypi`… | Any |
+| `version` | A [version](#versions) name | The latest version |
 
 The order is the project page's: known exploited first, then by severity, EPSS score, CVSS
 score, component name and vulnerability ([Prioritization](../explanation/prioritization.md)).
@@ -95,6 +141,7 @@ A finding:
 {
   "id": 17,
   "project": "web",
+  "version": "2.4",
   "vulnerability_id": "GHSA-35jh-r3h4-6jhm",
   "aliases": ["CVE-2021-23337"],
   "summary": "Command Injection in lodash",
@@ -134,6 +181,7 @@ A finding:
 
 | Field | |
 | --- | --- |
+| `version` | The project version the finding belongs to; `""` for the unnamed version |
 | `component.license` | The component's license in the latest SBOM; `null` when it is not in it any more ([components](#projects-components-runs-and-search)) |
 | `severity` | The highest among the vulnerability's aliases at the latest run that reported it |
 | `exploitation` | Aggregated over the finding's CVEs; empty values when nothing is known, which is not the same as "not exploited" for a finding without a CVE |
@@ -155,7 +203,7 @@ in a list, plus:
 | `fixed_versions` | Versions of the package that fix the vulnerability, per the OSV record |
 | `references` | The advisory's links: `{"type": "ADVISORY", "url": "…"}` |
 | `ignored_by`, `ignored_by_token` | The member, or the token of a VEX import, that ignored the finding, while it is ignored |
-| `events` | The history, oldest first: `kind` (`opened`, `fixed`, `reopened`, `ignored`, `restored`, `ignore_expired`), `created_at`, `user` or `token`, `reason`, `justification`, `run_id` |
+| `events` | The history, oldest first: `kind` (`opened`, `fixed`, `reopened`, `ignored`, `restored`, `ignore_expired`, `inherited`), `created_at`, `user` or `token`, `reason`, `justification`, `run_id`. An `inherited` event starts the history of a finding copied into a new version: its `reason` is the name of the version it was copied from (`""` for the unnamed version), and `token` the token of the upload that created the version |
 | `dependency_paths` | `{"paths": [[…]], "more": 0, "partial": false}`, each path from a direct dependency to the component; `null` when the SBOM does not say which components are direct dependencies |
 | `affected_components` | The same vulnerability in other projects the caller sees: `finding_id`, `organization`, `project`, `purl`, `status` |
 
@@ -168,12 +216,17 @@ A project:
 | `slug`, `name` | |
 | `last_upload_at` | The latest upload; `null` before the first |
 | `stale` | No SBOM for longer than `NANOBOM_STALE_AFTER_DAYS` |
-| `open` | Open findings by severity: `critical`, `high`, `medium`, `low`, `unknown` |
-| `ignored` | Ignored findings |
-| `known_exploited` | Open findings with a CVE in the CISA KEV catalog |
+| `open` | Open issues by severity: `critical`, `high`, `medium`, `low`, `unknown` |
+| `ignored` | Ignored issues |
+| `known_exploited` | Open issues with a CVE in the CISA KEV catalog |
+
+The counts cover the project's active versions, by **issue**: a vulnerability of a package
+counts once, at its highest severity, however many versions (or versions of the package) have
+it. An issue is open when it is open in any version, ignored when it is ignored in every version
+that has it open or ignored. Each version's own counts are in [`/versions`](#versions).
 | `url` | The project's page in the interface |
 
-A component is `purl`, `name`, `version`, `ecosystem` and `license`. `license` is an SPDX
+A component is `purl`, `name`, `version` (of the package), `ecosystem` and `license`. `license` is an SPDX
 license expression as the SBOM gave it, possibly with free-text license names (`MIT`,
 `Apache-2.0 OR MIT`, `LicenseRef-Acme`); it is `null` when the SBOM gives none, and for
 components uploaded before nanobom read licenses until their project's next upload
@@ -220,11 +273,11 @@ the API reads it:
 | `rules` | `license` (canonical SPDX identifier or `LicenseRef-…`) and `action`, by identifier |
 
 A page of violations adds `active`, `forbidden` and `warned` (the number of components with
-each verdict across the project; `total` is their sum) to the usual page fields. Each item is
+each verdict across the project version; `total` is their sum) to the usual page fields. Each item is
 `component` (as above), `verdict` (`forbid` or `warn`) and `licenses`, the identifiers that
 lead to the verdict, empty when the action for unknown licenses alone gives it. Items are forbidden components first,
 then warned ones, each by name then package URL. Violations are computed at each request from
-the current policy and the latest SBOM ([how](license-policy.md#evaluation)); without an active
+the current policy and the version's latest SBOM ([how](license-policy.md#evaluation)); without an active
 policy the list is empty and `active` is `false`.
 
 ## Caching
@@ -249,7 +302,7 @@ Errors are English JSON, `{"error": "…"}`, as on the upload API.
 | `304` | `If-None-Match` matches | |
 | `401` | No token and no session, or a token that is unknown or revoked. The response has a `WWW-Authenticate: Bearer` header | `sign in, or send a token in the Authorization header (Bearer) or in X-Api-Key` |
 | `400` | A path segment that is not valid percent-encoded UTF-8 | A description of the problem |
-| `404` | Missing, or out of the caller's reach | `not found` |
+| `404` | Missing (a project version included), or out of the caller's reach | `not found` |
 | `422` | An invalid query parameter | For example `limit must be a number from 1 to 500`, `severity must be a comma-separated list of critical, high, medium, low and unknown`, `q, the name to search for, is required`, `offset is not supported on runs: use limit, up to 100` |
 | `500` | A database error | `internal error` |
 

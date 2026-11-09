@@ -46,7 +46,7 @@ whatever the language of the interface, since nanobom does not know the readers'
 | Block | Content |
 | --- | --- |
 | `header` | `Acme: 3 new findings (highest severity: critical, 1 known exploited)` |
-| one `section` per finding, at most 10 | `*<finding page\|vulnerability id>* - severity - reopened - known exploited`, then the component's package URL in code and the project, the OSV summary, and `Introduced via` the project's direct dependencies (at most 5) when the SBOM's dependency graph says |
+| one `section` per finding, at most 10 | `*<finding page\|vulnerability id>* - severity - reopened - known exploited`, then the component's package URL in code and the project, `Versions:` the project versions (at most 5, `unnamed version` for the unnamed one) when the project names versions, the OSV summary, and `Introduced via` the project's direct dependencies (at most 5) when the SBOM's dependency graph says |
 | `context` | `N more findings not shown.` when some were left out, and a link to the organization |
 
 `projects.stale`: a `header` (`Acme: 2 projects stopped sending SBOMs`), one `section` per project
@@ -98,7 +98,7 @@ in May 2026:
 
 The `body` has the same content as the Slack message, in English: a bold title, then one
 container per finding or project (at most 10) with the vulnerability identifier linking to its
-page, its tags, the component and project, the summary and the `Introduced via` line, and a last
+page, its tags, the component and project, the `Versions:` line, the summary and the `Introduced via` line, and a last
 line counting what was left out. Known exploited findings are in the card's attention color. The
 button opens the organization's page.
 
@@ -132,7 +132,9 @@ events are also emailed to its recipients:
   organization and the number of findings or projects), the highest severity and the number of
   known exploited findings, then up to 50 findings, each with its identifier linking to its page,
   its severity and tags (`reopened`, `known exploited`, `newly known exploited`), the component and
-  project, the summary and the direct dependencies that introduce it; for stale projects, each
+  project, the project versions when the project names versions (`unnamed version`, or
+  `version sans nom` in French, for the unnamed one), the summary and the direct dependencies
+  that introduce it; for stale projects, each
   project linking to its page with the time of its last SBOM. A line counts the items left out,
   a link opens the organization, and a footer says why the reader gets the email and links to
   the organization's settings.
@@ -223,6 +225,12 @@ listing its findings that are:
 With **Only known exploited vulnerabilities**, only the known exploited ones among them are sent.
 Nothing is sent when nothing remains after filtering. Ignored findings are never sent.
 
+A project with several [versions](../explanation/concepts.md#versions) has one finding per
+version. They are sent as **one entry per project and vulnerability**, with the versions it
+stands for in `versions`: a new advisory against a dependency five versions share is one entry,
+not five. Findings a new version inherits from the latest one when it is created are not new,
+and are never sent.
+
 ```json
 {
   "event": "findings.new",
@@ -251,6 +259,7 @@ Nothing is sent when nothing remains after filtering. Ignored findings are never
       "epss": 0.0149,
       "epss_percentile": 0.78,
       "introduced_via": ["web-framework"],
+      "versions": ["2.4", "3.0"],
       "url": "https://nanobom.example.org/findings/17"
     }
   ]
@@ -261,7 +270,7 @@ Nothing is sent when nothing remains after filtering. Ignored findings are never
 | --- | --- |
 | `organization` | Slug, display name and page of the organization |
 | `run` | The run that found them: identifier, `trigger` (`upload`, `scheduled` or `manual`) and start time |
-| `count` | Number of entries in `findings` |
+| `count` | Number of entries in `findings`, one per project and vulnerability |
 | `highest_severity` | The highest severity among them |
 | `known_exploited_count` | How many of them are known exploited |
 | `findings[].project` | Project slug |
@@ -276,6 +285,7 @@ Nothing is sent when nothing remains after filtering. Ignored findings are never
 | `findings[].kev_due_date` | CISA's due date, or `null` |
 | `findings[].epss`, `epss_percentile` | EPSS score and percentile, from 0 to 1, or `null` |
 | `findings[].introduced_via` | The names of the project's direct dependencies that lead to the component, sorted; the component's own name when it is one; empty when the SBOM's dependency graph does not say ([Dependency paths](../explanation/dependency-paths.md)) |
+| `findings[].versions` | The names of the project versions the entry stands for, sorted; `""` is the unnamed version, the only one of a project that never names versions. `component`, `introduced_via` and `url` are those of the latest version's finding when the latest version is among them, of the first one otherwise; `severity`, `cvss_score` and `known_exploited` are the highest among them, and `reason` the first of `new`, `reopened`, `exploited` |
 | `findings[].url` | The finding's page |
 
 Every known exploited open finding of a run's scope is marked as notified once that run is over,

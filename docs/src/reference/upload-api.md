@@ -8,9 +8,9 @@ Authorization: Bearer nanobom_…
 ```
 
 The body is the CycloneDX or SPDX JSON document, as is; the `Content-Type` header is not
-checked, and a multipart form is not read. One request replaces the project's components with
-those of the document and records the upload in the project's history. The project is created
-if it does not exist and the token allows it.
+checked, and a multipart form is not read. One request replaces the components of one
+[version](#versions) of the project with those of the document and records the upload in the
+project's history. The project is created if it does not exist and the token allows it.
 
 Organization and project slugs are case-insensitive (`Web` and `web` are the same project). A new
 project's slug must be 1 to 64 characters among lower-case letters, digits, `.`, `_` and `-`,
@@ -141,14 +141,46 @@ In both formats:
 
 | Parameter | Value | Effect |
 | --- | --- | --- |
+| `version` | 1 to 64 characters among letters, digits, `.`, `_`, `+`, `/` and `-` | The [project version](#versions) the SBOM describes; without it, the unnamed version |
+| `latest` | `true` or `false` | `true` makes the version the latest; `false` keeps a version this upload creates from becoming the latest |
 | `source_commit` | text, up to 300 characters | The commit the SBOM was built from, shown in the upload history |
 | `image_tag` | text, up to 300 characters | The container image tag the SBOM describes, shown in the upload history |
 | `wait` | `true` or `false` | Wait for the project's evaluation and return it |
 | `fail_on` | `critical`, `high`, `medium`, `low`, `exploited` or `license`, or several separated by commas | Fail the upload when one of these thresholds is reached; implies `wait` |
 
 All are optional. Empty `source_commit` and `image_tag` count as absent; control characters are
-refused. Each `fail_on` value is trimmed and case-insensitive (`fail_on=high,license`); `wait`
-accepts exactly `true` or `false`.
+refused. `version` is trimmed and case-sensitive (`2.4-RC1` and `2.4-rc1` are two versions); an
+empty `version` is refused. Each `fail_on` value is trimmed and case-insensitive
+(`fail_on=high,license`); `wait` and `latest` accept exactly `true` or `false`. Invalid
+parameters are refused with a `422` before the body is read, so nothing is stored.
+
+## Versions
+
+A project has one or more versions, each with its own components, findings and triage
+([concepts](../explanation/concepts.md#versions)). The version of an upload is the `version`
+parameter only: nanobom never reads it from the SBOM (CycloneDX `metadata.component.version`
+or SPDX `versionInfo`).
+
+- Without `version`, the upload goes to the **unnamed version**, the only version of a project
+  that never names one.
+- The first upload naming a version creates it. A project created by an upload starts with the
+  version the upload names, without an unnamed version next to it.
+- One version of each project is the **latest**: the one the project page, the
+  [read API](read-api.md) and the [VEX export](vex-api.md) show unless they are asked for
+  another. A version the upload creates becomes the latest, unless `latest=false`;
+  `latest=true` makes the version uploaded to the latest, whether it is new or not. Without
+  `latest`, an existing version keeps its flag, and `latest=false` on an existing version
+  changes nothing: a project always has exactly one latest version.
+- A new version starts with the open and ignored findings of the latest version, with their
+  status, ignore and first-seen date. The run that follows the upload then compares them with
+  the new SBOM, like any findings: those whose component is gone are fixed. They are never
+  announced as new. Fixed findings are not copied
+  ([why](../explanation/concepts.md#versions)).
+- A project has at most **50 active versions**. An upload that would create the 51st is refused
+  with a `409` and nothing is stored; uploads to existing versions are still accepted.
+
+The run after an upload evaluates every version of the project; the [evaluation](#the-evaluation-object)
+returned, and `fail_on`, judge the version uploaded only.
 
 ### `fail_on` thresholds
 
@@ -212,6 +244,8 @@ A successful upload returns `201 Created` when it created the project, `200 OK` 
   "project": "web",
   "project_id": 3,
   "project_created": false,
+  "version": "2.4",
+  "version_created": false,
   "upload_id": 58,
   "component_count": 212,
   "components_without_purl": 2,
@@ -257,6 +291,8 @@ A successful upload returns `201 Created` when it created the project, `200 OK` 
 | `organization`, `project` | The slugs, normalized to lower case |
 | `project_id`, `upload_id` | Identifiers in nanobom |
 | `project_created` | Whether this upload created the project |
+| `version` | The [version](#versions) uploaded to; `""` for the unnamed version |
+| `version_created` | Whether this upload created the version (always `true` when it created the project) |
 | `component_count` | Distinct components stored (by package URL) |
 | `components_without_purl` | Components skipped for a missing or invalid package URL |
 | `skipped` | The first 100 of them, with `name`, `version` and `reason` |
@@ -270,14 +306,15 @@ A successful upload returns `201 Created` when it created the project, `200 OK` 
 | --- | --- |
 | `status` | `succeeded`; `failed` when the run could not complete (OSV unreachable, for example); `timed_out` when it did not finish within `NANOBOM_UPLOAD_WAIT_SECONDS` |
 | `run_id` | The run's identifier, `null` when timed out |
-| `open` | The project's **open** findings by severity (`critical`, `high`, `medium`, `low`, `unknown`); ignored findings are not counted |
+| `open` | The **open** findings of the version uploaded by severity (`critical`, `high`, `medium`, `low`, `unknown`); ignored findings are not counted |
 | `known_exploited` | How many open findings are known exploited |
 | `findings` | The open findings, most severe first, known exploited first within a severity, then by EPSS score; at most 100, so a long list drops the least severe. Each has `vulnerability`, `component` (package URL), `severity`, `known_exploited`, `introduced_via` and `url` (the finding's page) |
 | `findings[].introduced_via` | The names of the project's direct dependencies that lead to the component, sorted; the component's own name when it is one; empty when the SBOM's dependency graph does not say ([Dependency paths](../explanation/dependency-paths.md)) |
 | `licenses` | Only when the organization has an active [license policy](license-policy.md), whatever `fail_on` says: `forbidden` and `warned`, the number of components with each verdict, and `violations`, the first 20 of them, forbidden first, then by name |
 | `licenses.violations[]` | `component` (package URL), `name`, `version`, `license` (as read from the SBOM, `null` when it gave none), `verdict` (`forbid` or `warn`) and `licenses`, the identifiers that lead to the verdict (empty when the action for unknown licenses alone gives it) |
 
-`open` and `findings` describe the project's findings as they are when the response is written.
+`open` and `findings` describe the findings of the version uploaded as they are when the
+response is written; other versions of the project do not count.
 After a `failed` or `timed_out` evaluation, they are the findings of the previous successful run,
 not of this SBOM.
 
@@ -285,19 +322,21 @@ not of this SBOM.
 
 | Status | When | What to do |
 | --- | --- | --- |
-| `200` | The SBOM replaced the project's components | |
+| `200` | The SBOM replaced the components of the version | |
 | `201` | The SBOM created the project | |
 | `401` | No `Authorization: Bearer` header, or a token that is unknown or revoked, including one revoked while the upload waited | Check the secret in CI; the response has a `WWW-Authenticate: Bearer` header |
 | `403` | A project token used for another existing project, or a read token | Use that project's slug, or an organization token; upload with a token of the upload scope |
 | `404` | The organization does not exist or is not the token's; or a project token used for a project that does not exist | Check the organization slug in the URL; create the project first (with an organization token) |
 | `409` | With `fail_on`: the evaluation succeeded and open findings reach a threshold, or, with `license`, a component has a forbidden license | Fix or triage the findings listed in `evaluation.findings`; replace the components listed in `evaluation.licenses.violations`, or change the policy |
+| `409` | The upload would create a 51st active version; nothing was stored | Upload to an existing version |
 | `413` | The body is larger than `NANOBOM_MAXIMUM_SBOM_SIZE` (16 MiB by default) | Raise the limit, or split the SBOM; this error's body is plain text, not JSON |
 | `422` | Invalid parameter, invalid project slug, or invalid document (not JSON, neither CycloneDX nor SPDX, unsupported version) | Read `error` |
 | `500` | A database error | See the server's logs |
 | `503` | With a `fail_on` threshold other than `license`: the evaluation failed or timed out, so the findings are not up to date | Retry later; see [Troubleshoot](../how-to/troubleshoot.md#upload-answers-503) |
 | `503` | With `wait` or `fail_on`: `NANOBOM_MAX_WAITING_UPLOADS` uploads are already waiting; the response has a `Retry-After` header (in seconds) | Send the upload again after `Retry-After`; nothing was stored |
 
-The `409` and `503` responses still stored the SBOM, except a `503` for too many waiting uploads:
+The `409` and `503` responses still stored the SBOM, except a `503` for too many waiting uploads
+and a `409` for too many versions:
 the inventory is up to date even when the gate fails. So did a `401` for a token revoked while
 the upload waited. A `422` for a parameter is answered before anything is stored.
 
@@ -313,7 +352,9 @@ cut to 200 characters, followed by `…`.
 | `403` | `this token does not allow uploads to this project` |
 | `403` | `this token is read-only: uploads need a token with the upload scope` |
 | `404` | `not found` |
-| `422` | `wait must be true or false` |
+| `409` | `this project already has 50 active versions: upload to an existing version instead` |
+| `422` | `wait must be true or false` (or `latest must be …`) |
+| `422` | `the version must be 1 to 64 characters: letters, digits, '.', '_', '+', '/' or '-'` |
 | `422` | `fail_on must be critical, high, medium, low, exploited or license, or several of them separated by commas` |
 | `422` | `fail_on=exploited needs exploitation data (NANOBOM_EXPLOITATION_DATA)`: exploitation data is off on this instance, so no finding could ever be known exploited and the gate would always pass |
 | `422` | `the source commit must be at most 300 printable characters` (or `the image tag …`) |
@@ -354,14 +395,16 @@ organization is the token's.
 | Field | Value | Effect |
 | --- | --- | --- |
 | `projectName` | text | The project slug: trimmed and folded to lower case, then 1 to 64 characters among letters, digits, `.`, `_` and `-`, starting with a letter or a digit. Required |
-| `projectVersion` | text, up to 300 characters | Recorded as the upload's image tag (`image_tag`) |
+| `projectVersion` | 1 to 64 characters among letters, digits, `.`, `_`, `+`, `/` and `-` | The [project version](#versions), like the native `version`; blank or missing, the unnamed version |
+| `isLatest` (form), `isLatestProjectVersion` (JSON) | `true` or `false` | Like the native `latest`: `true` makes the version the latest, `false` keeps a new version from becoming it; missing, a new version becomes the latest |
 | `autoCreate` | `true` or `false` (default) | Create the project if it does not exist (organization tokens only). Without it, a missing project is a `404` |
 | `bom` | base64 text (`PUT`), file or text part (`POST`) | The CycloneDX or SPDX JSON [document](#the-document). In `PUT`, line breaks in the base64 text are ignored. A UTF-8 byte order mark is removed. In `POST`, only the first `bom` part is read |
 | `project` | UUID | Refused with a `400` when `projectName` is missing; ignored otherwise |
-| `projectTags`, `parentUUID`, `parentName`, `parentVersion`, `isLatest`, `isActive` | | Accepted and ignored |
+| `projectTags`, `parentUUID`, `parentName`, `parentVersion`, `isActive` | | Accepted and ignored |
 
-In `PUT`, the body is parsed as JSON whatever its `Content-Type`; `autoCreate` may be a boolean
-or the string `"true"`. In `POST`, `autoCreate` is `true` when the field reads `true` in any case.
+In `PUT`, the body is parsed as JSON whatever its `Content-Type`; `autoCreate` and
+`isLatestProjectVersion` may be booleans or strings (`"true"`). In `POST`, `autoCreate` and
+`isLatest` are `true` when the field reads `true` in any case, `false` otherwise.
 
 The decoded SBOM may be at most `NANOBOM_MAXIMUM_SBOM_SIZE` MiB, like a native upload. The `PUT`
 body may be larger, for the base64 encoding (a third more) and for the line breaks of wrapped
@@ -399,14 +442,15 @@ problems (`Content-Type: application/problem+json`):
 
 | Status | When | Body |
 | --- | --- | --- |
-| `200` | The SBOM replaced the project's components | `{"token": …}` |
-| `400` | No `projectName` (`projectName is required`), a project given by UUID only (`nanobom cannot find projects by UUID: send projectName (the nanobom project slug) instead of project`), a `projectName` that cannot be a slug (`projectName "…" cannot be a nanobom project slug: …`), a `projectVersion` too long, a request that is not JSON (`invalid upload request: …`), `bom` not base64 (`The BOM must be Base64 encoded`), no SBOM (`No BOM file provided.`) | Plain text |
+| `200` | The SBOM replaced the components of the version | `{"token": …}` |
+| `400` | No `projectName` (`projectName is required`), a project given by UUID only (`nanobom cannot find projects by UUID: send projectName (the nanobom project slug) instead of project`), a `projectName` that cannot be a slug (`projectName "…" cannot be a nanobom project slug: …`), a `projectVersion` nanobom cannot name a version with (`the version must be 1 to 64 characters: …`), a request that is not JSON (`invalid upload request: …`), `bom` not base64 (`The BOM must be Base64 encoded`), no SBOM (`No BOM file provided.`) | Plain text |
 | `400` | An invalid document: any [document error](#error-messages) of the native API, XML and SPDX tag-value included | Problem |
 | `401` | No `X-Api-Key`, or a token that is unknown or revoked | `a valid nanobom upload token is required in the X-Api-Key header` |
 | `403` | A project token used for another existing project | `Access to the specified project is forbidden` |
 | `403` | A read token | `This nanobom token is read-only: uploads need a token with the upload scope.` |
 | `404` | A missing project without `autoCreate`, or with a project token | `The project could not be found.` |
 | `409` | `autoCreate` and another upload created the same project first: send the upload again | `the project "…" already exists` |
+| `409` | The upload would create a 51st active version | `this project already has 50 active versions: upload to an existing version instead` |
 | `413` | An SBOM larger than `NANOBOM_MAXIMUM_SBOM_SIZE` | Plain text |
 | `500` | A database error | `internal error` |
 

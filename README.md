@@ -73,6 +73,9 @@ upload to nanobom with a new address and key: see [Dependency-Track clients](htt
   Alpine and more; aliases (GHSA, CVE, …) of one vulnerability merged into one finding.
 - A history per project: uploads with their commit and image tag, findings opened, fixed,
   reopened or ignored with a reason and an expiry date.
+- Several versions per project, for maintenance branches next to the main one: each with its own
+  findings and triage, a new version starting with the triage of the latest one, and a
+  vulnerability that hits several versions announced once.
 
 **Fix what matters first**
 - Known-exploited vulnerabilities (CISA KEV) flagged, with their remediation due date.

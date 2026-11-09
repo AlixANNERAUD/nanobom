@@ -25,15 +25,50 @@ its first upload with an organization-wide token (or never, with a project token
 [tokens](../reference/upload-api.md#tokens)). Its slug follows the same rules as organization
 slugs.
 
-A project holds the components of its **latest** SBOM only. The history of uploads (when, from
-which commit or image tag, how many components) is kept; the components of older uploads are
-not.
+A project holds the components of the last SBOM of each of its [versions](#versions) only.
+The history of uploads (when, to which version, from which commit or image tag, how many
+components) is kept; the components of older uploads are not.
+
+## Versions
+
+A product often ships several releases at once: `3.x` is current while `2.x` still gets
+security fixes. A **version** of a project is one of them. Each version has its own
+components, findings and triage, so fixing lodash on the main branch does not hide that the
+`2.4` maintenance branch still ships the vulnerable one, and ignoring a finding in `2.4` does
+not ignore it in `3.0`, where the code may have changed.
+
+CI names the version with each upload ([`version`](../reference/upload-api.md#versions)); a
+project that never names one has a single, **unnamed** version and works as if versions did not
+exist. One version is the **latest**: the project page, the read API and the VEX export show it
+unless asked for another. A new version becomes the latest unless the upload says otherwise,
+which is what a maintenance branch does (`latest=false`).
+
+When an upload creates a version, the new version **inherits** the open and ignored findings of
+the latest version, as Dependency-Track copies the audit trail when it clones a version: a
+release branched from `main` has the same dependencies and the same reasons to ignore a
+finding, and nobody should have to triage them again. Each inherited finding keeps its
+status, its ignore (reason, justification, expiry) and its first-seen date, and its history
+starts with one event naming the version it came from. The run after the upload then treats
+inherited findings like any other: those whose component the new SBOM no longer has are fixed.
+
+Inherited findings are **not announced**: they are not news, and announcing every finding of
+the latest version each time a release branch is cut would bury the findings that are. A
+vulnerability that appears in several versions at once (a new advisory against a dependency
+they share) is announced once, with the list of versions it affects
+([payloads](../reference/webhooks.md)). Fixed findings are not inherited: an ignore ends when its
+finding is fixed, so they carry nothing the new version needs, and a vulnerability fixed in the
+latest version but present in the new one is announced as new for it.
+
+Versions also keep the database small: a project has at most 50 active versions. Organization
+pages count a vulnerability of a package once per project, at its highest severity, however
+many versions have it; the gate of an upload (`fail_on`) judges the version uploaded only.
 
 ## Uploads
 
-An **upload** is one SBOM sent by CI. It replaces the project's components entirely: a
-component missing from the new SBOM is gone, and its findings are fixed at the next run. Upload
-one SBOM per project and build, describing everything the project ships.
+An **upload** is one SBOM sent by CI. It replaces the components of one version of the project
+entirely: a component missing from the new SBOM is gone, and its findings in that version are
+fixed at the next run. Upload one SBOM per project, version and build, describing everything
+the version ships.
 
 Components are identified by their package URL. Components without one are counted and listed
 in the upload's response but cannot be checked. The SBOM's dependency graph, when it has one, is
@@ -42,7 +77,7 @@ kept with the components and tells which direct dependency of the project pulls 
 it: one SPDX license expression, shown on findings and in search results
 ([how licenses are read](../reference/upload-api.md#the-document)). An organization's
 **license policy** allows, warns about or forbids licenses; the components that break it are
-computed from the latest SBOM whenever they are shown ([License policies](licenses.md)).
+computed from the last SBOM of a version whenever they are shown ([License policies](licenses.md)).
 
 ## Runs
 
@@ -59,7 +94,8 @@ reads as "no vulnerabilities". See [How findings are kept up to date](findings.m
 
 ## Findings
 
-A **finding** is one vulnerability affecting one component of one project. It has a status:
+A **finding** is one vulnerability affecting one component of one version of a project. It has a
+status:
 
 | Status | Meaning | Becomes |
 | --- | --- | --- |
