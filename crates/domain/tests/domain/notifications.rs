@@ -645,3 +645,35 @@ async fn payloads_carry_exploitation_data() {
     assert!(second["kev_due_date"].is_null());
     assert!(second["epss"].is_null() && second["epss_percentile"].is_null());
 }
+
+#[tokio::test]
+async fn exploitation_data_follows_its_finding_when_new_and_open_findings_mix() {
+    let fixture = Exploited::new(Severity::Unknown, false).await;
+    let plain = fixture.finding("GHSA-plain", &[], "high", "open").await;
+    let existing = fixture
+        .finding("GHSA-old", &["CVE-2021-23337"], "low", "open")
+        .await;
+    let deliveries = fixture
+        .deliveries(vec![fixture.new_finding(
+            plain,
+            "GHSA-plain",
+            &[],
+            Severity::High,
+        )])
+        .await;
+    let body = serde_json::to_value(&deliveries[0].payload).unwrap();
+    assert_eq!(body["count"], 2);
+    let new = &body["findings"][0];
+    assert_eq!(new["vulnerability"], "GHSA-plain");
+    assert_eq!(new["reason"], "new");
+    assert_eq!(new["known_exploited"], false);
+    assert!(new["epss"].is_null());
+    let exploited = &body["findings"][1];
+    assert_eq!(exploited["vulnerability"], "GHSA-old");
+    assert_eq!(exploited["reason"], "exploited");
+    assert_eq!(exploited["known_exploited"], true);
+    assert_eq!(exploited["kev_due_date"], "2022-03-22");
+    assert_eq!(exploited["epss"], 0.75);
+    assert!(fixture.notified(existing).await);
+    assert!(!fixture.notified(plain).await);
+}

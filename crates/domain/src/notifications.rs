@@ -381,8 +381,26 @@ struct Entry {
     summary: Option<String>,
     severity: Severity,
     cvss_score: Option<f64>,
-    reason: &'static str,
+    reason: Reason,
     exploitation: Exploitation,
+}
+
+/// Why a finding is delivered, sent as `PayloadFinding::reason`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reason {
+    New,
+    Reopened,
+    Exploited,
+}
+
+impl Reason {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::New => "new",
+            Self::Reopened => "reopened",
+            Self::Exploited => "exploited",
+        }
+    }
 }
 
 /// What an open finding needs to be notified.
@@ -498,25 +516,26 @@ pub async fn new_findings_deliveries(
         .collect();
     let candidates = unnotified_open_findings(database, outcome.scope).await?;
 
-    // Entries are keyed by position, since a finding id is not unique among outcomes built
-    // by hand.
+    // Keyed by finding id: a finding the run opened is also a candidate, with the same
+    // identifiers, so its two keys carry the same data.
     let keyed: Vec<(i64, Vec<String>)> = outcome
         .new_findings
         .iter()
-        .map(|finding| exploitation::cve_ids(&finding.vulnerability_id, &finding.aliases))
+        .map(|finding| {
+            (
+                finding.finding_id,
+                exploitation::cve_ids(&finding.vulnerability_id, &finding.aliases),
+            )
+        })
         .chain(candidates.iter().map(|candidate| {
-            exploitation::cve_ids(&candidate.finding.vulnerability_id, &candidate.aliases)
+            (
+                candidate.finding.id,
+                exploitation::cve_ids(&candidate.finding.vulnerability_id, &candidate.aliases),
+            )
         }))
-        .enumerate()
-        .map(|(index, cves)| (i64::try_from(index).unwrap_or(i64::MAX), cves))
         .collect();
-    let mut exploitation = exploitation::for_findings(database, &keyed).await?;
-    let mut position = 0_i64;
-    let mut take = || {
-        let value = exploitation.remove(&position).unwrap_or_default();
-        position += 1;
-        value
-    };
+    let exploitation = exploitation::for_findings(database, &keyed).await?;
+    let exploitation_of = |id: i64| exploitation.get(&id).cloned().unwrap_or_default();
 
     let mut entries: Vec<Entry> = outcome
         .new_findings
@@ -532,8 +551,12 @@ pub async fn new_findings_deliveries(
             summary: finding.summary.clone(),
             severity: finding.severity,
             cvss_score: finding.cvss_score,
-            reason: if finding.reopened { "reopened" } else { "new" },
-            exploitation: take(),
+            reason: if finding.reopened {
+                Reason::Reopened
+            } else {
+                Reason::New
+            },
+            exploitation: exploitation_of(finding.finding_id),
         })
         .collect();
     let mut to_mark: Vec<i64> = entries
@@ -542,7 +565,7 @@ pub async fn new_findings_deliveries(
         .map(|entry| entry.finding_id)
         .collect();
     for candidate in candidates {
-        let exploitation = take();
+        let exploitation = exploitation_of(candidate.finding.id);
         if !exploitation.known_exploited {
             continue;
         }
@@ -565,7 +588,7 @@ pub async fn new_findings_deliveries(
                 .parse()
                 .unwrap_or(Severity::Unknown),
             cvss_score: candidate.cvss_score,
-            reason: "exploited",
+            reason: Reason::Exploited,
             exploitation,
         });
     }
@@ -656,8 +679,8 @@ pub async fn new_findings_deliveries(
                     severity: entry.severity,
                     cvss_score: entry.cvss_score,
                     summary: entry.summary,
-                    reopened: entry.reason == "reopened",
-                    reason: entry.reason.to_owned(),
+                    reopened: entry.reason == Reason::Reopened,
+                    reason: entry.reason.as_str().to_owned(),
                     known_exploited: entry.exploitation.known_exploited,
                     kev_due_date: entry.exploitation.kev_due_date,
                     epss: entry.exploitation.epss_score,
@@ -781,6 +804,17 @@ pub async fn queue_new_findings(
     let deliveries = new_findings_deliveries(&transaction, outcome, public_url).await?;
     let ids = enqueue(&transaction, &deliveries).await?;
     transaction.commit().await?;
+    // The attempt logs only know the queued row, whose body is rendered (JSON, Slack or
+    // Teams), so the number of findings is logged here, under the same delivery id.
+    for (delivery, id) in deliveries.iter().zip(&ids) {
+        tracing::info!(
+            delivery = id,
+            organization = delivery.organization_id,
+            findings = delivery.payload.count,
+            known_exploited = delivery.payload.known_exploited_count,
+            "findings.new delivery queued"
+        );
+    }
     Ok(ids)
 }
 
