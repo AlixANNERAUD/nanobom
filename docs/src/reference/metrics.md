@@ -25,8 +25,11 @@ about a particular organization.
 | `nanobom_exploitation_refresh_failures_total` | counter | Refreshes of exploitation data that failed or were abandoned |
 | `nanobom_webhook_deliveries_total{outcome}` | counter | Webhook delivery attempts, by outcome: `delivered`, `retried` (the attempt failed and another is scheduled) or `abandoned` (the attempt failed and no retry follows: refused by the receiver, or the last retry) |
 
-Gauges are computed from the database at startup and after each run;
-`nanobom_last_successful_run_timestamp_seconds` only appears after the first successful run.
+Gauges are computed from the database at startup and after each run. `nanobom_stale_projects`
+is also recomputed on each scrape, since projects go stale with time alone (with
+`NANOBOM_SCHEDULE=off` and few uploads, runs can be rare); if that fails, the scrape serves the
+last value. `nanobom_last_successful_run_timestamp_seconds` only appears after the first
+successful run.
 Counters start at zero at each start, and appear only once something has been counted: a missing
 `nanobom_run_failures_total` means no run failed since the start.
 

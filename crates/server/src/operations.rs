@@ -37,9 +37,9 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
 }
 
 /// `GET /metrics`: Prometheus text format.
-async fn metrics() -> impl IntoResponse {
+async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/plain; version=0.0.4")],
-        crate::metrics::handle().render(),
+        crate::metrics::render(&state.database, state.options.stale_after_days).await,
     )
 }

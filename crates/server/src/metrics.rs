@@ -2,8 +2,10 @@
 //! number small, and so that `/metrics` reveals nothing about a given organization.
 //!
 //! Gauges are recomputed from the database at startup ([`initialize`]) and after each run,
-//! rather than adjusted incrementally, so they cannot drift. The recorder is process-global:
-//! every function here installs it on first use, and tests in the same process share it.
+//! rather than adjusted incrementally, so they cannot drift. The stale projects gauge depends on
+//! the time as well, so [`render`] also recomputes it on each scrape. The recorder is
+//! process-global: every function here installs it on first use, and tests in the same process
+//! share it.
 
 use std::{sync::OnceLock, time::Duration};
 
@@ -137,6 +139,14 @@ pub async fn refresh_stale_projects(database: &DatabaseConnection, stale_after_d
         Ok(count) => gauge!("nanobom_stale_projects").set(count as f64),
         Err(error) => tracing::warn!(%error, "counting stale projects failed"),
     }
+}
+
+/// The metrics in Prometheus text format, after recomputing the gauges that change with time
+/// alone. Only those: the others change with runs, and recomputing them reads every open
+/// finding, too much for each scrape. A failed refresh is logged and the last values are served.
+pub async fn render(database: &DatabaseConnection, stale_after_days: u32) -> String {
+    refresh_stale_projects(database, stale_after_days).await;
+    handle().render()
 }
 
 /// Updates the open findings gauges from the database.
