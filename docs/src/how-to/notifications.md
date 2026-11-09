@@ -104,7 +104,9 @@ then each organization's admins choose who receives its emails.
    ```
 
    `smtps://` connects with TLS on port 465; for a server that only offers STARTTLS on port 587,
-   use `smtp://…:587?tls=required`. Percent-encode the user and password (`@` becomes `%40`).
+   use `smtp://…:587?tls=required`. nanobom refuses to start with a user or password in a
+   `smtp://` URL without `tls=`, which would send them in clear text. Percent-encode the user and
+   password (`@` becomes `%40`).
    Most providers (Google Workspace, Microsoft 365, Amazon SES, Mailgun, Postmark…) give SMTP
    credentials for applications; use those rather than a person's password. Every option is in
    the [configuration reference](../reference/configuration.md#email). The log says
@@ -119,16 +121,19 @@ then each organization's admins choose who receives its emails.
    Then **Save email settings**.
 3. Choose **Send a test email**. The page says **Test email sent** once the SMTP server accepted
    it, or shows its reply, such as `permanent error (535): authentication failed` for wrong
-   credentials. A test can be sent every 30 seconds.
+   credentials, with the address it concerns. A test can be sent every 30 seconds per
+   organization and per user, and 10 every 10 minutes on the whole instance.
 
-The next run that opens findings sends one email to all the recipients, with a subject such as
+The next run that opens findings emails each recipient, with a subject such as
 `nanobom: 3 new vulnerabilities in acme/web` and the findings, each linking to its page in
 nanobom. Stale projects are emailed too. What an email contains is in the
 [reference](../reference/webhooks.md#emails).
 
-Emails show in **Recent deliveries** with the webhook's, marked **Email**. An SMTP reply in the
-`4xx` range (greylisting, a full mailbox) is retried like a webhook; a `5xx` reply (an unknown
-address, a message refused as spam) is not, and the delivery shows as **Failed** with the reply.
+Emails show in **Recent deliveries** with the webhook's, one line per recipient, marked
+**Email to** and the address. An SMTP reply in the `4xx` range (greylisting, a full mailbox) is
+retried like a webhook; a `5xx` reply (an unknown address, a message refused as spam) is not,
+and the delivery shows as **Failed** with the reply. Either way, only the refused address is
+concerned: the other recipients get the email.
 Changing the recipients or the language abandons the emails waiting for a retry; **Remove email
 notifications** turns email off for the organization.
 

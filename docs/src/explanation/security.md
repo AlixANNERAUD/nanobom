@@ -116,6 +116,9 @@ nanobom makes requests to:
 - the OpenID Connect provider, at sign-in;
 - webhooks: organization webhooks set by organization admins, and the failure webhook;
 - the SMTP server (`NANOBOM_SMTP_URL`), for emails to the recipients organization admins set.
+  Recipients are not verified and any signed-in user can create an organization, so test emails
+  are rate limited per organization, per user and for the instance, and name the organization
+  by its slug rather than its free-text display name.
 
 Organization admins can make nanobom `POST` to any `http` or `https` address they choose,
 including addresses on its own network. If nanobom runs next to services that trust their

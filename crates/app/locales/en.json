@@ -356,7 +356,7 @@
     "enabled": "Enabled",
     "save_webhook": "Save webhook",
     "delivery_channel_webhook": "Webhook",
-    "delivery_channel_email": "Email",
+    "delivery_channel_email": "Email to {recipient}",
     "email_title": "Email notifications",
     "email_description": "After each check, new findings at or above the chosen severity, and projects that stop sending SBOMs, are emailed to these addresses in one message (described in the guide's notification reference: https://alixanneraud.github.io/nanobom/reference/webhooks.html).",
     "email_unavailable": "Email is off on this server: its operator has not configured an SMTP server (NANOBOM_SMTP_URL).",

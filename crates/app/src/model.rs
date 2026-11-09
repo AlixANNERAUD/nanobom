@@ -560,8 +560,8 @@ impl DeliveryState {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WebhookDelivery {
     pub id: i64,
-    /// True for an email, false for a webhook post.
-    pub email: bool,
+    /// The recipient of an email; `None` for a webhook post.
+    pub recipient: Option<String>,
     pub event: String,
     pub state: DeliveryState,
     pub attempts: i64,

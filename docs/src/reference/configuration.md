@@ -60,11 +60,12 @@ See [Run on PostgreSQL](../how-to/postgresql.md).
 
 | Variable | Flag | Default | |
 | --- | --- | --- | --- |
-| `NANOBOM_SMTP_URL` | `--smtp-url` | | The SMTP server that sends [email notifications](webhooks.md#emails). Unset, email is off and organizations' email settings are hidden. `smtps://user:password@smtp.example.org` connects with TLS (port 465 by default); `smtp://user:password@smtp.example.org:587?tls=required` upgrades the connection with STARTTLS and fails without it; `smtp://relay.internal:25` sends in clear text, for a relay on a trusted network only. Percent-encode special characters of the user and password (`@` as `%40`). Certificates are checked against the public authorities of [webpki-roots](https://github.com/rustls/webpki-roots). Treat it as a secret: it is not shown by `--help` nor logged. |
+| `NANOBOM_SMTP_URL` | `--smtp-url` | | The SMTP server that sends [email notifications](webhooks.md#emails). Unset, email is off and organizations' email settings are hidden. `smtps://user:password@smtp.example.org` connects with TLS (port 465 by default); `smtp://user:password@smtp.example.org:587?tls=required` upgrades the connection with STARTTLS and fails without it; `smtp://relay.internal:25` sends in clear text, for a relay on a trusted network only, so a `smtp://` URL with a user or password must set `tls=required` or `tls=opportunistic` (STARTTLS when the server offers it); nanobom refuses to start otherwise. Percent-encode special characters of the user and password (`@` as `%40`). Certificates are checked against the public authorities of [webpki-roots](https://github.com/rustls/webpki-roots). Treat it as a secret: it is not shown by `--help` nor logged. |
 | `NANOBOM_SMTP_FROM` | `--smtp-from` | | The sender of the emails, `nanobom@example.org` or `nanobom <nanobom@example.org>`. Required with `NANOBOM_SMTP_URL`. |
 
-nanobom refuses to start when `NANOBOM_SMTP_URL` is set without `NANOBOM_SMTP_FROM`, or when either
-is invalid. The SMTP server itself is contacted at the first email: send a test email from an
+nanobom refuses to start when `NANOBOM_SMTP_URL` is set without `NANOBOM_SMTP_FROM`, when either
+is invalid, or when a `smtp://` URL has credentials but no `tls=required` or `tls=opportunistic`
+(the error says so without repeating the URL). The SMTP server itself is contacted at the first email: send a test email from an
 organization's settings to check it. Removing `NANOBOM_SMTP_URL` abandons, at the next start, the
 emails still waiting for a retry.
 

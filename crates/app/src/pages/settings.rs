@@ -512,10 +512,11 @@ fn Deliveries(deliveries: Vec<WebhookDelivery>) -> impl IntoView {
                         </span>
                     }
                 });
-            let channel = if delivery.email {
-                t!("settings.delivery_channel_email")
-            } else {
-                t!("settings.delivery_channel_webhook")
+            let channel = match &delivery.recipient {
+                Some(recipient) => {
+                    tf!("settings.delivery_channel_email", recipient = recipient.clone())
+                }
+                None => t!("settings.delivery_channel_webhook").to_owned(),
             };
             view! {
                 <tr class=TABLE_ROW>

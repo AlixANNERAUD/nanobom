@@ -179,12 +179,14 @@ differently; nanobom shows the higher. See [Severity](../explanation/findings.md
 
 - If **Settings → Email notifications** says email is off, the operator has not set
   `NANOBOM_SMTP_URL` (and `NANOBOM_SMTP_FROM`); see [Send them by email](notifications.md#send-them-by-email).
-- **Send a test email** shows the SMTP server's reply when it refuses the message: `535` means
+- **Send a test email** shows the SMTP server's reply for each address it refuses: `535` means
   the credentials in `NANOBOM_SMTP_URL` are wrong, `550` or `554` that a recipient or the sender
   is refused. A network or TLS error means nanobom cannot reach the server with the scheme and
   port given (`smtps://` uses port 465, `smtp://…?tls=required` port 587).
-- **Recent deliveries** lists emails marked **Email** with the SMTP server's last reply. A `5xx`
-  reply is not retried.
+- **Recent deliveries** lists one line per recipient, marked **Email to** and the address, with
+  the SMTP server's last reply. A `5xx` reply is not retried.
+- nanobom does not start: a `smtp://` URL with a user or password needs `?tls=required` (or
+  use `smtps://`), so that the credentials are not sent in clear text.
 - An email accepted by the server (**Delivered**) but not in the inbox is in the hands of the
   mail system: look in the spam folder, and check that the sender's domain allows the SMTP
   server to send for it (SPF, DKIM).

@@ -356,7 +356,7 @@
     "enabled": "Activé",
     "save_webhook": "Enregistrer le webhook",
     "delivery_channel_webhook": "Webhook",
-    "delivery_channel_email": "E-mail",
+    "delivery_channel_email": "E-mail à {recipient}",
     "email_title": "Notifications par e-mail",
     "email_description": "Après chaque vérification, les nouvelles vulnérabilités de gravité égale ou supérieure au seuil choisi, et les projets qui n’envoient plus de SBOM, sont envoyés à ces adresses en un seul message (décrit dans la référence des notifications du guide : https://alixanneraud.github.io/nanobom/reference/webhooks.html).",
     "email_unavailable": "L’envoi d’e-mails est désactivé sur ce serveur : son exploitant n’a pas configuré de serveur SMTP (NANOBOM_SMTP_URL).",

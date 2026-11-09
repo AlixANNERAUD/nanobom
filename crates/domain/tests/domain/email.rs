@@ -215,7 +215,7 @@ async fn admins_manage_recipients_and_other_organizations_see_nothing() {
 }
 
 #[tokio::test]
-async fn new_findings_are_mailed_to_every_recipient_in_one_message() {
+async fn new_findings_are_mailed_to_each_recipient_with_everyone_in_to() {
     let database = testing::database().await;
     let owner = actor(&database, "owner").await;
     let organization = organization(&database, &owner, Language::English).await;
@@ -234,18 +234,25 @@ async fn new_findings_are_mailed_to_every_recipient_in_one_message() {
             .is_empty()
     );
 
+    // One row per recipient, with the same message.
     let ids = notifications::queue_new_findings(&database, &run, &public_url(), true)
         .await
         .unwrap();
-    assert_eq!(ids.len(), 1);
-    let row = webhook_deliveries::Entity::find_by_id(ids[0])
-        .one(&database)
-        .await
-        .unwrap()
-        .unwrap();
-    assert_eq!(row.channel, "email");
-    assert_eq!(row.url, "alice@example.org, bob@example.org");
-    let message: email::Message = serde_json::from_str(&row.payload).unwrap();
+    assert_eq!(ids.len(), 2);
+    let mut payloads = Vec::new();
+    for (id, recipient) in ids.iter().zip(["alice@example.org", "bob@example.org"]) {
+        let row = webhook_deliveries::Entity::find_by_id(*id)
+            .one(&database)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.channel, "email");
+        assert_eq!(row.url, recipient);
+        payloads.push(row.payload);
+    }
+    assert_eq!(payloads[0], payloads[1]);
+    let message: email::Message = serde_json::from_str(&payloads[0]).unwrap();
+    assert_eq!(message.to, ["alice@example.org", "bob@example.org"]);
     assert_eq!(message.subject, "nanobom: 1 new vulnerability in acme/web");
     assert!(message.text.contains("GHSA-1"), "{}", message.text);
     assert!(
@@ -255,16 +262,21 @@ async fn new_findings_are_mailed_to_every_recipient_in_one_message() {
 
     assert_eq!(
         notifier.attempt_all(&database, &ids).await.unwrap(),
-        [(Channel::Email, Outcome::Delivered)]
+        [
+            (Channel::Email, Outcome::Delivered),
+            (Channel::Email, Outcome::Delivered)
+        ]
     );
     let received = sink.received();
-    assert_eq!(received.len(), 1);
+    assert_eq!(received.len(), 2);
     assert_eq!(received[0].from, "nanobom@example.org");
-    assert_eq!(
-        received[0].recipients,
-        ["alice@example.org", "bob@example.org"]
-    );
+    assert_eq!(received[0].recipients, ["alice@example.org"]);
+    assert_eq!(received[1].recipients, ["bob@example.org"]);
     let data = &received[0].data;
+    assert!(
+        data.contains("To: alice@example.org, bob@example.org"),
+        "{data}"
+    );
     assert!(
         data.contains("Subject: nanobom: 1 new vulnerability in acme/web"),
         "{data}"
@@ -278,7 +290,10 @@ async fn new_findings_are_mailed_to_every_recipient_in_one_message() {
     let recent = deliveries::recent(&database, &owner, organization, 10)
         .await
         .unwrap();
+    assert_eq!(recent.len(), 2);
     assert_eq!(recent[0].channel, Channel::Email);
+    assert_eq!(recent[0].recipient.as_deref(), Some("bob@example.org"));
+    assert_eq!(recent[1].recipient.as_deref(), Some("alice@example.org"));
     assert_eq!(recent[0].state, State::Delivered);
     assert!(
         recent[0]
@@ -321,8 +336,14 @@ async fn stale_projects_are_mailed_in_the_organization_language() {
         .deliver(&database, deliveries)
         .await
         .unwrap();
-    assert_eq!(outcomes, [(Channel::Email, Outcome::Delivered)]);
-    assert_eq!(sink.received().len(), 1);
+    assert_eq!(
+        outcomes,
+        [
+            (Channel::Email, Outcome::Delivered),
+            (Channel::Email, Outcome::Delivered)
+        ]
+    );
+    assert_eq!(sink.received().len(), 2);
     let row = webhook_deliveries::Entity::find()
         .one(&database)
         .await
@@ -353,8 +374,29 @@ fn stale_payload() -> StaleProjectsPayload {
     }
 }
 
+/// The deliveries of `ids` as listed in the settings, in the same order.
+async fn summaries(
+    database: &DatabaseConnection,
+    owner: &Actor,
+    organization: i64,
+    ids: &[i64],
+) -> Vec<deliveries::DeliverySummary> {
+    let recent = deliveries::recent(database, owner, organization, 50)
+        .await
+        .unwrap();
+    ids.iter()
+        .map(|id| {
+            recent
+                .iter()
+                .find(|delivery| delivery.id == *id)
+                .unwrap()
+                .clone()
+        })
+        .collect()
+}
+
 #[tokio::test]
-async fn a_transient_rejection_is_retried_and_a_permanent_one_is_not() {
+async fn a_refused_recipient_fails_alone() {
     let database = testing::database().await;
     let owner = actor(&database, "owner").await;
     let organization = organization(&database, &owner, Language::English).await;
@@ -362,31 +404,42 @@ async fn a_transient_rejection_is_retried_and_a_permanent_one_is_not() {
     let notifier = Notifier::new().unwrap().with_mailer(mailer(&sink));
     let run = outcome(vec![finding(organization, Severity::Critical, "GHSA-1")]);
 
+    // A transient refusal of alice: only her delivery is retried, bob has his email.
     sink.reject_next("450 4.2.1 mailbox busy");
     let ids = notifications::queue_new_findings(&database, &run, &public_url(), true)
         .await
         .unwrap();
     assert_eq!(
         notifier.attempt_all(&database, &ids).await.unwrap(),
-        [(Channel::Email, Outcome::Retried)]
+        [
+            (Channel::Email, Outcome::Retried),
+            (Channel::Email, Outcome::Delivered)
+        ]
     );
-    let recent = deliveries::recent(&database, &owner, organization, 10)
-        .await
-        .unwrap();
-    assert_eq!(recent[0].state, State::Pending);
+    let [alice, bob] =
+        <[_; 2]>::try_from(summaries(&database, &owner, organization, &ids).await).unwrap();
+    assert_eq!(alice.recipient.as_deref(), Some("alice@example.org"));
+    assert_eq!(alice.state, State::Pending);
     assert!(
-        recent[0].last_status.as_deref().unwrap().contains("450"),
+        alice.last_status.as_deref().unwrap().contains("450"),
         "{:?}",
-        recent[0].last_status
+        alice.last_status
     );
-    assert!(sink.received().is_empty());
+    assert_eq!(bob.state, State::Delivered);
+    let received = sink.received();
+    assert_eq!(received.len(), 1);
+    assert_eq!(received[0].recipients, ["bob@example.org"]);
     make_due(&database, ids[0]).await;
     assert_eq!(
         notifier.retry_due(&database, 10).await.unwrap(),
-        [(Channel::Email, Outcome::Delivered)]
+        [(Channel::Email, Outcome::Delivered)],
+        "the retry sends to alice only"
     );
-    assert_eq!(sink.received().len(), 1);
+    let received = sink.received();
+    assert_eq!(received.len(), 2);
+    assert_eq!(received[1].recipients, ["alice@example.org"]);
 
+    // A permanent refusal of alice abandons her delivery only.
     sink.reject_next("550 5.1.1 no such user");
     let ids = notifications::queue_new_findings(
         &database,
@@ -398,18 +451,24 @@ async fn a_transient_rejection_is_retried_and_a_permanent_one_is_not() {
     .unwrap();
     assert_eq!(
         notifier.attempt_all(&database, &ids).await.unwrap(),
-        [(Channel::Email, Outcome::Abandoned)]
+        [
+            (Channel::Email, Outcome::Abandoned),
+            (Channel::Email, Outcome::Delivered)
+        ]
     );
-    let recent = deliveries::recent(&database, &owner, organization, 10)
-        .await
-        .unwrap();
-    assert_eq!(recent[0].state, State::Failed);
+    let [alice, bob] =
+        <[_; 2]>::try_from(summaries(&database, &owner, organization, &ids).await).unwrap();
+    assert_eq!(alice.state, State::Failed);
     assert!(
-        recent[0].last_status.as_deref().unwrap().contains("550"),
+        alice.last_status.as_deref().unwrap().contains("550"),
         "{:?}",
-        recent[0].last_status
+        alice.last_status
     );
-    assert_eq!(recent[0].next_attempt_at, None);
+    assert_eq!(alice.next_attempt_at, None);
+    assert_eq!(bob.state, State::Delivered);
+    let received = sink.received();
+    assert_eq!(received.len(), 3);
+    assert_eq!(received[2].recipients, ["bob@example.org"]);
 }
 
 #[tokio::test]
@@ -641,6 +700,7 @@ async fn emails_render_in_both_languages_and_escape_the_data() {
 async fn the_test_email_is_sent_at_once_and_rate_limited() {
     let database = testing::database().await;
     let owner = actor(&database, "owner").await;
+    let second = actor(&database, "second").await;
     let organization = organization(&database, &owner, Language::English).await;
     let other = organizations::create(&database, &owner, "other", "Other")
         .await
@@ -668,12 +728,18 @@ async fn the_test_email_is_sent_at_once_and_rate_limited() {
     .await
     .unwrap();
     let received = sink.received();
-    assert_eq!(received.len(), 1);
-    assert!(received[0].data.contains("Subject: nanobom: test email"));
-    assert_eq!(
-        received[0].recipients,
-        ["alice@example.org", "bob@example.org"]
+    assert_eq!(received.len(), 2);
+    assert_eq!(received[0].recipients, ["alice@example.org"]);
+    assert_eq!(received[1].recipients, ["bob@example.org"]);
+    let data = &received[0].data;
+    assert!(data.contains("Subject: nanobom: test email"), "{data}");
+    assert!(
+        data.contains("To: alice@example.org, bob@example.org"),
+        "{data}"
     );
+    // The organization is named by its slug: its display name is free text.
+    assert!(data.contains("acme: test email"), "{data}");
+    assert!(!data.contains("Acme"), "{data}");
     assert!(matches!(
         email::send_test(
             &database,
@@ -685,24 +751,43 @@ async fn the_test_email_is_sent_at_once_and_rate_limited() {
         .await,
         Err(Error::Conflict(Problem::TestEmailTooSoon { .. }))
     ));
-    assert_eq!(sink.received().len(), 1);
+    assert_eq!(sink.received().len(), 2);
 
-    // The SMTP server's reply is shown.
+    // The same user, in another organization: limited too.
     email::set(
         &database,
         &owner,
         other,
-        &settings(&["nobody@example.org"], Language::English),
+        &settings(
+            &["nobody@example.org", "carol@example.org"],
+            Language::English,
+        ),
     )
     .await
     .unwrap();
+    assert!(matches!(
+        email::send_test(&database, &owner, other, Some(&mailer), &public_url()).await,
+        Err(Error::Conflict(Problem::TestEmailTooSoon { .. }))
+    ));
+    assert_eq!(sink.received().len(), 2);
+
+    // Another admin can: the refused test was not counted. The SMTP server's reply to the
+    // refused recipient is shown, and the other recipient still gets the email.
+    memberships::add(&database, &owner, other, "second", Role::Admin)
+        .await
+        .unwrap();
     sink.reject_next("550 5.1.1 no such user");
-    match email::send_test(&database, &owner, other, Some(&mailer), &public_url()).await {
+    match email::send_test(&database, &second, other, Some(&mailer), &public_url()).await {
         Err(Error::Invalid(Problem::TestEmailFailed { detail })) => {
+            assert!(detail.starts_with("nobody@example.org: "), "{detail}");
             assert!(detail.contains("550"), "{detail}");
+            assert!(!detail.contains("carol"), "{detail}");
         }
         other => panic!("{other:?}"),
     }
+    let received = sink.received();
+    assert_eq!(received.len(), 3);
+    assert_eq!(received[2].recipients, ["carol@example.org"]);
 }
 
 #[tokio::test]
@@ -722,7 +807,13 @@ async fn without_smtp_emails_are_neither_sent_nor_kept_pending() {
         .attempt_all(&database, &queued)
         .await
         .unwrap();
-    assert_eq!(outcomes, [(Channel::Email, Outcome::Abandoned)]);
+    assert_eq!(
+        outcomes,
+        [
+            (Channel::Email, Outcome::Abandoned),
+            (Channel::Email, Outcome::Abandoned)
+        ]
+    );
     let recent = deliveries::recent(&database, &owner, organization, 10)
         .await
         .unwrap();
@@ -742,7 +833,7 @@ async fn without_smtp_emails_are_neither_sent_nor_kept_pending() {
     .unwrap();
     assert_eq!(
         deliveries::cancel_pending_emails(&database).await.unwrap(),
-        1
+        2
     );
     assert!(
         Notifier::new()

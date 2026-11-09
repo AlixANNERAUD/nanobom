@@ -1146,21 +1146,27 @@ async fn the_email_form_saves_recipients_and_sends_a_test_email() {
         "{}",
         location(&response)
     );
+    // One message per recipient, each listing both in `To`.
     let received = sink.received();
-    assert_eq!(received.len(), 1);
-    assert_eq!(
-        received[0].recipients,
-        ["alice@example.org", "bob@example.org"]
+    assert_eq!(received.len(), 2);
+    assert_eq!(received[0].recipients, ["alice@example.org"]);
+    assert_eq!(received[1].recipients, ["bob@example.org"]);
+    assert!(
+        received[1]
+            .data
+            .contains("To: alice@example.org, bob@example.org"),
+        "{}",
+        received[1].data
     );
     let response = alice
         .submit(page, "send_test_email", "organization=acme")
         .await;
     assert!(
-        location(&response).contains("error=A%20test%20email%20was%20just%20sent"),
+        location(&response).contains("error=Too%20many%20test%20emails%20were%20sent%20recently"),
         "{}",
         location(&response)
     );
-    assert_eq!(sink.received().len(), 1);
+    assert_eq!(sink.received().len(), 2);
 
     alice
         .submit(page, "delete_email", "organization=acme")
@@ -1238,6 +1244,7 @@ async fn new_findings_of_an_upload_are_emailed() {
     let alice = Browser::sign_in(&server, "alice").await;
     let html = alice.page("/organizations/acme/settings").await;
     assert!(html.contains("Recent deliveries"), "{html}");
+    assert!(html.contains("Email to security@example.org"), "{html}");
 }
 
 #[tokio::test]
@@ -1263,6 +1270,16 @@ async fn smtp_settings_are_checked_at_startup_without_revealing_the_password() {
     ]);
     let error = nanobom::serve::mailer(&options).unwrap_err().to_string();
     assert!(error.contains("NANOBOM_SMTP_URL"), "{error}");
+    assert!(!error.contains("hunter2"), "{error}");
+    // Credentials over plain SMTP would be sent in clear text.
+    let options = crate::common::options(&[
+        "--smtp-url",
+        "smtp://user:hunter2@smtp.example.org:587",
+        "--smtp-from",
+        "nanobom@example.org",
+    ]);
+    let error = nanobom::serve::mailer(&options).unwrap_err().to_string();
+    assert!(error.contains("tls=required"), "{error}");
     assert!(!error.contains("hunter2"), "{error}");
     assert!(
         nanobom::serve::mailer(&crate::common::options(&[]))

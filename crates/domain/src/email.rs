@@ -10,8 +10,12 @@
 //! channel, prepared with the webhook deliveries of the same event ([`crate::notifications`])
 //! and retried with the same backoff.
 //! The message is rendered when it is queued ([`Message`]: a subject, a plain-text body and an
-//! HTML alternative, in the organization's language), so a retry sends the same message. One
-//! email goes to every recipient of an organization at once, all in `To`: recipients are the
+//! HTML alternative, in the organization's language), so a retry sends the same message.
+//!
+//! Each recipient has a delivery of its own, with only its address in the SMTP envelope: an
+//! SMTP server refuses recipients one by one, and the client gives up the whole transaction at
+//! the first refusal, so a single envelope would let one wrong address stop the email for
+//! everyone, for good on a 5xx. The `To` header still lists every recipient: they are the
 //! organization's own people, and seeing who else was told helps them coordinate.
 //!
 //! The SMTP server is configured by the operator ([`Mailer`]); without one, email is off, and
@@ -19,11 +23,16 @@
 //! not exist, a message refused as spam) is permanent and not retried; 4xx replies and
 //! connection failures are.
 //!
+//! Test emails are limited per organization, per user and for the whole instance
+//! ([`Mailer`]): recipients are not verified, and any signed-in user can create an
+//! organization, so the button must not turn the instance into a relay. For the same reason the
+//! test email carries no free text from users: it names the organization by its slug.
+//!
 //! Everything in an email that comes from the data (organization and project names, component
 //! identifiers, summaries) is clipped, kept on one line, and escaped in the HTML part.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, VecDeque},
     fmt::Write as _,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
@@ -31,7 +40,8 @@ use std::{
 
 use embedded_i18n::{translate, translate_plural};
 use lettre::{
-    AsyncSmtpTransport, AsyncTransport, Tokio1Executor,
+    Address, AsyncSmtpTransport, AsyncTransport, Tokio1Executor,
+    address::Envelope,
     message::{Mailbox, MultiPart},
 };
 use nanobom_entity::{organization_emails, organizations};
@@ -55,9 +65,14 @@ use crate::{
 /// tool: its members can then change without an admin of nanobom.
 pub const MAX_RECIPIENTS: usize = 20;
 
-/// Shortest wait between two test emails of an organization, so the button cannot be used to
-/// flood a mailbox.
+/// Shortest wait between two test emails of an organization, and between two test emails of
+/// a user, so the button cannot be used to flood a mailbox.
 pub const TEST_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Most test emails of the whole instance per [`TEST_WINDOW`]: users can create organizations,
+/// so the limits per organization and per user alone do not bound what the instance sends.
+pub const TEST_LIMIT: usize = 10;
+pub const TEST_WINDOW: Duration = Duration::from_secs(10 * 60);
 
 /// How many findings or projects an email lists; the link at the bottom leads to the others.
 pub const MAX_ITEMS: usize = 50;
@@ -279,6 +294,10 @@ pub async fn delete(
 /// A rendered email, stored as JSON in the payload of its delivery.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Message {
+    /// The addresses of the `To` header: every recipient of the organization, set when the
+    /// email is queued. Each delivery sends to one of them only (see the module documentation).
+    #[serde(default)]
+    pub to: Vec<String>,
     pub subject: String,
     pub text: String,
     pub html: String,
@@ -490,6 +509,7 @@ impl Frame<'_> {
             escape(&settings),
         );
         Message {
+            to: Vec::new(),
             subject: value(&subject, SUBJECT_LIMIT),
             text,
             html,
@@ -677,7 +697,9 @@ pub fn stale_projects(payload: &StaleProjectsPayload, language: Language) -> Mes
     frame.message(subject, &headline, None, &items, hidden)
 }
 
-/// The test email of an organization's settings.
+/// The test email of an organization's settings, to `recipients`. The organization's name is
+/// shown as given: [`send_test`] passes its slug, so that users cannot put text of their own in
+/// a message sent on demand to addresses nobody verified.
 pub fn test_message(
     organization: &PayloadOrganization,
     recipients: &[String],
@@ -698,13 +720,15 @@ pub fn test_message(
         translate!(locale = locale, "email.test_body"),
         &[("recipients", &recipients.join(", "))],
     );
-    frame.message(
+    let mut message = frame.message(
         translate!(locale = locale, "email.test_subject").to_owned(),
         &headline,
         Some(body),
         &[],
         None,
-    )
+    );
+    message.to = recipients.to_vec();
+    message
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -719,17 +743,51 @@ pub enum ConfigurationError {
     Url(String),
     #[error("invalid sender address (NANOBOM_SMTP_FROM): {0}")]
     From(String),
+    #[error(
+        "NANOBOM_SMTP_URL has credentials but no TLS: plain smtp:// would send them in clear \
+         text; use smtps://, or add ?tls=required (STARTTLS) to the URL"
+    )]
+    CredentialsWithoutTls,
+}
+
+/// Refuses credentials over a connection that may stay in clear text: lettre's `smtp://`
+/// without `tls=` never starts TLS, yet authenticates with the user and password of the URL.
+fn check_tls(url: &str) -> std::result::Result<(), ConfigurationError> {
+    // An unparsable URL is left to lettre, whose error is reported instead.
+    let Ok(parsed) = Url::parse(url) else {
+        return Ok(());
+    };
+    let has_credentials = !parsed.username().is_empty() || parsed.password().is_some();
+    let tls = parsed
+        .query_pairs()
+        .find(|(key, _)| key == "tls")
+        .map(|(_, value)| value.into_owned());
+    let encrypted =
+        parsed.scheme() != "smtp" || matches!(tls.as_deref(), Some("required" | "opportunistic"));
+    if has_credentials && !encrypted {
+        return Err(ConfigurationError::CredentialsWithoutTls);
+    }
+    Ok(())
+}
+
+/// When test emails were sent, to enforce the limits of [`Mailer`].
+#[derive(Debug, Default)]
+struct TestLog {
+    organizations: HashMap<i64, Instant>,
+    users: HashMap<i64, Instant>,
+    /// The test emails of the instance in the last [`TEST_WINDOW`], the oldest first.
+    instance: VecDeque<Instant>,
 }
 
 /// Sends emails through the SMTP server of the instance, and test emails at most once per
-/// [`TEST_INTERVAL`] per organization. Each message opens its own connection: emails are rare
-/// (a few per run), so a pool would only hold idle connections.
+/// [`TEST_INTERVAL`] per organization and per user, and [`TEST_LIMIT`] per [`TEST_WINDOW`] for
+/// the instance. Each message opens its own connection: emails are rare (a few per run), so a
+/// pool would only hold idle connections.
 #[derive(Clone)]
 pub struct Mailer {
     transport: AsyncSmtpTransport<Tokio1Executor>,
     from: Mailbox,
-    /// When each organization last sent a test email.
-    tests: Arc<Mutex<HashMap<i64, Instant>>>,
+    tests: Arc<Mutex<TestLog>>,
 }
 
 /// Leaves the transport out: it holds the SMTP credentials.
@@ -745,7 +803,8 @@ impl std::fmt::Debug for Mailer {
 impl Mailer {
     /// A mailer for an SMTP URL in lettre's syntax (`smtps://user:password@host`,
     /// `smtp://host:25?tls=required`...) and a sender (`nanobom@example.org` or
-    /// `nanobom <nanobom@example.org>`). Nothing is contacted yet.
+    /// `nanobom <nanobom@example.org>`). Nothing is contacted yet. A `smtp://` URL with
+    /// credentials must set `tls=required` or `tls=opportunistic`.
     pub fn new(url: &str, from: &str) -> std::result::Result<Self, ConfigurationError> {
         let from: Mailbox =
             from.trim()
@@ -753,6 +812,7 @@ impl Mailer {
                 .map_err(|error: lettre::address::AddressError| {
                     ConfigurationError::From(error.to_string())
                 })?;
+        check_tls(url.trim())?;
         let transport = AsyncSmtpTransport::<Tokio1Executor>::from_url(url.trim())
             .map_err(|error| ConfigurationError::Url(error.to_string()))?
             .timeout(Some(COMMAND_TIMEOUT))
@@ -764,16 +824,34 @@ impl Mailer {
         })
     }
 
-    /// Sends a message to every recipient at once, and tells how the server replied.
-    pub async fn send(&self, recipients: &[String], message: &Message) -> Attempt {
+    /// Sends a message to one recipient, and tells how the server replied. The `To` header
+    /// lists the message's [`Message::to`] (the recipient alone when it is empty); the envelope
+    /// holds `recipient` only.
+    pub async fn send(&self, recipient: &str, message: &Message) -> Attempt {
+        let address = match recipient.parse::<Address>() {
+            Ok(address) => address,
+            Err(error) => {
+                return Attempt::Impossible(format!("invalid recipient {recipient}: {error}"));
+            }
+        };
+        let envelope = match Envelope::new(Some(self.from.email.clone()), vec![address]) {
+            Ok(envelope) => envelope,
+            Err(error) => return Attempt::Impossible(format!("invalid envelope: {error}")),
+        };
         let mut builder = lettre::Message::builder()
             .from(self.from.clone())
-            .subject(&message.subject);
-        for recipient in recipients {
-            match recipient.parse::<Mailbox>() {
+            .subject(&message.subject)
+            .envelope(envelope);
+        let to = if message.to.is_empty() {
+            vec![recipient.to_owned()]
+        } else {
+            message.to.clone()
+        };
+        for header in &to {
+            match header.parse::<Mailbox>() {
                 Ok(mailbox) => builder = builder.to(mailbox),
                 Err(error) => {
-                    return Attempt::Impossible(format!("invalid recipient {recipient}: {error}"));
+                    return Attempt::Impossible(format!("invalid recipient {header}: {error}"));
                 }
             }
         }
@@ -805,39 +883,69 @@ impl Mailer {
         }
     }
 
-    /// Sends a message stored in a delivery: `recipients` comma-separated, `payload` a
+    /// Sends a message stored in a delivery: `recipient` its one address, `payload` a
     /// [`Message`] as JSON.
-    pub async fn send_stored(&self, recipients: &str, payload: &str) -> Attempt {
+    pub async fn send_stored(&self, recipient: &str, payload: &str) -> Attempt {
         let Ok(message) = serde_json::from_str::<Message>(payload) else {
             return Attempt::Impossible("the stored email cannot be read".to_owned());
         };
-        let recipients: Vec<String> = recipients
-            .split(',')
-            .map(str::trim)
-            .filter(|recipient| !recipient.is_empty())
-            .map(str::to_owned)
-            .collect();
-        self.send(&recipients, &message).await
+        self.send(recipient.trim(), &message).await
     }
 
-    /// Records a test email of an organization now, unless one was sent less than
-    /// [`TEST_INTERVAL`] ago; returns the seconds left to wait then.
-    fn allow_test(&self, organization_id: i64) -> std::result::Result<(), u64> {
-        let now = Instant::now();
+    /// Records a test email of an organization by a user now, unless it would exceed a limit
+    /// (see [`Mailer`]); returns the seconds left to wait then. A refused test is not recorded.
+    fn allow_test(&self, organization_id: i64, user_id: i64) -> std::result::Result<(), u64> {
+        self.allow_test_at(organization_id, user_id, Instant::now())
+    }
+
+    fn allow_test_at(
+        &self,
+        organization_id: i64,
+        user_id: i64,
+        now: Instant,
+    ) -> std::result::Result<(), u64> {
         let mut tests = self.tests.lock().expect("not poisoned");
-        tests.retain(|_, sent| now.duration_since(*sent) < TEST_INTERVAL);
-        if let Some(sent) = tests.get(&organization_id) {
-            let left = TEST_INTERVAL.saturating_sub(now.duration_since(*sent));
-            return Err(left.as_secs().max(1));
+        let TestLog {
+            organizations,
+            users,
+            instance,
+        } = &mut *tests;
+        organizations.retain(|_, sent| now.duration_since(*sent) < TEST_INTERVAL);
+        users.retain(|_, sent| now.duration_since(*sent) < TEST_INTERVAL);
+        while instance
+            .front()
+            .is_some_and(|sent| now.duration_since(*sent) >= TEST_WINDOW)
+        {
+            instance.pop_front();
         }
-        tests.insert(organization_id, now);
+        let interval_left =
+            |sent: &Instant| TEST_INTERVAL.saturating_sub(now.duration_since(*sent));
+        let mut wait = [
+            organizations.get(&organization_id).map(interval_left),
+            users.get(&user_id).map(interval_left),
+        ]
+        .into_iter()
+        .flatten()
+        .max();
+        if instance.len() >= TEST_LIMIT
+            && let Some(oldest) = instance.front()
+        {
+            let left = TEST_WINDOW.saturating_sub(now.duration_since(*oldest));
+            wait = wait.max(Some(left));
+        }
+        if let Some(wait) = wait {
+            return Err(wait.as_secs().max(1));
+        }
+        organizations.insert(organization_id, now);
+        users.insert(user_id, now);
+        instance.push_back(now);
         Ok(())
     }
 }
 
-/// Sends a test email to the saved recipients of an organization, at once, and fails with the
-/// SMTP server's reply if it is not accepted. Requires [`Permission::ManageWebhook`]; at most
-/// one test per organization every [`TEST_INTERVAL`], whether it succeeded or not.
+/// Sends a test email to each saved recipient of an organization, at once, and fails with the
+/// SMTP server's replies to the recipients it did not accept. Requires
+/// [`Permission::ManageWebhook`]; limited as [`Mailer`] says, whether it succeeded or not.
 pub async fn send_test(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -857,27 +965,38 @@ pub async fn send_test(
         .await?
         .ok_or(Error::NotFound)?;
     mailer
-        .allow_test(organization_id)
+        .allow_test(organization_id, actor.user_id)
         .map_err(|seconds| Error::conflict(Problem::TestEmailTooSoon { seconds }))?;
+    // The slug, not the display name: the name is free text of the user's choosing.
     let organization = PayloadOrganization {
         url: link(public_url, &format!("organizations/{}", organization.slug)),
+        name: organization.slug.clone(),
         slug: organization.slug,
-        name: organization.name,
     };
     let message = test_message(&organization, &settings.recipients, settings.language);
-    let attempt = mailer.send(&settings.recipients, &message).await;
-    if attempt.succeeded() {
+    let mut failures = Vec::new();
+    for recipient in &settings.recipients {
+        let attempt = mailer.send(recipient, &message).await;
+        if attempt.succeeded() {
+            continue;
+        }
+        failures.push(format!("{recipient}: {}", attempt.description()));
+        // No reply at all: the server is unreachable for the others too.
+        if matches!(attempt, Attempt::Unreachable(_)) {
+            break;
+        }
+    }
+    if failures.is_empty() {
         tracing::info!(organization = organization_id, "test email sent");
         Ok(())
     } else {
+        let detail = failures.join("; ");
         tracing::warn!(
             organization = organization_id,
-            status = attempt.description(),
+            status = %detail,
             "test email failed"
         );
-        Err(Error::invalid(Problem::TestEmailFailed {
-            detail: attempt.description().to_owned(),
-        }))
+        Err(Error::invalid(Problem::TestEmailFailed { detail }))
     }
 }
 
@@ -938,5 +1057,62 @@ mod tests {
         )
         .unwrap();
         assert!(!format!("{mailer:?}").contains("secret"));
+    }
+
+    #[test]
+    fn credentials_need_tls() {
+        for url in [
+            "smtp://user:secret@smtp.example.org:587",
+            "smtp://user@smtp.example.org",
+            "smtp://user:secret@smtp.example.org:587?tls=none",
+        ] {
+            let error = Mailer::new(url, "nanobom@example.org").unwrap_err();
+            assert!(
+                matches!(error, ConfigurationError::CredentialsWithoutTls),
+                "{url}: {error}"
+            );
+            assert!(!error.to_string().contains("secret"), "{error}");
+        }
+        for url in [
+            "smtp://user:secret@smtp.example.org:587?tls=required",
+            "smtp://user:secret@smtp.example.org:587?tls=opportunistic",
+            "smtps://user:secret@smtp.example.org",
+            "smtp://relay.internal:25",
+        ] {
+            assert!(Mailer::new(url, "nanobom@example.org").is_ok(), "{url}");
+        }
+    }
+
+    #[test]
+    fn test_emails_are_limited_per_organization_user_and_instance() {
+        let mailer = Mailer::new("smtp://relay.internal:25", "nanobom@example.org").unwrap();
+        let start = Instant::now();
+        mailer.allow_test_at(1, 1, start).unwrap();
+        // The same organization by another user, another organization by the same user.
+        assert!(mailer.allow_test_at(1, 2, start).is_err());
+        let left = mailer.allow_test_at(2, 1, start).unwrap_err();
+        assert_eq!(left, TEST_INTERVAL.as_secs());
+        // Refused tests are not recorded: another user and organization still can.
+        mailer.allow_test_at(2, 2, start).unwrap();
+        let later = start + TEST_INTERVAL;
+        mailer.allow_test_at(1, 1, later).unwrap();
+
+        // The instance: TEST_LIMIT tests in the window, whoever sends them.
+        let mut tests = 3;
+        let mut id = 10;
+        while tests < TEST_LIMIT {
+            mailer.allow_test_at(id, id, later).unwrap();
+            tests += 1;
+            id += 1;
+        }
+        let left = mailer.allow_test_at(id, id, later).unwrap_err();
+        assert_eq!(left, (TEST_WINDOW - TEST_INTERVAL).as_secs());
+        // Once the oldest leave the window, tests are allowed again, and the log only keeps
+        // what still counts.
+        mailer.allow_test_at(id, id, start + TEST_WINDOW).unwrap();
+        let log = mailer.tests.lock().unwrap();
+        assert_eq!(log.instance.len(), TEST_LIMIT - 1);
+        assert_eq!(log.organizations.len(), 1);
+        assert_eq!(log.users.len(), 1);
     }
 }

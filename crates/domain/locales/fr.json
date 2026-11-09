@@ -57,7 +57,7 @@
     "too_many_recipients": "{maximum} destinataires au plus sont autorisés ; utilisez une liste de diffusion au-delà",
     "unknown_email_language": "langue d’e-mail inconnue",
     "email_not_configured": "l’envoi d’e-mails n’est pas configuré sur ce serveur",
-    "test_email_too_soon": "un e-mail de test vient d’être envoyé ; réessayez dans {seconds} secondes",
+    "test_email_too_soon": "trop d’e-mails de test ont été envoyés récemment ; réessayez dans {seconds} secondes",
     "test_email_failed": "l’e-mail de test n’a pas pu être envoyé : {detail}",
     "unknown_license_id": "« {license} » n’est pas un identifiant de licence SPDX (voir https://spdx.org/licenses) ni LicenseRef- suivi de lettres, de chiffres, de « . » ou de « - »",
     "unknown_license_action": "action de licence « {action} » inconnue ; actions possibles : allow, warn ou forbid",

@@ -27,8 +27,8 @@
 //!
 //! Each row has a [`Channel`]. Emails share the table and its lease, claim and backoff logic
 //! rather than having a queue of their own, which would duplicate every query of this module:
-//! an email row holds its recipients in `url` (comma-separated) and the rendered message in
-//! `payload` (see [`crate::email::Message`]).
+//! an email row holds its one recipient in `url` (an email to several recipients is a row per
+//! recipient) and the rendered message in `payload` (see [`crate::email::Message`]).
 
 use chrono::{DateTime, FixedOffset, TimeDelta};
 use nanobom_entity::webhook_deliveries;
@@ -226,7 +226,7 @@ pub async fn enqueue(
 /// Like [`enqueue`], for a body rendered by the caller: the chat formats of
 /// [`crate::notifications::Format`] are not the serialization of the payload, and an email
 /// carries a rendered message. The body is stored as is and sent as is by every attempt. For an
-/// email, `url` holds the recipients.
+/// email, `url` holds its recipient.
 pub async fn enqueue_body(
     database: &impl ConnectionTrait,
     organization_id: Option<i64>,
@@ -413,6 +413,8 @@ pub async fn prune(database: &impl ConnectionTrait, now: DateTime<FixedOffset>) 
 pub struct DeliverySummary {
     pub id: i64,
     pub channel: Channel,
+    /// The address of an email; `None` for a webhook, whose URL may hold a secret.
+    pub recipient: Option<String>,
     pub event: String,
     pub state: State,
     pub attempts: i64,
@@ -446,6 +448,7 @@ pub async fn recent(
         .map(|model| DeliverySummary {
             state: state(&model),
             id: model.id,
+            recipient: (Channel::parse(&model.channel) == Channel::Email).then_some(model.url),
             channel: Channel::parse(&model.channel),
             event: model.event,
             attempts: model.attempts,

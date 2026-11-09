@@ -847,41 +847,58 @@ pub async fn enqueue<T: Payload>(
     database: &impl ConnectionTrait,
     deliveries: &[Delivery<T>],
 ) -> Result<Vec<i64>> {
+    Ok(enqueue_each(database, deliveries)
+        .await?
+        .into_iter()
+        .flatten()
+        .collect())
+}
+
+/// Like [`enqueue`], with the ids of each delivery apart: a webhook delivery is one row, an
+/// email one row per recipient, all with the same message, so that a recipient the SMTP
+/// server refuses fails alone (see [`crate::email`]).
+async fn enqueue_each<T: Payload>(
+    database: &impl ConnectionTrait,
+    deliveries: &[Delivery<T>],
+) -> Result<Vec<Vec<i64>>> {
     let now = Utc::now().fixed_offset();
     let mut ids = Vec::with_capacity(deliveries.len());
     for delivery in deliveries {
-        let (channel, address, body) = match &delivery.target {
-            Target::Webhook { url, format } => (
-                Channel::Webhook,
-                url.clone(),
-                delivery.payload.render(*format),
-            ),
+        let rows: Vec<(Channel, &str, String)> = match &delivery.target {
+            Target::Webhook { url, format } => {
+                vec![(Channel::Webhook, url, delivery.payload.render(*format))]
+            }
             Target::Email {
                 recipients,
                 language,
             } => {
-                let message = delivery
+                let mut message = delivery
                     .payload
                     .email(*language)
                     .expect("only documents with an email are sent by email");
-                (
-                    Channel::Email,
-                    recipients.join(", "),
-                    serde_json::to_string(&message).expect("messages serialize to JSON"),
-                )
+                message.to.clone_from(recipients);
+                let body = serde_json::to_string(&message).expect("messages serialize to JSON");
+                recipients
+                    .iter()
+                    .map(|recipient| (Channel::Email, recipient.as_str(), body.clone()))
+                    .collect()
             }
         };
-        let row = deliveries::enqueue_body(
-            database,
-            delivery.organization_id,
-            channel,
-            &address,
-            delivery.payload.event(),
-            body,
-            now,
-        )
-        .await?;
-        ids.push(row.id);
+        let mut delivery_ids = Vec::with_capacity(rows.len());
+        for (channel, address, body) in rows {
+            let row = deliveries::enqueue_body(
+                database,
+                delivery.organization_id,
+                channel,
+                address,
+                delivery.payload.event(),
+                body,
+                now,
+            )
+            .await?;
+            delivery_ids.push(row.id);
+        }
+        ids.push(delivery_ids);
     }
     Ok(ids)
 }
@@ -897,24 +914,26 @@ pub async fn queue_new_findings(
 ) -> Result<Vec<i64>> {
     let transaction = crate::database::begin_write(database).await?;
     let deliveries = new_findings_deliveries(&transaction, outcome, public_url, email).await?;
-    let ids = enqueue(&transaction, &deliveries).await?;
+    let ids = enqueue_each(&transaction, &deliveries).await?;
     transaction.commit().await?;
     // The attempt logs only know the queued row, whose body is rendered (JSON, Slack, Teams or
     // an email), so the number of findings is logged here, under the same delivery id.
-    for (delivery, id) in deliveries.iter().zip(&ids) {
-        tracing::info!(
-            delivery = id,
-            organization = delivery.organization_id,
-            channel = match delivery.target {
-                Target::Webhook { .. } => Channel::Webhook.as_str(),
-                Target::Email { .. } => Channel::Email.as_str(),
-            },
-            findings = delivery.payload.count,
-            known_exploited = delivery.payload.known_exploited_count,
-            "findings.new delivery queued"
-        );
+    for (delivery, ids) in deliveries.iter().zip(&ids) {
+        for id in ids {
+            tracing::info!(
+                delivery = id,
+                organization = delivery.organization_id,
+                channel = match delivery.target {
+                    Target::Webhook { .. } => Channel::Webhook.as_str(),
+                    Target::Email { .. } => Channel::Email.as_str(),
+                },
+                findings = delivery.payload.count,
+                known_exploited = delivery.payload.known_exploited_count,
+                "findings.new delivery queued"
+            );
+        }
     }
-    Ok(ids)
+    Ok(ids.into_iter().flatten().collect())
 }
 
 /// Prepares the `projects.stale` deliveries ([`stale_deliveries`]) and records them in the

@@ -117,9 +117,11 @@ When the instance has an SMTP server (`NANOBOM_SMTP_URL`, see
 [configuration](configuration.md#email)), an organization's `findings.new` and `projects.stale`
 events are also emailed to its recipients:
 
-- **One message per event and organization**, to every recipient at once, all in `To`: the
-  recipients are the organization's own people, and seeing who else was told helps them
-  coordinate. At most 20 recipients; use a mailing list for more.
+- **One message per event and organization**, sent to each recipient separately: the SMTP
+  envelope of each copy holds one recipient, so an address the SMTP server refuses fails alone
+  and the others still get the email. The `To` header lists every recipient: they are the
+  organization's own people, and seeing who else was told helps them coordinate. At most 20
+  recipients; use a mailing list for more.
 - **From** `NANOBOM_SMTP_FROM`.
 - **Language**: English or French, chosen per organization (English by default).
 - **Subject**: `nanobom: 3 new vulnerabilities in acme/web` (the organization's slug and the
@@ -140,9 +142,11 @@ events are also emailed to its recipients:
 
 `run.failed` is not emailed: it goes to the failure webhook only.
 
-The **Send a test email** button of the settings sends a test message to the saved recipients at
-once and shows the SMTP server's reply when it refuses it. An organization can send one test
-email every 30 seconds.
+The **Send a test email** button of the settings sends a test message to each saved recipient at
+once and shows the SMTP server's reply for each address it refuses. The test message names the
+organization by its slug, never its display name, since it goes on demand to addresses nobody
+verified. Test emails are limited to one every 30 seconds per organization, one every 30 seconds
+per user, and 10 every 10 minutes for the whole instance.
 
 ## Delivery
 
@@ -163,8 +167,9 @@ Webhook documents and emails go through the same queue, with the same retries.
   | `4xx`, except `408` and `429` | Failed for good: the receiver refuses the document and would refuse it again, so it is not retried |
   | `408`, `429`, `5xx`, any other status, a network error or a timeout | Retried |
 
-- An email is sent to the SMTP server in one connection; each SMTP command may take 15 seconds,
-  the whole message 60. How the SMTP server's reply is handled:
+- Each recipient of an email is a delivery of its own, retried and abandoned on its own. Its copy
+  is sent in one connection; each SMTP command may take 15 seconds, the whole message 60. How
+  the SMTP server's reply is handled:
 
   | Reply | Outcome |
   | --- | --- |
@@ -180,7 +185,8 @@ Webhook documents and emails go through the same queue, with the same retries.
 - Every attempt that fails is logged (`notification delivery failed`, with the delivery, its
   channel, its event, the attempt number and the status) and counted by
   `nanobom_webhook_deliveries_total` ([metrics](metrics.md)). The latest deliveries of an
-  organization, webhook and email, are listed in its settings with their channel.
+  organization, webhook and email, are listed in its settings with their channel, and the
+  recipient of each email.
 - Removing an organization's webhook, disabling it or changing its URL or format abandons its deliveries
   still waiting for an attempt or a retry: no new attempt goes to an address the admins replaced
   or turned off. An attempt already in progress at that moment is not stopped, so its request

@@ -443,7 +443,7 @@ pub async fn load_settings(organization: String) -> Result<SettingsData, ServerF
             .into_iter()
             .map(|delivery| WebhookDelivery {
                 id: delivery.id,
-                email: delivery.channel == nanobom_domain::deliveries::Channel::Email,
+                recipient: delivery.recipient,
                 event: delivery.event,
                 state: crate::server::delivery_state(delivery.state),
                 attempts: delivery.attempts,
