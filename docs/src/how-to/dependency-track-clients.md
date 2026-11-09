@@ -20,10 +20,11 @@ is explained in [Dependency-Track compatibility](../explanation/dependency-track
   with a project UUID only gets a `400`.
 
 - **Send a version that names a release, not a build.** `projectVersion` is the
-  [project version](../explanation/concepts.md#versions) the SBOM goes to; a project keeps at
-  most 50 active versions, so a build number or a commit hash, new at every build, soon fills
-  it. Use a release or branch name, or leave `projectVersion` out to keep one version per
-  project. Version names are 1 to 64 letters, digits, `.`, `_`, `+`, `/` or `-`.
+  [project version](../explanation/concepts.md#versions) the SBOM goes to. A build number or a
+  commit hash, new at every build, creates a version per build: it works, but past 50 active
+  versions each build makes the oldest one inactive ([the cap](../reference/versions.md#the-cap)),
+  and the project page lists every build. Use a release or branch name, or leave
+  `projectVersion` out to keep one version per project. Version names are 1 to 64 letters, digits, `.`, `_`, `+`, `/` or `-`.
 
 Earlier nanobom releases recorded `projectVersion` as the upload's image tag and kept one
 inventory per project. Since project versions, each `projectVersion` is a version of its own

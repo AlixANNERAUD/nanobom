@@ -1373,3 +1373,184 @@ async fn the_project_page_shows_one_version_at_a_time() {
     assert!(html.contains("href=\"/organizations/acme/projects/web?version=2.0\""));
     assert!(html.contains("Inherited from the unnamed version"));
 }
+
+#[tokio::test]
+async fn versions_are_managed_from_the_project_page() {
+    use nanobom_domain::{access::Role, memberships, versions};
+    let server = server(&[]).await;
+    server.source.publish(
+        json!({
+            "id": "GHSA-35jh-r3h4-6jhm",
+            "modified": "2024-01-01T00:00:00Z",
+            "summary": "Command Injection in lodash",
+            "database_specific": {"severity": "HIGH"}
+        }),
+        &["pkg:npm/lodash@4.17.20"],
+    );
+    let owner = local_user(&server.database, "alice", PASSWORD).await;
+    local_user(&server.database, "bob", PASSWORD).await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    memberships::add(
+        &server.database,
+        &owner,
+        organization.id,
+        "bob",
+        Role::Viewer,
+    )
+    .await
+    .unwrap();
+    let secret = tokens::create(&server.database, &owner, organization.id, None, "CI")
+        .await
+        .unwrap()
+        .secret;
+    let upload = |query: &str, document: &str| {
+        Request::put(format!("/api/organizations/acme/projects/web/sbom{query}"))
+            .header(header::AUTHORIZATION, format!("Bearer {secret}"))
+            .body(Body::from(sbom_document(document)))
+            .unwrap()
+    };
+    // 1.0 has lodash; 2.0 inherits it and its run fixes it; 3.0 is created after, without it.
+    server
+        .send(upload("?version=1.0", "cyclonedx-npm.json"))
+        .await;
+    server.runner.wait_until_idle().await;
+    server
+        .send(upload("?version=2.0", "cyclonedx-py.json"))
+        .await;
+    server.runner.wait_until_idle().await;
+    server
+        .send(upload("?version=3.0&latest=false", "cyclonedx-py.json"))
+        .await;
+    server.runner.wait_until_idle().await;
+    let project = projects::find(&server.database, &owner, organization.id, "web")
+        .await
+        .unwrap();
+    let state = || async {
+        let mut listed: Vec<(String, bool, bool)> =
+            versions::list(&server.database, &owner, project.id)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|version| (version.name, version.latest, version.active))
+                .collect();
+        listed.sort();
+        listed
+    };
+    let alice = Browser::sign_in(&server, "alice").await;
+    let bob = Browser::sign_in(&server, "bob").await;
+    let page = "/organizations/acme/projects/web";
+
+    let html = alice.page(page).await;
+    assert!(html.contains(">Versions<"), "{html}");
+    assert!(html.contains("action=\"/api/set_version_active\""));
+    assert!(html.contains("action=\"/api/set_latest_version\""));
+    assert!(html.contains("action=\"/api/delete_version\""));
+    // Viewers see the versions, not the actions.
+    let html = bob.page(page).await;
+    assert!(html.contains(">Versions<"));
+    assert!(!html.contains("action=\"/api/set_version_active\""));
+    assert!(!html.contains("action=\"/api/delete_version\""));
+    let response = bob
+        .submit(
+            page,
+            "set_version_active",
+            "organization=acme&project=web&version=1.0&active=false",
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert!(location(&response).contains("error="));
+
+    // Made inactive, a version is marked in the selector and on its page.
+    let response = alice
+        .submit(
+            page,
+            "set_version_active",
+            "organization=acme&project=web&version=1.0&active=false",
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert!(location(&response).contains("notice="));
+    assert_eq!(
+        state().await,
+        [
+            ("1.0".to_owned(), false, false),
+            ("2.0".to_owned(), true, true),
+            ("3.0".to_owned(), false, true)
+        ]
+    );
+    let html = alice.page(&format!("{page}?version=1.0")).await;
+    assert!(html.contains("1.0 (inactive)"));
+    assert!(html.contains("This version is inactive"));
+    assert!(html.contains("Make active"));
+    // Searches leave it out unless asked.
+    let html = alice.page("/search?query=lodash").await;
+    assert!(!html.contains("/organizations/acme/projects/web?version=1.0"));
+    let html = alice.page("/search?query=lodash&inactive=1").await;
+    assert!(html.contains("href=\"/organizations/acme/projects/web?version=1.0\""));
+    assert!(html.contains("version 1.0"));
+    assert!(html.contains(" · inactive"));
+
+    // The finding page compares the versions.
+    let lodash = findings::list_in_version(
+        &server.database,
+        &owner,
+        project.id,
+        Some("1.0"),
+        &Filter::default(),
+    )
+    .await
+    .unwrap();
+    let html = alice.page(&format!("/findings/{}", lodash[0].id)).await;
+    assert!(html.contains("Versions of this project"));
+    assert!(html.contains("Not affected"), "3.0 never had lodash");
+    assert!(html.contains("this finding"));
+
+    // The latest moves; it can be neither made inactive nor deleted.
+    let response = alice
+        .submit(
+            page,
+            "set_latest_version",
+            "organization=acme&project=web&version=3.0",
+        )
+        .await;
+    assert!(location(&response).contains("notice="));
+    let response = alice
+        .submit(
+            page,
+            "delete_version",
+            "organization=acme&project=web&version=3.0&confirm=1",
+        )
+        .await;
+    assert!(location(&response).contains("error="));
+    // Deletion needs the confirmation box.
+    let response = alice
+        .submit(
+            page,
+            "delete_version",
+            "organization=acme&project=web&version=2.0",
+        )
+        .await;
+    assert!(location(&response).contains("error="));
+    assert_eq!(state().await.len(), 3);
+    let response = alice
+        .submit(
+            page,
+            "delete_version",
+            "organization=acme&project=web&version=2.0&confirm=1",
+        )
+        .await;
+    let target = location(&response);
+    assert!(
+        target.starts_with(&format!("{page}?notice=")),
+        "back to the latest version: {target}"
+    );
+    assert_eq!(
+        state().await,
+        [
+            ("1.0".to_owned(), false, false),
+            ("3.0".to_owned(), true, true)
+        ]
+    );
+}

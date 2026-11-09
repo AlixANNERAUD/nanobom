@@ -207,9 +207,25 @@
     "licenses_none": "Every component's license is allowed by the organization's policy.",
     "licenses_because": "because of {licenses}",
     "license_unknown": "Unknown",
-    "version": "Version",
     "license": "License",
-    "verdict": "Verdict"
+    "verdict": "Verdict",
+    "version_inactive_option": "{version} (inactive)",
+    "inactive_title": "This version is inactive",
+    "inactive_text": "Runs no longer check it, and its findings are left out of counts, search and notifications. An upload to it, or a user who manages projects, makes it active again.",
+    "versions_title": "Versions",
+    "versions_description": "Inactive versions are no longer checked, counted or notified, and stay readable. At most 50 versions are active: past that, an upload makes the version uploaded to the longest ago inactive.",
+    "versions_caption": "Versions of the project, newest first, with their open findings",
+    "version_state": "State",
+    "version_last_upload": "Last upload",
+    "version_is_latest": "Latest",
+    "version_active": "Active",
+    "version_inactive": "Inactive",
+    "make_latest": "Make latest",
+    "make_inactive": "Make inactive",
+    "make_active": "Make active",
+    "delete_version": "Delete",
+    "delete_version_confirm": "Delete {version} with its components, upload history and findings",
+    "delete_version_submit": "Delete version"
   },
   "finding": {
     "title": "Finding",
@@ -288,7 +304,13 @@
     "epss_value": "{score} (percentile {percentile}, {date})",
     "percent": "{value}%",
     "kev_link": "CISA Known Exploited Vulnerabilities catalog",
-    "epss_link": "About EPSS"
+    "epss_link": "About EPSS",
+    "versions_title": "Versions of this project",
+    "versions_description": "Where each version stands with this vulnerability or its aliases.",
+    "not_affected": "Not affected",
+    "version_latest": "latest",
+    "version_inactive": "inactive",
+    "version_current": "this finding"
   },
   "search": {
     "title": "Search",
@@ -307,7 +329,9 @@
     "version": "Version",
     "license": "License",
     "unknown_license": "Unknown",
-    "project": "Project"
+    "project": "Project",
+    "include_inactive": "Include inactive versions",
+    "inactive": "inactive"
   },
   "settings": {
     "title": "Settings",
@@ -448,6 +472,11 @@
     "user_enabled": "User enabled.",
     "administrator_updated": "Administration rights updated.",
     "password_changed": "Password changed.",
-    "license_policy_saved": "License policy saved."
+    "license_policy_saved": "License policy saved.",
+    "version_latest": "Version marked latest.",
+    "version_inactive": "Version made inactive.",
+    "version_active": "Version made active; a run has started to check it.",
+    "confirm_version": "Tick the box to confirm the version's deletion.",
+    "version_deleted": "Version deleted."
   }
 }

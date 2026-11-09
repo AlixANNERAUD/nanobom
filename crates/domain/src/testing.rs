@@ -111,9 +111,12 @@ impl FakeSource {
         self.state.lock().expect("not poisoned").panicking = true;
     }
 
-    /// Holds queries until `resume`, keeping runs in progress.
+    /// Holds queries until `resume`, keeping runs in progress. Forgets queries started before,
+    /// so that `query_started` then waits for one this pause holds, not for an earlier run's.
     pub fn pause(&self) {
         self.state.lock().expect("not poisoned").paused = true;
+        // Polling once consumes the permit an earlier, unawaited query left, if any.
+        std::pin::pin!(self.query_started.notified()).enable();
     }
 
     /// Releases held queries.

@@ -26,8 +26,11 @@ previous one of its version.
   unnamed version. Dependency-Track's latest-version flag (`isLatest`) is nanobom's `latest`.
   Before nanobom had versions, `projectVersion` was only recorded as the upload's image tag, and
   uploads of every version replaced each other; pipelines that send a new `projectVersion` with
-  every build (a build number) now create a version each time, up to the limit of 50 active
-  versions per project, and should send a release or branch name instead.
+  every build (a build number) now create a version each time. They keep working: past 50
+  active versions per project, each new build makes the version uploaded to the longest ago
+  inactive ([the cap](../reference/versions.md#the-cap)), so the latest 50 builds are checked.
+  A release or branch name is still the better version: it keeps one version per line of
+  development instead of one per build.
 - **Versions differ in two ways.** nanobom accepts a narrower set of version names (letters,
   digits, `.`, `_`, `+`, `/` and `-`, up to 64 characters) and refuses others with a `400`,
   rather than mapping them to a name nobody chose. And a new version becomes the latest unless
@@ -39,8 +42,10 @@ previous one of its version.
 - **`autoCreate` keeps its meaning.** Without it, a missing project is a `404`, as in
   Dependency-Track. With it, an organization token creates the project; a project token never
   does, whatever the request says ([Security model](security.md#upload-tokens)).
-- **The rest is ignored.** Tags, parent projects and the active flag have no equivalent; they are
-  accepted so that clients sending them still work.
+- **The rest is ignored.** Tags and parent projects have no equivalent; they are accepted so that
+  clients sending them still work. So is the active flag (`isActive`): nanobom versions can be
+  [inactive](../reference/versions.md#states), but an upload always makes its version active, as
+  something still builds it.
 
 ## Processing status
 

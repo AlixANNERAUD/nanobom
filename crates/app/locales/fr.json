@@ -207,9 +207,25 @@
     "licenses_none": "La politique de l’organisation autorise la licence de chaque composant.",
     "licenses_because": "à cause de {licenses}",
     "license_unknown": "Inconnue",
-    "version": "Version",
     "license": "Licence",
-    "verdict": "Verdict"
+    "verdict": "Verdict",
+    "version_inactive_option": "{version} (inactive)",
+    "inactive_title": "Cette version est inactive",
+    "inactive_text": "Les analyses ne la vérifient plus, et ses vulnérabilités ne sont plus comptées, cherchées ni notifiées. Un envoi vers elle, ou un utilisateur qui gère les projets, la rend de nouveau active.",
+    "versions_title": "Versions",
+    "versions_description": "Les versions inactives ne sont plus vérifiées, comptées ni notifiées, et restent consultables. Au plus 50 versions sont actives : au-delà, un envoi rend inactive la version qui a reçu un envoi il y a le plus longtemps.",
+    "versions_caption": "Versions du projet, des plus récentes aux plus anciennes, avec leurs vulnérabilités ouvertes",
+    "version_state": "État",
+    "version_last_upload": "Dernier envoi",
+    "version_is_latest": "Dernière",
+    "version_active": "Active",
+    "version_inactive": "Inactive",
+    "make_latest": "Marquer comme dernière",
+    "make_inactive": "Rendre inactive",
+    "make_active": "Rendre active",
+    "delete_version": "Supprimer",
+    "delete_version_confirm": "Supprimer {version} avec ses composants, son historique d'envois et ses vulnérabilités",
+    "delete_version_submit": "Supprimer la version"
   },
   "finding": {
     "title": "Vulnérabilité",
@@ -288,7 +304,13 @@
     "epss_value": "{score} (percentile {percentile}, {date})",
     "percent": "{value} %",
     "kev_link": "Catalogue des vulnérabilités exploitées connues de la CISA",
-    "epss_link": "À propos d’EPSS"
+    "epss_link": "À propos d’EPSS",
+    "versions_title": "Versions de ce projet",
+    "versions_description": "La situation de chaque version face à cette vulnérabilité ou à ses alias.",
+    "not_affected": "Non affectée",
+    "version_latest": "dernière",
+    "version_inactive": "inactive",
+    "version_current": "cette vulnérabilité"
   },
   "search": {
     "title": "Recherche",
@@ -307,7 +329,9 @@
     "version": "Version",
     "license": "Licence",
     "unknown_license": "Inconnue",
-    "project": "Projet"
+    "project": "Projet",
+    "include_inactive": "Inclure les versions inactives",
+    "inactive": "inactive"
   },
   "settings": {
     "title": "Paramètres",
@@ -448,6 +472,11 @@
     "user_enabled": "Utilisateur activé.",
     "administrator_updated": "Droits d’administration mis à jour.",
     "password_changed": "Mot de passe modifié.",
-    "license_policy_saved": "Politique de licences enregistrée."
+    "license_policy_saved": "Politique de licences enregistrée.",
+    "version_latest": "Version marquée comme dernière.",
+    "version_inactive": "Version rendue inactive.",
+    "version_active": "Version rendue active ; une analyse a démarré pour la vérifier.",
+    "confirm_version": "Cochez la case pour confirmer la suppression de la version.",
+    "version_deleted": "Version supprimée."
   }
 }

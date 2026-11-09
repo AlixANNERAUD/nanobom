@@ -14,8 +14,8 @@ about a particular organization.
 
 | Metric | Type | |
 | --- | --- | --- |
-| `nanobom_open_findings{severity}` | gauge | Open findings across the instance, by severity (`critical`, `high`, `medium`, `low`, `unknown`); ignored findings are not counted |
-| `nanobom_open_findings_known_exploited` | gauge | Open findings with a CVE in CISA's KEV catalog |
+| `nanobom_open_findings{severity}` | gauge | Open findings of the active project versions across the instance, by severity (`critical`, `high`, `medium`, `low`, `unknown`); ignored findings and [inactive versions](versions.md#states) are not counted |
+| `nanobom_open_findings_known_exploited` | gauge | Open findings of the active project versions with a CVE in CISA's KEV catalog |
 | `nanobom_stale_projects` | gauge | Projects whose SBOM stopped coming |
 | `nanobom_last_successful_run_timestamp_seconds` | gauge | Unix time at which the last successful run started |
 | `nanobom_runs_total{status}` | counter | Runs, by status (`succeeded`, `failed`) |

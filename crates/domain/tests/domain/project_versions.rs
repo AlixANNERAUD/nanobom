@@ -6,16 +6,18 @@ use std::sync::Arc;
 use chrono::{Duration, Utc};
 use nanobom_domain::{
     Error, Problem,
-    access::Actor,
+    access::{Actor, Role},
     evaluation::{Evaluator, RunOutcome, Scope, Trigger},
+    findings::VersionStatus,
     findings::{self, EventKind, Filter, Justification, Status},
     inventory::{self, UploadOutcome, UploadSource},
+    memberships,
     notifications::{self, Format, Payload, Webhook},
     organizations, projects, testing,
     testing::FakeSource,
     tokens,
     users::{self, NewUser},
-    versions,
+    versions, vex,
 };
 use nanobom_entity::{finding_events, findings as findings_entity, project_versions};
 use nanobom_osv::Severity;
@@ -28,6 +30,7 @@ use serde_json::json;
 const LODASH: &str = "pkg:npm/lodash@4.17.20";
 const MINIMIST: &str = "pkg:npm/minimist@1.2.5";
 const EXPRESS: &str = "pkg:npm/express@4.18.2";
+const LODASH_ES: &str = "pkg:npm/lodash-es@4.17.20";
 
 struct Fixture {
     database: DatabaseConnection,
@@ -345,18 +348,28 @@ async fn a_project_created_in_the_interface_takes_the_first_version_named() {
 }
 
 #[tokio::test]
-async fn active_versions_are_capped() {
+async fn uploads_past_the_cap_make_the_oldest_version_inactive() {
     let fixture = Fixture::new().await;
+    // The unnamed version is the latest and the oldest: it must stay active.
     let outcome = fixture.upload(None, None, &[EXPRESS]).await;
-    let now = Utc::now().fixed_offset();
+    let start = Utc::now().fixed_offset() - Duration::days(400);
     for number in 1..versions::MAXIMUM_ACTIVE {
+        let created_at = start + Duration::days(i64::try_from(number).unwrap());
+        // 1.1 was uploaded to last, and 1.2 never was, created after 1.3's last upload: 1.3
+        // is the oldest by last upload, then 1.2 by creation.
+        let last_upload_at = match number {
+            1 => Some(Utc::now().fixed_offset()),
+            2 => None,
+            3 => Some(created_at - Duration::days(10)),
+            _ => Some(created_at + Duration::days(100)),
+        };
         project_versions::ActiveModel {
             project_id: Set(outcome.project_id),
             name: Set(format!("1.{number}")),
             latest: Set(false),
             active: Set(true),
-            created_at: Set(now),
-            last_upload_at: Set(None),
+            created_at: Set(created_at),
+            last_upload_at: Set(last_upload_at),
             dependencies_partial: Set(false),
             ..Default::default()
         }
@@ -364,7 +377,54 @@ async fn active_versions_are_capped() {
         .await
         .unwrap();
     }
-    let refused = fixture.try_upload(Some("2.0"), None, &[EXPRESS]).await;
+    let inactive = |versions: Vec<project_versions::Model>| -> Vec<String> {
+        versions
+            .into_iter()
+            .filter(|version| !version.active)
+            .map(|version| version.name)
+            .collect()
+    };
+    let active_count = |versions: &[project_versions::Model]| {
+        versions.iter().filter(|version| version.active).count()
+    };
+
+    // The 51st version is created, and the active version uploaded to the longest ago goes.
+    let created = fixture.upload(Some("2.0"), None, &[EXPRESS]).await;
+    assert!(created.version_created);
+    assert_eq!(fixture.latest().await, "2.0");
+    let all = fixture.versions().await;
+    assert_eq!(all.len(), 51);
+    assert_eq!(active_count(&all), 50);
+    assert_eq!(inactive(all), ["1.3"]);
+
+    // A version created without becoming the latest leaves the latest active too.
+    fixture.upload(Some("2.1"), Some(false), &[EXPRESS]).await;
+    assert_eq!(fixture.latest().await, "2.0");
+    assert_eq!(inactive(fixture.versions().await), ["1.2", "1.3"]);
+
+    // An upload to an inactive version makes it active again, at the expense of the oldest
+    // other one; the target itself is never picked.
+    let reactivated = fixture.upload(Some("1.3"), None, &[EXPRESS]).await;
+    assert!(!reactivated.version_created);
+    let all = fixture.versions().await;
+    assert_eq!(active_count(&all), 50);
+    assert_eq!(inactive(all), ["1.2", "1.4"]);
+    assert_eq!(fixture.latest().await, "2.0");
+
+    // Uploads to active versions change nothing.
+    fixture.upload(Some("1.49"), None, &[EXPRESS]).await;
+    fixture.upload(None, None, &[EXPRESS]).await;
+    assert_eq!(inactive(fixture.versions().await), ["1.2", "1.4"]);
+
+    // Made active by hand, past the cap, is refused: the user picks which version to retire.
+    let refused = versions::set_active(
+        &fixture.database,
+        &fixture.owner,
+        outcome.project_id,
+        "1.2",
+        true,
+    )
+    .await;
     assert!(
         matches!(
             refused,
@@ -374,13 +434,27 @@ async fn active_versions_are_capped() {
     );
     assert_eq!(
         Problem::TooManyVersions { maximum: 50 }.to_string(),
-        "this project already has 50 active versions: upload to an existing version instead"
+        "this project already has 50 active versions: make one inactive first"
     );
-    assert_eq!(fixture.versions().await.len(), 50);
-    assert_eq!(fixture.latest().await, "");
-    // Existing versions still take uploads.
-    fixture.upload(Some("1.49"), None, &[EXPRESS]).await;
-    fixture.upload(None, None, &[EXPRESS]).await;
+    versions::set_active(
+        &fixture.database,
+        &fixture.owner,
+        outcome.project_id,
+        "1.5",
+        false,
+    )
+    .await
+    .unwrap();
+    versions::set_active(
+        &fixture.database,
+        &fixture.owner,
+        outcome.project_id,
+        "1.2",
+        true,
+    )
+    .await
+    .unwrap();
+    assert_eq!(inactive(fixture.versions().await), ["1.4", "1.5"]);
 }
 
 #[tokio::test]
@@ -518,6 +592,139 @@ async fn a_new_version_inherits_the_triage_of_the_latest() {
         .collect();
     assert_eq!(inherited, [LODASH]);
     assert!(outcome.version_created);
+}
+
+/// The status of each finding of a version, by package URL.
+async fn statuses(fixture: &Fixture, project: i64, version: &str) -> Vec<(String, Status)> {
+    let mut statuses: Vec<(String, Status)> = fixture
+        .findings(project, version)
+        .await
+        .into_iter()
+        .map(|finding| (finding.purl, finding.status))
+        .collect();
+    statuses.sort_by(|left, right| left.0.cmp(&right.0));
+    statuses
+}
+
+/// Runs while `during` happens, once the run has listed what it evaluates and waits on the
+/// vulnerability source.
+async fn run_while(fixture: &Fixture, during: impl Future<Output = ()>) -> RunOutcome {
+    fixture.source.pause();
+    let (run, ()) = tokio::join!(fixture.run(), async {
+        fixture.source.query_started().await;
+        during.await;
+        fixture.source.resume();
+    });
+    run
+}
+
+#[tokio::test]
+async fn a_version_made_active_during_a_run_waits_for_the_next() {
+    let fixture = Fixture::new().await;
+    let project = fixture
+        .upload(Some("1.0"), None, &[LODASH, MINIMIST])
+        .await
+        .project_id;
+    fixture.upload(Some("2.0"), None, &[EXPRESS]).await;
+    fixture.run().await;
+    let minimist = fixture
+        .findings(project, "1.0")
+        .await
+        .into_iter()
+        .find(|finding| finding.purl == MINIMIST)
+        .unwrap();
+    findings::ignore(
+        &fixture.database,
+        &fixture.owner,
+        minimist.id,
+        "not reachable",
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    versions::set_active(&fixture.database, &fixture.owner, project, "1.0", false)
+        .await
+        .unwrap();
+    let before = statuses(&fixture, project, "1.0").await;
+    assert_eq!(
+        before,
+        [
+            (LODASH.to_owned(), Status::Open),
+            (MINIMIST.to_owned(), Status::Ignored)
+        ]
+    );
+
+    // The run listed its versions before 1.0 became active, so it has none of its components
+    // and leaves it alone rather than fixing every finding.
+    let run = run_while(&fixture, async {
+        versions::set_active(&fixture.database, &fixture.owner, project, "1.0", true)
+            .await
+            .unwrap();
+    })
+    .await;
+    assert!(run.succeeded(), "{:?}", run.error);
+    assert_eq!(run.new_findings, Vec::new());
+    assert_eq!(run.fixed_findings, 0);
+    assert_eq!(statuses(&fixture, project, "1.0").await, before);
+
+    // The next run evaluates it, finding the same, so announcing nothing.
+    let run = fixture.run().await;
+    assert_eq!(run.new_findings, Vec::new());
+    assert_eq!(run.fixed_findings, 0);
+    assert_eq!(statuses(&fixture, project, "1.0").await, before);
+}
+
+#[tokio::test]
+async fn a_version_created_during_a_run_waits_for_the_next() {
+    let fixture = Fixture::new().await;
+    let project = fixture
+        .upload(Some("1.0"), None, &[LODASH, MINIMIST])
+        .await
+        .project_id;
+    fixture.run().await;
+    let minimist = fixture
+        .findings(project, "1.0")
+        .await
+        .into_iter()
+        .find(|finding| finding.purl == MINIMIST)
+        .unwrap();
+    findings::ignore(
+        &fixture.database,
+        &fixture.owner,
+        minimist.id,
+        "not reachable",
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    let expected = [
+        (LODASH.to_owned(), Status::Open),
+        (MINIMIST.to_owned(), Status::Ignored),
+    ];
+
+    // 2.0 inherits the findings of 1.0 while the run waits; the run, which listed 1.0 only,
+    // leaves 2.0 alone instead of fixing what it inherited.
+    let run = run_while(&fixture, async {
+        assert!(
+            fixture
+                .upload(Some("2.0"), None, &[LODASH, MINIMIST])
+                .await
+                .version_created
+        );
+    })
+    .await;
+    assert!(run.succeeded(), "{:?}", run.error);
+    assert_eq!(run.new_findings, Vec::new());
+    assert_eq!(run.fixed_findings, 0);
+    assert_eq!(statuses(&fixture, project, "2.0").await, expected);
+
+    let run = fixture.run().await;
+    assert_eq!(run.new_findings, Vec::new());
+    assert_eq!(run.fixed_findings, 0);
+    assert_eq!(statuses(&fixture, project, "2.0").await, expected);
+    assert_eq!(statuses(&fixture, project, "1.0").await, expected);
 }
 
 /// Enables a JSON webhook for every finding.
@@ -904,4 +1111,513 @@ async fn reads_name_a_version() {
         .await
         .unwrap();
     assert_eq!(inherited.len(), 0, "the unnamed version had no finding yet");
+}
+
+/// A user with this role in the fixture's organization, or in none when `role` is `None`.
+async fn user(fixture: &Fixture, username: &str, role: Option<Role>) -> Actor {
+    let user = users::create(
+        &fixture.database,
+        NewUser {
+            username: username.to_owned(),
+            ..NewUser::default()
+        },
+        false,
+    )
+    .await
+    .unwrap();
+    if let Some(role) = role {
+        memberships::add(
+            &fixture.database,
+            &fixture.owner,
+            fixture.organization,
+            username,
+            role,
+        )
+        .await
+        .unwrap();
+    }
+    Actor::from_user(&user)
+}
+
+#[tokio::test]
+async fn inactive_versions_are_left_out_until_made_active_again() {
+    let fixture = Fixture::new().await;
+    webhook(&fixture).await;
+    let project = fixture
+        .upload(Some("1.0"), None, &[LODASH])
+        .await
+        .project_id;
+    fixture.upload(Some("2.0"), None, &[LODASH]).await;
+    fixture.upload(Some("3.0"), None, &[EXPRESS]).await;
+    fixture.run().await;
+    let open = |fixture: &Fixture| {
+        let database = fixture.database.clone();
+        let owner = fixture.owner;
+        let organization = fixture.organization;
+        async move {
+            findings::overview(&database, &owner, organization, 30)
+                .await
+                .unwrap()[0]
+                .open
+                .total()
+        }
+    };
+    let project_versions = |matches: Vec<inventory::ComponentMatch>| -> Vec<(String, bool)> {
+        matches
+            .into_iter()
+            .map(|component| (component.project_version, component.project_version_active))
+            .collect()
+    };
+    assert_eq!(open(&fixture).await, 1, "one issue across versions");
+    assert_eq!(
+        findings::open_counts(&fixture.database)
+            .await
+            .unwrap()
+            .total(),
+        2
+    );
+    // A package in two versions is one match per version, each naming its version.
+    assert_eq!(
+        project_versions(
+            inventory::search(&fixture.database, &fixture.owner, "lodash")
+                .await
+                .unwrap()
+        ),
+        [("1.0".to_owned(), true), ("2.0".to_owned(), true)]
+    );
+
+    for version in ["1.0", "2.0"] {
+        let inactive =
+            versions::set_active(&fixture.database, &fixture.owner, project, version, false)
+                .await
+                .unwrap();
+        assert!(!inactive.active);
+    }
+    // Neither counted, searched, nor reported in metrics...
+    assert_eq!(open(&fixture).await, 0);
+    assert_eq!(
+        findings::open_counts(&fixture.database)
+            .await
+            .unwrap()
+            .total(),
+        0
+    );
+    assert_eq!(
+        inventory::search(&fixture.database, &fixture.owner, "lodash")
+            .await
+            .unwrap(),
+        []
+    );
+    // ...unless asked for, and still readable and exportable.
+    assert_eq!(
+        project_versions(
+            inventory::search_versions(&fixture.database, &fixture.owner, "lodash", "", true)
+                .await
+                .unwrap()
+                .matches
+        ),
+        [("1.0".to_owned(), false), ("2.0".to_owned(), false)]
+    );
+    assert_eq!(fixture.findings(project, "1.0").await.len(), 1);
+    let listed = versions::list(&fixture.database, &fixture.owner, project)
+        .await
+        .unwrap();
+    assert_eq!(
+        listed
+            .iter()
+            .map(|version| (version.name.as_str(), version.active, version.open.total()))
+            .collect::<Vec<_>>(),
+        [("3.0", true, 0), ("2.0", false, 1), ("1.0", false, 1)]
+    );
+    let token = tokens::authenticate(&fixture.database, &fixture.secret)
+        .await
+        .unwrap()
+        .unwrap();
+    let document = vex::export(&fixture.database, &token, "acme", "web", Some("1.0"))
+        .await
+        .unwrap();
+    assert_eq!(document.vulnerabilities.len(), 1);
+
+    // ...nor evaluated or announced.
+    fixture.source.publish(
+        json!({
+            "id": "GHSA-p6mc-m468-83gw",
+            "modified": "2024-03-01T00:00:00Z",
+            "summary": "Prototype pollution in lodash",
+            "database_specific": {"severity": "MODERATE"}
+        }),
+        &[LODASH],
+    );
+    let run = fixture.run().await;
+    assert!(run.succeeded());
+    assert_eq!(run.new_findings, Vec::new());
+    assert_eq!(fixture.findings(project, "1.0").await.len(), 1);
+
+    // Active again, the version catches up at the next run, which announces what it missed.
+    versions::set_active(&fixture.database, &fixture.owner, project, "1.0", true)
+        .await
+        .unwrap();
+    let run = fixture.run().await;
+    assert_eq!(run.new_findings.len(), 1);
+    assert_eq!(run.new_findings[0].version, "1.0");
+    assert_eq!(run.new_findings[0].vulnerability_id, "GHSA-p6mc-m468-83gw");
+    let deliveries = run_deliveries(&fixture, &run).await;
+    assert_eq!(deliveries.len(), 1);
+    assert_eq!(deliveries[0].payload.findings[0].versions, ["1.0"]);
+    assert_eq!(open(&fixture).await, 2);
+    // 2.0 stays as it was.
+    assert_eq!(fixture.findings(project, "2.0").await.len(), 1);
+}
+
+#[tokio::test]
+async fn the_latest_version_stays_active() {
+    let fixture = Fixture::new().await;
+    let project = fixture
+        .upload(Some("1.0"), None, &[EXPRESS])
+        .await
+        .project_id;
+    fixture.upload(Some("2.0"), None, &[EXPRESS]).await;
+    let set_active = |name: &'static str, active: bool| {
+        versions::set_active(&fixture.database, &fixture.owner, project, name, active)
+    };
+    let set_latest =
+        |name: &'static str| versions::set_latest(&fixture.database, &fixture.owner, project, name);
+
+    let refused = set_active("2.0", false).await;
+    assert!(
+        matches!(
+            refused,
+            Err(Error::Conflict(Problem::LatestVersionInactive))
+        ),
+        "{refused:?}"
+    );
+    set_active("1.0", false).await.unwrap();
+    let refused = set_latest("1.0").await;
+    assert!(
+        matches!(
+            refused,
+            Err(Error::Conflict(Problem::InactiveVersionLatest))
+        ),
+        "{refused:?}"
+    );
+    assert_eq!(fixture.latest().await, "2.0");
+
+    set_active("1.0", true).await.unwrap();
+    let latest = set_latest("1.0").await.unwrap();
+    assert!(latest.latest);
+    assert_eq!(fixture.latest().await, "1.0");
+    assert_eq!(
+        versions::find(&fixture.database, &fixture.owner, project, None)
+            .await
+            .unwrap()
+            .name,
+        "1.0"
+    );
+    // Marking the latest again, or making an active version active, changes nothing.
+    set_latest("1.0").await.unwrap();
+    set_active("1.0", true).await.unwrap();
+    assert_eq!(fixture.latest().await, "1.0");
+    set_active("2.0", false).await.unwrap();
+    // An upload with latest=true to an inactive version reactivates it.
+    fixture.upload(Some("2.0"), Some(true), &[EXPRESS]).await;
+    let versions = fixture.versions().await;
+    assert!(versions.iter().all(|version| version.active));
+    assert_eq!(fixture.latest().await, "2.0");
+
+    assert_eq!(
+        Problem::LatestVersionInactive.to_string(),
+        "the latest version cannot be made inactive: mark another version latest first"
+    );
+    assert_eq!(
+        Problem::InactiveVersionLatest.to_string(),
+        "an inactive version cannot be the latest: make it active first"
+    );
+}
+
+#[tokio::test]
+async fn deleting_a_version_deletes_what_it_holds() {
+    let fixture = Fixture::new().await;
+    let project = fixture
+        .upload(Some("1.0"), None, &[LODASH, MINIMIST])
+        .await
+        .project_id;
+    fixture.run().await;
+    let lodash = fixture
+        .findings(project, "1.0")
+        .await
+        .into_iter()
+        .find(|finding| finding.purl == LODASH)
+        .unwrap();
+    findings::ignore(
+        &fixture.database,
+        &fixture.owner,
+        lodash.id,
+        "not reachable",
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    fixture.upload(Some("2.0"), None, &[LODASH]).await;
+    fixture.run().await;
+    let delete =
+        |name: &'static str| versions::delete(&fixture.database, &fixture.owner, project, name);
+
+    let refused = delete("2.0").await;
+    assert!(
+        matches!(refused, Err(Error::Conflict(Problem::LatestVersionDeleted))),
+        "{refused:?}"
+    );
+    delete("1.0").await.unwrap();
+    assert!(matches!(delete("1.0").await, Err(Error::NotFound)));
+    let remaining = fixture.versions().await;
+    assert_eq!(remaining.len(), 1);
+    assert_eq!(remaining[0].name, "2.0");
+    assert!(matches!(
+        findings::list_in_version(
+            &fixture.database,
+            &fixture.owner,
+            project,
+            Some("1.0"),
+            &Filter::default()
+        )
+        .await,
+        Err(Error::NotFound)
+    ));
+    let finding_versions: Vec<Option<i64>> = findings_entity::Entity::find()
+        .all(&fixture.database)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|finding| finding.version_id)
+        .collect();
+    assert_eq!(finding_versions, [Some(remaining[0].id); 2]);
+    // The events of the deleted findings went with them.
+    let finding_ids: Vec<i64> = findings_entity::Entity::find()
+        .all(&fixture.database)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|finding| finding.id)
+        .collect();
+    let events = finding_events::Entity::find()
+        .all(&fixture.database)
+        .await
+        .unwrap();
+    assert!(!events.is_empty());
+    assert!(
+        events
+            .iter()
+            .all(|event| finding_ids.contains(&event.finding_id))
+    );
+    let uploads = inventory::uploads(&fixture.database, &fixture.owner, project)
+        .await
+        .unwrap();
+    assert_eq!(uploads.len(), 1);
+    assert_eq!(uploads[0].version_id, Some(remaining[0].id));
+    // The copy of the ignored finding in 2.0 keeps its triage.
+    let copy = fixture
+        .findings(project, "2.0")
+        .await
+        .into_iter()
+        .find(|finding| finding.purl == LODASH)
+        .unwrap();
+    assert_eq!(copy.status, Status::Ignored);
+
+    let refused = delete("2.0").await;
+    assert!(
+        matches!(refused, Err(Error::Conflict(Problem::LastVersion))),
+        "{refused:?}"
+    );
+    assert_eq!(
+        Problem::LastVersion.to_string(),
+        "a project keeps at least one version: delete the project instead"
+    );
+    assert_eq!(
+        Problem::LatestVersionDeleted.to_string(),
+        "the latest version cannot be deleted: mark another version latest first"
+    );
+}
+
+#[tokio::test]
+async fn only_project_managers_change_versions() {
+    let fixture = Fixture::new().await;
+    let project = fixture
+        .upload(Some("1.0"), None, &[EXPRESS])
+        .await
+        .project_id;
+    fixture.upload(Some("2.0"), None, &[EXPRESS]).await;
+    for (actor, refusal) in [
+        (
+            user(&fixture, "viewer", Some(Role::Viewer)).await,
+            "forbidden",
+        ),
+        (
+            user(&fixture, "member", Some(Role::Member)).await,
+            "forbidden",
+        ),
+        (user(&fixture, "stranger", None).await, "not found"),
+    ] {
+        let outcomes = [
+            versions::set_active(&fixture.database, &actor, project, "1.0", false)
+                .await
+                .map(|_| ()),
+            versions::set_latest(&fixture.database, &actor, project, "1.0")
+                .await
+                .map(|_| ()),
+            versions::delete(&fixture.database, &actor, project, "1.0").await,
+        ];
+        for outcome in outcomes {
+            let expected = match refusal {
+                "forbidden" => matches!(outcome, Err(Error::Forbidden)),
+                _ => matches!(outcome, Err(Error::NotFound)),
+            };
+            assert!(expected, "{refusal}: {outcome:?}");
+        }
+    }
+    // Unknown versions are not found.
+    assert!(matches!(
+        versions::delete(&fixture.database, &fixture.owner, project, "9.9").await,
+        Err(Error::NotFound)
+    ));
+    let versions = fixture.versions().await;
+    assert_eq!(versions.len(), 2);
+    assert!(versions.iter().all(|version| version.active));
+    assert_eq!(fixture.latest().await, "2.0");
+}
+
+#[tokio::test]
+async fn a_finding_lists_every_version_of_its_project() {
+    let fixture = Fixture::new().await;
+    // Another advisory for the same CVE, filed under its own identifier for lodash-es.
+    fixture.source.publish(
+        json!({
+            "id": "GHSA-29mw-wpgm-hmr9",
+            "modified": "2024-01-01T00:00:00Z",
+            "aliases": ["cve-2021-23337"],
+            "database_specific": {"severity": "HIGH"}
+        }),
+        &[LODASH_ES],
+    );
+    let project = fixture
+        .upload(Some("1.0"), None, &[LODASH])
+        .await
+        .project_id;
+    fixture.run().await;
+    // 2.0 inherits the open finding, then ignores it; 3.0 inherits the ignore, then fixes it.
+    fixture.upload(Some("2.0"), None, &[LODASH]).await;
+    let ignored = fixture.findings(project, "2.0").await[0].clone();
+    findings::ignore(
+        &fixture.database,
+        &fixture.owner,
+        ignored.id,
+        "behind the proxy",
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    fixture.upload(Some("3.0"), None, &[EXPRESS]).await;
+    fixture.run().await;
+    // Created after 3.0's run fixed its copy, so they inherit nothing.
+    fixture
+        .upload(Some("0.9"), Some(false), &[EXPRESS, LODASH_ES])
+        .await;
+    fixture.upload(Some("0.8"), Some(false), &[EXPRESS]).await;
+    fixture.run().await;
+    versions::set_active(&fixture.database, &fixture.owner, project, "1.0", false)
+        .await
+        .unwrap();
+
+    let detail = findings::detail(&fixture.database, &fixture.owner, ignored.id)
+        .await
+        .unwrap();
+    let id_of = |version: &str, purl: &str| {
+        let fixture = &fixture;
+        let version = version.to_owned();
+        let purl = purl.to_owned();
+        async move {
+            fixture
+                .findings(project, &version)
+                .await
+                .into_iter()
+                .find(|finding| finding.purl == purl)
+                .map(|finding| finding.id)
+        }
+    };
+    let rows: Vec<(String, VersionStatus, Option<i64>, bool, bool, bool)> = detail
+        .versions
+        .iter()
+        .map(|version| {
+            (
+                version.version.clone(),
+                version.status,
+                version.finding_id,
+                version.latest,
+                version.active,
+                version.current,
+            )
+        })
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            (
+                "0.8".to_owned(),
+                VersionStatus::NotAffected,
+                None,
+                false,
+                true,
+                false
+            ),
+            (
+                "0.9".to_owned(),
+                VersionStatus::Open,
+                id_of("0.9", LODASH_ES).await,
+                false,
+                true,
+                false
+            ),
+            (
+                "3.0".to_owned(),
+                VersionStatus::Fixed,
+                id_of("3.0", LODASH).await,
+                true,
+                true,
+                false
+            ),
+            (
+                "2.0".to_owned(),
+                VersionStatus::Ignored,
+                Some(ignored.id),
+                false,
+                true,
+                true
+            ),
+            (
+                "1.0".to_owned(),
+                VersionStatus::Open,
+                id_of("1.0", LODASH).await,
+                false,
+                false,
+                false
+            ),
+        ]
+    );
+    // Other components affected name their version; inactive versions are left out.
+    let affected: Vec<(String, String, Status)> = detail
+        .affected_components
+        .iter()
+        .map(|component| {
+            (
+                component.version.clone(),
+                component.purl.clone(),
+                component.status,
+            )
+        })
+        .collect();
+    assert_eq!(
+        affected,
+        [("3.0".to_owned(), LODASH.to_owned(), Status::Fixed)]
+    );
 }

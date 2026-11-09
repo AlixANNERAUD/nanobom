@@ -6,8 +6,15 @@
 //! none goes to the unnamed version (name `""`), so a project that never names one behaves as if
 //! versions did not exist. One version of each project is flagged **latest**: it is the one read
 //! when a reader does not name a version ([`find`]). Runs evaluate the **active** versions
-//! only, and organization-wide reads (search, counts, notifications) cover active versions
-//! only; a project has at most [`MAXIMUM_ACTIVE`] of them.
+//! only, and organization-wide reads (search, counts, notifications, metrics) cover active
+//! versions only; inactive versions stay readable and exportable by name.
+//!
+//! A project has at most [`MAXIMUM_ACTIVE`] active versions. An upload that would go past the
+//! cap (creating a version, or reactivating an inactive one) makes the active version uploaded
+//! to the longest ago inactive instead of failing, so pipelines that send a build number as the
+//! version keep working; nothing is ever deleted automatically. Users who manage projects make
+//! versions inactive and active again ([`set_active`]), mark one latest ([`set_latest`]) and
+//! delete them ([`delete`]). The latest version is always active.
 //!
 //! A version an upload creates **inherits** the open and ignored findings of the latest version
 //! (`inherit`), so a release branch does not have to be triaged again; the run that follows
@@ -21,19 +28,22 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, FixedOffset};
-use nanobom_entity::{components, finding_events, findings, project_versions, sbom_uploads};
+use nanobom_entity::{
+    component_dependencies, components, finding_events, findings, project_versions, projects,
+    sbom_uploads,
+};
 use nanobom_osv::Severity;
 use sea_orm::{
     ActiveModelTrait,
     ActiveValue::Set,
     ColumnTrait, ConnectionTrait, DbErr, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
-    QuerySelect,
+    QuerySelect, TransactionSession, TransactionTrait,
     sea_query::{Expr, OnConflict, Query, SelectStatement},
 };
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    access::{Permission, Reader},
+    access::{Actor, Permission, Reader},
     error::{Error, Result},
     findings::{EventKind, SeverityCounts, Status},
     problem::Problem,
@@ -80,8 +90,9 @@ async fn named(
 }
 
 /// The most active versions a project may have. nanobom keeps small databases, and each active
-/// version is evaluated at every run and counted on every page: a project that needs more makes
-/// old versions inactive. Dependency-Track has no such cap.
+/// version is evaluated at every run and counted on every page: past the cap, uploads make the
+/// version uploaded to the longest ago inactive (see the module documentation).
+/// Dependency-Track has no such cap.
 pub const MAXIMUM_ACTIVE: u64 = 50;
 
 /// The longest version name, in characters.
@@ -121,8 +132,9 @@ pub(crate) struct UploadVersion {
 ///
 /// A created version becomes the latest unless `latest` is `Some(false)`; `Some(true)` makes an
 /// existing version the latest. The flag moves inside the caller's transaction, so readers
-/// always see exactly one latest version. Creating a version beyond [`MAXIMUM_ACTIVE`] active
-/// ones is a [`Problem::TooManyVersions`] conflict.
+/// always see exactly one latest version. An inactive version becomes active again, as it is
+/// in use. Creating or reactivating a version when the project already has [`MAXIMUM_ACTIVE`]
+/// active ones first makes another inactive ([`make_room`]).
 ///
 /// The caller must hold a write lock on the project row (the upload updates it first): on
 /// PostgreSQL that serializes concurrent uploads to one project, which the cap and the latest
@@ -136,6 +148,19 @@ pub(crate) async fn prepare_upload(
     now: DateTime<FixedOffset>,
 ) -> Result<UploadVersion> {
     if let Some(version) = named(database, project_id, name).await? {
+        let version = if version.active {
+            version
+        } else {
+            make_room(database, project_id).await?;
+            tracing::info!(
+                project_id,
+                version = %version.name,
+                "inactive version made active by an upload"
+            );
+            let mut version: project_versions::ActiveModel = version.into();
+            version.active = Set(true);
+            version.update(database).await?
+        };
         let version = if latest == Some(true) && !version.latest {
             make_latest(database, version).await?
         } else {
@@ -156,16 +181,7 @@ pub(crate) async fn prepare_upload(
             inherits_from: None,
         });
     }
-    let active = project_versions::Entity::find()
-        .filter(project_versions::Column::ProjectId.eq(project_id))
-        .filter(project_versions::Column::Active.eq(true))
-        .count(database)
-        .await?;
-    if active >= MAXIMUM_ACTIVE {
-        return Err(Error::conflict(Problem::TooManyVersions {
-            maximum: MAXIMUM_ACTIVE,
-        }));
-    }
+    make_room(database, project_id).await?;
     let previous = latest_version(database, project_id).await?;
     let inserted = project_versions::Entity::insert(project_versions::ActiveModel {
         project_id: Set(project_id),
@@ -210,6 +226,52 @@ pub(crate) async fn prepare_upload(
         created: true,
         inherits_from: previous,
     })
+}
+
+/// Makes active versions of a project inactive until there is room for one more under
+/// [`MAXIMUM_ACTIVE`], in the caller's transaction: those whose last upload (their creation
+/// when they never had one) is the oldest go first, never the latest. The version about to be
+/// created or reactivated is not active yet, so it is never among them.
+///
+/// Inactive versions keep everything (components, findings, triage) and become active again
+/// with their next upload; nothing is deleted.
+async fn make_room(database: &impl ConnectionTrait, project_id: i64) -> Result<()> {
+    let mut candidates: Vec<project_versions::Model> = project_versions::Entity::find()
+        .filter(project_versions::Column::ProjectId.eq(project_id))
+        .filter(project_versions::Column::Active.eq(true))
+        .order_by_asc(project_versions::Column::Id)
+        .all(database)
+        .await?;
+    // Room for one more: at most `MAXIMUM_ACTIVE - 1` may stay.
+    let excess = (candidates.len() as u64 + 1).saturating_sub(MAXIMUM_ACTIVE);
+    if excess == 0 {
+        return Ok(());
+    }
+    candidates.retain(|version| !version.latest);
+    // Sorted in Rust rather than with `COALESCE` in SQL: there are at most a few dozen, and
+    // the identifier breaks ties between versions created in the same instant.
+    candidates.sort_by_key(|version| {
+        (
+            version.last_upload_at.unwrap_or(version.created_at),
+            version.id,
+        )
+    });
+    for version in candidates
+        .into_iter()
+        .take(usize::try_from(excess).unwrap_or(usize::MAX))
+    {
+        tracing::info!(
+            project_id,
+            version = %version.name,
+            last_upload_at = ?version.last_upload_at,
+            maximum = MAXIMUM_ACTIVE,
+            "version made inactive: the project reached its maximum of active versions"
+        );
+        let mut version: project_versions::ActiveModel = version.into();
+        version.active = Set(false);
+        version.update(database).await?;
+    }
+    Ok(())
 }
 
 /// Renames a project's unnamed version to `name` when it is the project's only version and
@@ -528,4 +590,171 @@ pub async fn list(
             last_upload_at: version.last_upload_at,
         })
         .collect())
+}
+
+/// Takes the write lock on a project's row for the rest of the transaction, as uploads do by
+/// updating it first: on PostgreSQL, changes to a project's versions then wait for one another
+/// and for uploads, so the cap and the latest flag hold. SQLite already serializes writers.
+async fn lock_project(database: &impl ConnectionTrait, project_id: i64) -> Result<()> {
+    projects::Entity::update_many()
+        .col_expr(projects::Column::Name, Expr::col(projects::Column::Name))
+        .filter(projects::Column::Id.eq(project_id))
+        .exec(database)
+        .await?;
+    Ok(())
+}
+
+/// Authorizes a change to a project's versions and opens its transaction: the project row is
+/// locked ([`lock_project`]) and the version named `name` read inside it.
+async fn begin_change<C: ConnectionTrait + TransactionTrait>(
+    database: &C,
+    actor: &Actor,
+    project_id: i64,
+    name: &str,
+) -> Result<(C::Transaction, project_versions::Model)> {
+    crate::projects::authorize(database, actor, project_id, Permission::ManageProjects).await?;
+    let transaction = crate::database::begin_write(database).await?;
+    lock_project(&transaction, project_id).await?;
+    let version = named(&transaction, project_id, name)
+        .await?
+        .ok_or(Error::NotFound)?;
+    Ok((transaction, version))
+}
+
+/// Makes a version inactive (`active` false) or active again. Requires
+/// [`Permission::ManageProjects`]. An inactive version is no longer evaluated by runs, counted
+/// or notified, and stays readable and exportable; making it active again lets the next run
+/// catch up.
+///
+/// The latest version cannot be made inactive ([`Problem::LatestVersionInactive`]): another one
+/// must be marked latest first. Making a version active again when the project already has
+/// [`MAXIMUM_ACTIVE`] active versions is a [`Problem::TooManyVersions`] conflict: unlike an
+/// upload, a user choosing which versions to keep is better asked than overruled.
+pub async fn set_active(
+    database: &(impl ConnectionTrait + TransactionTrait),
+    actor: &Actor,
+    project_id: i64,
+    name: &str,
+    active: bool,
+) -> Result<project_versions::Model> {
+    let (transaction, version) = begin_change(database, actor, project_id, name).await?;
+    if version.active == active {
+        return Ok(version);
+    }
+    if !active && version.latest {
+        return Err(Error::conflict(Problem::LatestVersionInactive));
+    }
+    if active {
+        let count = project_versions::Entity::find()
+            .filter(project_versions::Column::ProjectId.eq(project_id))
+            .filter(project_versions::Column::Active.eq(true))
+            .count(&transaction)
+            .await?;
+        if count >= MAXIMUM_ACTIVE {
+            return Err(Error::conflict(Problem::TooManyVersions {
+                maximum: MAXIMUM_ACTIVE,
+            }));
+        }
+    }
+    let mut version: project_versions::ActiveModel = version.into();
+    version.active = Set(active);
+    let version = version.update(&transaction).await?;
+    transaction.commit().await?;
+    tracing::info!(
+        project_id,
+        version = %version.name,
+        active,
+        user = actor.user_id,
+        "version activity changed"
+    );
+    Ok(version)
+}
+
+/// Marks a version latest, the one read when a reader names none, and clears the flag on the
+/// others. Requires [`Permission::ManageProjects`]. An inactive version cannot be the latest
+/// ([`Problem::InactiveVersionLatest`]): it must be made active first.
+pub async fn set_latest(
+    database: &(impl ConnectionTrait + TransactionTrait),
+    actor: &Actor,
+    project_id: i64,
+    name: &str,
+) -> Result<project_versions::Model> {
+    let (transaction, version) = begin_change(database, actor, project_id, name).await?;
+    if version.latest {
+        return Ok(version);
+    }
+    if !version.active {
+        return Err(Error::conflict(Problem::InactiveVersionLatest));
+    }
+    let version = make_latest(&transaction, version).await?;
+    transaction.commit().await?;
+    tracing::info!(project_id, version = %version.name, user = actor.user_id, "latest version changed");
+    Ok(version)
+}
+
+/// Deletes a version with its components, dependency graph, upload history and findings (with
+/// their history), in one transaction. Requires [`Permission::ManageProjects`].
+///
+/// The latest version cannot be deleted ([`Problem::LatestVersionDeleted`]), nor the only
+/// version of a project ([`Problem::LastVersion`]): a project always has a latest version, and
+/// deleting the project is the way to remove everything.
+///
+/// The rows are deleted explicitly, children first: `version_id` has no foreign key (see the
+/// module documentation). The version's row goes first, so that a run updating the version,
+/// which locks that row ([`crate::evaluation`]), has either finished, and its findings are
+/// deleted here, or will find the version gone and leave it alone.
+pub async fn delete(
+    database: &(impl ConnectionTrait + TransactionTrait),
+    actor: &Actor,
+    project_id: i64,
+    name: &str,
+) -> Result<()> {
+    let (transaction, version) = begin_change(database, actor, project_id, name).await?;
+    // The only version is also the latest: checked first, as its message says what to do.
+    let others = project_versions::Entity::find()
+        .filter(project_versions::Column::ProjectId.eq(project_id))
+        .filter(project_versions::Column::Id.ne(version.id))
+        .count(&transaction)
+        .await?;
+    if others == 0 {
+        return Err(Error::conflict(Problem::LastVersion));
+    }
+    if version.latest {
+        return Err(Error::conflict(Problem::LatestVersionDeleted));
+    }
+    project_versions::Entity::delete_by_id(version.id)
+        .exec(&transaction)
+        .await?;
+    finding_events::Entity::delete_many()
+        .filter(
+            finding_events::Column::FindingId.in_subquery(
+                Query::select()
+                    .column(findings::Column::Id)
+                    .from(findings::Entity)
+                    .and_where(findings::Column::VersionId.eq(version.id))
+                    .to_owned(),
+            ),
+        )
+        .exec(&transaction)
+        .await?;
+    findings::Entity::delete_many()
+        .filter(findings::Column::VersionId.eq(version.id))
+        .exec(&transaction)
+        .await?;
+    // Before the components, which the edges reference.
+    component_dependencies::Entity::delete_many()
+        .filter(component_dependencies::Column::VersionId.eq(version.id))
+        .exec(&transaction)
+        .await?;
+    components::Entity::delete_many()
+        .filter(components::Column::VersionId.eq(version.id))
+        .exec(&transaction)
+        .await?;
+    sbom_uploads::Entity::delete_many()
+        .filter(sbom_uploads::Column::VersionId.eq(version.id))
+        .exec(&transaction)
+        .await?;
+    transaction.commit().await?;
+    tracing::info!(project_id, version = %version.name, user = actor.user_id, "version deleted");
+    Ok(())
 }

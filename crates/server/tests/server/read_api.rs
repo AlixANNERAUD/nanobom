@@ -484,6 +484,7 @@ async fn every_endpoint_answers_as_described() {
             "finding_id": finding_id(&setup, "acme", "api", LODASH).await,
             "organization": "acme",
             "project": "api",
+            "version": "",
             "purl": LODASH,
             "status": "open"
         }])
@@ -743,6 +744,8 @@ async fn organizations_are_isolated_on_every_endpoint() {
         json!([{
             "organization": "globex",
             "project": "web",
+            "project_version": "",
+            "project_version_active": true,
             "purl": LODASH,
             "name": "lodash",
             "version": "4.17.20",

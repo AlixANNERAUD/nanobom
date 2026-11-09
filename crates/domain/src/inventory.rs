@@ -39,7 +39,8 @@ use cyclonedx_bom::{
     prelude::Bom,
 };
 use nanobom_entity::{
-    component_dependencies, components, organizations, projects, sbom_uploads, upload_tokens,
+    component_dependencies, components, organizations, project_versions, projects, sbom_uploads,
+    upload_tokens,
 };
 use packageurl::PackageUrl;
 use sea_orm::{
@@ -984,6 +985,11 @@ pub async fn components_in_version(
 pub struct ComponentMatch {
     pub organization_slug: String,
     pub project_slug: String,
+    /// The project version the component is in; empty for the unnamed version. A package
+    /// present in several versions of a project is one match per version.
+    pub project_version: String,
+    /// Whether that version is active; inactive versions are searched only on request.
+    pub project_version_active: bool,
     pub purl: String,
     pub ecosystem: String,
     pub name: String,
@@ -1003,7 +1009,8 @@ pub struct SearchResults {
     pub truncated: bool,
 }
 
-/// Finds components by name across the active versions of the projects the reader can see:
+/// Finds components by name across the active versions of the projects the reader can see (one
+/// match per version holding the package, see [`search_versions`] for inactive ones):
 /// `openssl` matches
 /// names containing it, `openssl 3.` (or `openssl@3.`) also requires the version to start with
 /// `3.`. Names and versions match case-insensitively; `%` and `_` are taken literally.
@@ -1036,6 +1043,17 @@ pub async fn search_by_license(
     reader: impl Into<Reader>,
     query: &str,
     license: &str,
+) -> Result<SearchResults> {
+    search_versions(database, reader, query, license, false).await
+}
+
+/// [`search_by_license`], across inactive versions too when `include_inactive` is true.
+pub async fn search_versions(
+    database: &impl ConnectionTrait,
+    reader: impl Into<Reader>,
+    query: &str,
+    license: &str,
+    include_inactive: bool,
 ) -> Result<SearchResults> {
     let reader = reader.into();
     let query = query.trim();
@@ -1071,8 +1089,11 @@ pub async fn search_by_license(
     // case-sensitive on PostgreSQL (and on SQLite for non-ASCII letters), so both sides are
     // compared in lower case.
     let mut select = components::Entity::find()
-        .filter(components::Column::ProjectId.is_in(projects.keys().copied()))
-        .filter(components::Column::VersionId.in_subquery(crate::versions::active_ids()));
+        .filter(components::Column::ProjectId.is_in(projects.keys().copied()));
+    if !include_inactive {
+        select =
+            select.filter(components::Column::VersionId.in_subquery(crate::versions::active_ids()));
+    }
     if !name.is_empty() {
         select = select.filter(contains_text(components::Column::Name, name));
     }
@@ -1096,14 +1117,29 @@ pub async fn search_by_license(
         .all(database)
         .await?;
     let truncated = models.len() > MAXIMUM_SEARCH_RESULTS;
+    let models: Vec<components::Model> = models.into_iter().take(MAXIMUM_SEARCH_RESULTS).collect();
+    let versions: HashMap<i64, project_versions::Model> = project_versions::Entity::find()
+        .filter(
+            project_versions::Column::Id
+                .is_in(models.iter().filter_map(|component| component.version_id)),
+        )
+        .all(database)
+        .await?
+        .into_iter()
+        .map(|version| (version.id, version))
+        .collect();
     let matches = models
         .into_iter()
-        .take(MAXIMUM_SEARCH_RESULTS)
         .map(|component| {
             let (organization_slug, project_slug) = projects[&component.project_id].clone();
+            let version = component.version_id.and_then(|id| versions.get(&id));
             ComponentMatch {
                 organization_slug,
                 project_slug,
+                project_version: version
+                    .map(|version| version.name.clone())
+                    .unwrap_or_default(),
+                project_version_active: version.is_some_and(|version| version.active),
                 purl: component.purl,
                 ecosystem: component.ecosystem,
                 name: component.name,

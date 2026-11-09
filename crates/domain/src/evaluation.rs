@@ -17,7 +17,8 @@
 //! happens before the first finding changes. Findings are then updated one project version
 //! per transaction, so a database error halfway leaves earlier versions updated and later ones
 //! untouched; the next run converges. Only active versions ([`crate::versions`]) are evaluated,
-//! and a finding is matched within its own version, so each version keeps its own triage.
+//! those active when the run starts, and a finding is matched within its own version, so each
+//! version keeps its own triage.
 //! Expired ignores are reopened at the start of every run, even one that later fails.
 //!
 //! Records are cached in the `vulnerabilities` table with the severity derived by
@@ -52,6 +53,7 @@ use sea_orm::{
     ActiveModelTrait,
     ActiveValue::Set,
     ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
+    QuerySelect,
     sea_query::{Expr, OnConflict},
 };
 use serde::{Deserialize, Serialize};
@@ -350,6 +352,12 @@ impl<S: VulnerabilitySource + 'static> Evaluator<S> {
 
     /// The body of a run. Expired ignores are reopened first; a failure to reach OSV then opens
     /// or fixes nothing, while a database error keeps the projects already updated.
+    ///
+    /// The active versions are read once, before anything else, and only those are updated: a
+    /// version made active or created while the run waits on OSV has no components in this
+    /// run's targets, so updating it would mark all of its findings fixed (ignored ones
+    /// included) for the next run to reopen and announce again. The run that its activation or
+    /// upload requests catches it up instead.
     async fn evaluate(
         &self,
         run_id: i64,
@@ -357,11 +365,24 @@ impl<S: VulnerabilitySource + 'static> Evaluator<S> {
         outcome: &mut RunOutcome,
     ) -> std::result::Result<(), String> {
         let database_error = |error: sea_orm::DbErr| format!("database error: {error}");
-        expire_ignores(&self.database, scope, run_id)
+        let projects = scope_projects(&self.database, scope)
+            .await
+            .map_err(database_error)?;
+        let versions = crate::versions::active(
+            &self.database,
+            &projects
+                .iter()
+                .map(|project| project.id)
+                .collect::<Vec<_>>(),
+        )
+        .await
+        .map_err(database_error)?;
+        let version_ids: Vec<i64> = versions.iter().map(|version| version.id).collect();
+        expire_ignores(&self.database, &version_ids, run_id)
             .await
             .map_err(database_error)?;
 
-        let targets = targets(&self.database, scope)
+        let targets = targets(&self.database, &version_ids)
             .await
             .map_err(database_error)?;
         outcome.component_count = targets.len();
@@ -385,18 +406,6 @@ impl<S: VulnerabilitySource + 'static> Evaluator<S> {
         let records = self.refresh_records(references.values().flatten()).await?;
         outcome.vulnerability_count = records.len();
 
-        let projects = scope_projects(&self.database, scope)
-            .await
-            .map_err(database_error)?;
-        let versions = crate::versions::active(
-            &self.database,
-            &projects
-                .iter()
-                .map(|project| project.id)
-                .collect::<Vec<_>>(),
-        )
-        .await
-        .map_err(database_error)?;
         for project in projects {
             let project_versions: Vec<&project_versions::Model> = versions
                 .iter()
@@ -559,30 +568,12 @@ async fn scope_projects(
     }
 }
 
-/// The identifiers of the active project versions in scope, which runs evaluate.
-async fn scope_versions(
-    database: &impl ConnectionTrait,
-    scope: Scope,
-) -> std::result::Result<Vec<i64>, sea_orm::DbErr> {
-    let project_ids: Vec<i64> = scope_projects(database, scope)
-        .await?
-        .into_iter()
-        .map(|project| project.id)
-        .collect();
-    Ok(crate::versions::active(database, &project_ids)
-        .await?
-        .into_iter()
-        .map(|version| version.id)
-        .collect())
-}
-
-/// The components with a version (of the package, not the project) in the active project
-/// versions in scope; components without one cannot be matched.
+/// The components with a version (of the package, not the project) in these project versions;
+/// components without one cannot be matched.
 async fn targets(
     database: &impl ConnectionTrait,
-    scope: Scope,
+    version_ids: &[i64],
 ) -> std::result::Result<Vec<Target>, sea_orm::DbErr> {
-    let version_ids = scope_versions(database, scope).await?;
     let mut targets = Vec::new();
     for chunk in version_ids.chunks(500) {
         let models = components::Entity::find()
@@ -603,41 +594,66 @@ async fn targets(
     Ok(targets)
 }
 
-/// Returns findings whose ignore expired to open.
+/// Returns findings of these project versions whose ignore expired to open.
 async fn expire_ignores(
     database: &DatabaseConnection,
-    scope: Scope,
+    version_ids: &[i64],
     run_id: i64,
 ) -> std::result::Result<(), sea_orm::DbErr> {
     let now = Utc::now().fixed_offset();
-    let version_ids = scope_versions(database, scope).await?;
     for chunk in version_ids.chunks(500) {
-        let expired = findings::Entity::find()
+        let expired: Vec<i64> = findings::Entity::find()
+            .select_only()
+            .column(findings::Column::Id)
             .filter(findings::Column::VersionId.is_in(chunk.iter().copied()))
             .filter(findings::Column::Status.eq(Status::Ignored.as_str()))
             .filter(findings::Column::IgnoreExpiresAt.lte(now))
             .order_by_asc(findings::Column::Id)
+            .into_tuple()
             .all(database)
             .await?;
-        for finding in expired {
-            let transaction = crate::database::begin_write(database).await?;
-            let id = finding.id;
-            let mut finding: findings::ActiveModel = finding.into();
-            finding.status = Set(Status::Open.as_str().to_owned());
-            finding.update(&transaction).await?;
-            record_event(
-                &transaction,
-                id,
-                EventKind::IgnoreExpired,
-                None,
-                None,
-                Some(run_id),
-            )
-            .await?;
-            transaction.commit().await?;
+        for finding_id in expired {
+            expire_ignore(database, finding_id, chunk, now, run_id).await?;
         }
     }
     Ok(())
+}
+
+/// Reopens one finding listed by [`expire_ignores`], if it is still as listed: its version may
+/// have been deleted since (taking the finding with it), or a user may have ignored it again
+/// with a later expiry or reopened it. Returns whether it was reopened; the event is recorded
+/// only then.
+async fn expire_ignore(
+    database: &DatabaseConnection,
+    finding_id: i64,
+    version_ids: &[i64],
+    now: DateTime<FixedOffset>,
+    run_id: i64,
+) -> std::result::Result<bool, sea_orm::DbErr> {
+    let transaction = crate::database::begin_write(database).await?;
+    let reopened = findings::Entity::update_many()
+        .col_expr(findings::Column::Status, Expr::value(Status::Open.as_str()))
+        .filter(findings::Column::Id.eq(finding_id))
+        .filter(findings::Column::Status.eq(Status::Ignored.as_str()))
+        .filter(findings::Column::IgnoreExpiresAt.lte(now))
+        .filter(findings::Column::VersionId.is_in(version_ids.iter().copied()))
+        .exec(&transaction)
+        .await?
+        .rows_affected
+        == 1;
+    if reopened {
+        record_event(
+            &transaction,
+            finding_id,
+            EventKind::IgnoreExpired,
+            None,
+            None,
+            Some(run_id),
+        )
+        .await?;
+    }
+    transaction.commit().await?;
+    Ok(reopened)
 }
 
 pub(crate) async fn record_event(
@@ -710,7 +726,7 @@ struct ProjectChanges {
     new_findings: Vec<NewFinding>,
 }
 
-/// Updates the findings of each active version of a project from its components, one
+/// Updates the findings of the project's versions the run listed as active, one
 /// transaction per version: a database error keeps the versions already updated, as it keeps
 /// the projects.
 async fn update_project(
@@ -726,10 +742,14 @@ async fn update_project(
         fixed: 0,
         new_findings: Vec::new(),
     };
-    let organization = organizations::Entity::find_by_id(project.organization_id)
+    // Read at the start of the run, the project may have been deleted since, with its
+    // organization; its versions are then gone too, and there is nothing to update.
+    let Some(organization) = organizations::Entity::find_by_id(project.organization_id)
         .one(database)
         .await?
-        .ok_or_else(|| sea_orm::DbErr::RecordNotFound("organization".to_owned()))?;
+    else {
+        return Ok(changes);
+    };
     for version in versions {
         let version_targets: Vec<&Target> = targets
             .iter()
@@ -767,6 +787,27 @@ async fn update_version(
 ) -> std::result::Result<ProjectChanges, sea_orm::DbErr> {
     let version_id = version.id;
     let transaction = crate::database::begin_write(database).await?;
+    let mut changes = ProjectChanges {
+        fixed: 0,
+        new_findings: Vec::new(),
+    };
+    // Locks the version's row, and skips a version deleted or made inactive since the run
+    // listed it: deleting a version removes this row first (`versions::delete`), so on
+    // PostgreSQL either the deletion waits for this transaction and removes what it wrote, or
+    // this finds the row gone and writes nothing that would outlive the version.
+    let locked = project_versions::Entity::update_many()
+        .col_expr(
+            project_versions::Column::Active,
+            Expr::col(project_versions::Column::Active),
+        )
+        .filter(project_versions::Column::Id.eq(version_id))
+        .filter(project_versions::Column::Active.eq(true))
+        .exec(&transaction)
+        .await?
+        .rows_affected;
+    if locked == 0 {
+        return Ok(changes);
+    }
     let now = Utc::now().fixed_offset();
     // Ordered, because the first stored finding matching an alias group is the one kept and the
     // others are marked fixed: the oldest must win, as it does on SQLite, or a triaged finding
@@ -784,10 +825,6 @@ async fn update_version(
             .push(finding);
     }
     let mut seen: BTreeSet<i64> = BTreeSet::new();
-    let mut changes = ProjectChanges {
-        fixed: 0,
-        new_findings: Vec::new(),
-    };
 
     for target in targets {
         let reported: Vec<&VulnerabilityReference> = references
@@ -1052,4 +1089,152 @@ pub async fn recent_runs(
             }
         })
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use chrono::{TimeDelta, Utc};
+    use nanobom_entity::{finding_events, findings};
+    use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, sea_query::Expr};
+    use serde_json::json;
+
+    use super::{Evaluator, Scope, Trigger, expire_ignore};
+    use crate::{
+        access::Actor,
+        findings::{EventKind, Status},
+        inventory::{self, UploadSource},
+        organizations,
+        testing::{self, FakeSource},
+        tokens,
+        users::{self, NewUser},
+        versions,
+    };
+
+    const LODASH: &str = "pkg:npm/lodash@4.17.20";
+
+    /// Reopening an expired ignore is conditional: a version deleted after `expire_ignores`
+    /// listed its findings, or a finding no longer ignored, is left alone, with no event,
+    /// instead of failing the run.
+    #[tokio::test]
+    async fn expiring_an_ignore_skips_findings_changed_since_listed() {
+        let database = testing::database().await;
+        let owner = users::create(
+            &database,
+            NewUser {
+                username: "owner".to_owned(),
+                ..NewUser::default()
+            },
+            false,
+        )
+        .await
+        .unwrap();
+        let owner = Actor::from_user(&owner);
+        let organization = organizations::create(&database, &owner, "acme", "Acme")
+            .await
+            .unwrap()
+            .id;
+        let secret = tokens::create(&database, &owner, organization, None, "CI")
+            .await
+            .unwrap()
+            .secret;
+        let token = tokens::authenticate(&database, &secret)
+            .await
+            .unwrap()
+            .unwrap();
+        let document = json!({
+            "bomFormat": "CycloneDX",
+            "specVersion": "1.5",
+            "version": 1,
+            "components": [{"type": "library", "name": "lodash", "purl": LODASH}],
+        })
+        .to_string();
+        for version in ["1.0", "2.0"] {
+            inventory::ingest(
+                &database,
+                &token,
+                "acme",
+                "web",
+                inventory::parse(document.as_bytes()).unwrap(),
+                UploadSource {
+                    version: Some(version.to_owned()),
+                    ..UploadSource::default()
+                },
+            )
+            .await
+            .unwrap();
+        }
+        let source = Arc::new(FakeSource::default());
+        source.publish(
+            json!({"id": "GHSA-35jh-r3h4-6jhm", "modified": "2024-01-01T00:00:00Z"}),
+            &[LODASH],
+        );
+        let run = Evaluator::new(database.clone(), source)
+            .run(Trigger::Manual, Scope::All, None)
+            .await
+            .unwrap();
+        // One finding per version, 1.0's first; both ignored, with an expiry already past.
+        let listed = findings::Entity::find()
+            .order_by_asc(findings::Column::Id)
+            .all(&database)
+            .await
+            .unwrap();
+        let (old, new) = (&listed[0], &listed[1]);
+        let now = Utc::now().fixed_offset();
+        findings::Entity::update_many()
+            .col_expr(
+                findings::Column::Status,
+                Expr::value(Status::Ignored.as_str()),
+            )
+            .col_expr(
+                findings::Column::IgnoreExpiresAt,
+                Expr::value(now - TimeDelta::days(1)),
+            )
+            .exec(&database)
+            .await
+            .unwrap();
+        let version_ids = [old.version_id.unwrap(), new.version_id.unwrap()];
+        let project_id = old.project_id;
+        versions::delete(&database, &owner, project_id, "1.0")
+            .await
+            .unwrap();
+        let expired_events = || async {
+            finding_events::Entity::find()
+                .filter(finding_events::Column::Kind.eq(EventKind::IgnoreExpired.as_str()))
+                .all(&database)
+                .await
+                .unwrap()
+                .into_iter()
+                .map(|event| event.finding_id)
+                .collect::<Vec<_>>()
+        };
+
+        assert!(
+            !expire_ignore(&database, old.id, &version_ids, now, run.run_id)
+                .await
+                .unwrap()
+        );
+        assert_eq!(expired_events().await, Vec::<i64>::new());
+
+        assert!(
+            expire_ignore(&database, new.id, &version_ids, now, run.run_id)
+                .await
+                .unwrap()
+        );
+        let reopened = findings::Entity::find_by_id(new.id)
+            .one(&database)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(reopened.status, Status::Open.as_str());
+        assert_eq!(expired_events().await, [new.id]);
+        // Open now, it is not reopened twice.
+        assert!(
+            !expire_ignore(&database, new.id, &version_ids, now, run.run_id)
+                .await
+                .unwrap()
+        );
+        assert_eq!(expired_events().await, [new.id]);
+    }
 }

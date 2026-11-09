@@ -190,10 +190,7 @@ pub async fn load_project(
     }
     .ok_or_else(|| failure(nanobom_domain::Error::NotFound))?;
     let selected_id = selected.id;
-    let selected_version = VersionOption {
-        name: selected.name.clone(),
-        latest: selected.latest,
-    };
+    let selected_version = version_option(selected);
     let names: HashMap<i64, String> = summaries
         .iter()
         .map(|summary| (summary.id, summary.name.clone()))
@@ -273,18 +270,23 @@ pub async fn load_project(
             .take(10)
             .map(|(_, upload)| upload)
             .collect(),
-        versions: summaries
-            .into_iter()
-            .map(|summary| VersionOption {
-                name: summary.name,
-                latest: summary.latest,
-            })
-            .collect(),
+        versions: summaries.iter().map(version_option).collect(),
         version: selected_version,
         version_upload,
         component_count,
         licenses,
     })
+}
+
+#[cfg(feature = "ssr")]
+fn version_option(summary: &nanobom_domain::versions::VersionSummary) -> VersionOption {
+    VersionOption {
+        name: summary.name.clone(),
+        latest: summary.latest,
+        active: summary.active,
+        last_upload_at: summary.last_upload_at,
+        open: crate::server::counts(summary.open),
+    }
 }
 
 #[server(endpoint = "finding_page")]
@@ -322,8 +324,29 @@ pub async fn load_finding(finding: i64) -> Result<FindingData, ServerFnError> {
                 finding_id: component.finding_id,
                 organization_slug: component.organization_slug,
                 project_slug: component.project_slug,
+                version: component.version,
                 purl: component.purl,
                 status: crate::server::status(component.status),
+            })
+            .collect(),
+        versions: detail
+            .versions
+            .into_iter()
+            .map(|version| {
+                use nanobom_domain::findings::{Status as Domain, VersionStatus};
+                VersionFinding {
+                    name: version.version,
+                    latest: version.latest,
+                    active: version.active,
+                    current: version.current,
+                    status: match version.status {
+                        VersionStatus::Open => Some(crate::server::status(Domain::Open)),
+                        VersionStatus::Ignored => Some(crate::server::status(Domain::Ignored)),
+                        VersionStatus::Fixed => Some(crate::server::status(Domain::Fixed)),
+                        VersionStatus::NotAffected => None,
+                    },
+                    finding_id: version.finding_id,
+                }
             })
             .collect(),
         events: detail
@@ -363,11 +386,12 @@ pub async fn load_finding(finding: i64) -> Result<FindingData, ServerFnError> {
 pub async fn search_components(
     query: String,
     license: String,
+    inactive: bool,
 ) -> Result<Vec<ComponentMatch>, ServerFnError> {
     let actor = actor().await?;
     let database = &context()?.database;
     Ok(
-        nanobom_domain::inventory::search_by_license(database, &actor, &query, &license)
+        nanobom_domain::inventory::search_versions(database, &actor, &query, &license, inactive)
             .await
             .map_err(failure)?
             .matches
@@ -375,6 +399,8 @@ pub async fn search_components(
             .map(|component| ComponentMatch {
                 organization_slug: component.organization_slug,
                 project_slug: component.project_slug,
+                project_version: component.project_version,
+                project_version_active: component.project_version_active,
                 purl: component.purl,
                 ecosystem: component.ecosystem,
                 name: component.name,
@@ -1050,6 +1076,101 @@ pub async fn delete_project(
             Ok(crate::t!("notices.project_deleted")),
         ),
         Err(error) => back(Err(crate::server::message(error)), "/organizations"),
+    }
+    Ok(())
+}
+
+/// The project page of a version, where version actions return.
+#[cfg(feature = "ssr")]
+fn version_page(organization: &str, project: &str) -> String {
+    format!("/organizations/{organization}/projects/{project}")
+}
+
+#[cfg(feature = "ssr")]
+async fn project_id(
+    database: &sea_orm::DatabaseConnection,
+    actor: &nanobom_domain::access::Actor,
+    organization: &str,
+    project: &str,
+) -> Result<i64, nanobom_domain::Error> {
+    let id = organization_id(database, actor, organization).await?;
+    Ok(nanobom_domain::projects::find(database, actor, id, project)
+        .await?
+        .id)
+}
+
+#[server(endpoint = "set_latest_version")]
+pub async fn set_latest_version(
+    organization: String,
+    project: String,
+    version: String,
+) -> Result<(), ServerFnError> {
+    let actor = actor().await?;
+    let database = &context()?.database;
+    let result = async {
+        let id = project_id(database, &actor, &organization, &project).await?;
+        nanobom_domain::versions::set_latest(database, &actor, id, &version).await?;
+        Ok(crate::t!("notices.version_latest").to_owned())
+    }
+    .await;
+    finish(result, &version_page(&organization, &project));
+    Ok(())
+}
+
+/// Makes a version inactive or active again; a version made active is checked at once, as
+/// runs skipped it while it was inactive.
+#[server(endpoint = "set_version_active")]
+pub async fn set_version_active(
+    organization: String,
+    project: String,
+    version: String,
+    active: bool,
+) -> Result<(), ServerFnError> {
+    use nanobom_domain::evaluation::{self, Scope, Trigger};
+    let actor = actor().await?;
+    let context = context()?;
+    let database = &context.database;
+    let result = async {
+        let id = project_id(database, &actor, &organization, &project).await?;
+        nanobom_domain::versions::set_active(database, &actor, id, &version, active).await?;
+        if !active {
+            return Ok(crate::t!("notices.version_inactive").to_owned());
+        }
+        let scope = Scope::Project(id);
+        if evaluation::authorize(database, &actor, scope).await.is_ok() {
+            (context.request_run)(Trigger::Manual, scope, Some(actor.user_id));
+        }
+        Ok(crate::t!("notices.version_active").to_owned())
+    }
+    .await;
+    finish(result, &version_page(&organization, &project));
+    Ok(())
+}
+
+/// Deletes a version once the form's confirmation box is ticked. Returns to the project's
+/// latest version, as the page the form came from shows the deleted one.
+#[server(endpoint = "delete_version")]
+pub async fn delete_version(
+    organization: String,
+    project: String,
+    version: String,
+    confirm: Option<String>,
+) -> Result<(), ServerFnError> {
+    let actor = actor().await?;
+    let database = &context()?.database;
+    let page = version_page(&organization, &project);
+    if confirm.is_none() {
+        redirect_with(&page, Err(crate::t!("notices.confirm_version").to_owned()));
+        return Ok(());
+    }
+    let result = async {
+        let id = project_id(database, &actor, &organization, &project).await?;
+        nanobom_domain::versions::delete(database, &actor, id, &version).await
+    }
+    .await;
+    match result {
+        Ok(()) => redirect_with(&page, Ok(crate::t!("notices.version_deleted"))),
+        Err(error) => redirect_with(&page, Err(crate::server::message(error))),
     }
     Ok(())
 }

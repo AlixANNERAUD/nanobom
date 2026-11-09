@@ -85,6 +85,11 @@ impl Fixture {
     /// organization-wide token when missing; the graph goes through a component without a
     /// package URL, so it is partial.
     async fn upload(&self, project: &str) -> i64 {
+        self.upload_to(project, None).await
+    }
+
+    /// Like [`Fixture::upload`], to the version named `version`.
+    async fn upload_to(&self, project: &str, version: Option<&str>) -> i64 {
         let token = tokens::authenticate(&self.database, &self.secret)
             .await
             .unwrap()
@@ -111,7 +116,10 @@ impl Fixture {
             "acme",
             project,
             inventory::parse(document.to_string().as_bytes()).unwrap(),
-            UploadSource::default(),
+            UploadSource {
+                version: version.map(str::to_owned),
+                ..UploadSource::default()
+            },
         )
         .await
         .unwrap()
@@ -139,9 +147,18 @@ impl Fixture {
     }
 
     /// Rows of the versioned tables without a version, or whose version belongs to another
-    /// project or no longer exists.
+    /// project or no longer exists, and finding events whose finding no longer exists.
     async fn misplaced_rows(&self) -> Vec<(&'static str, i64)> {
         let mut misplaced = Vec::new();
+        let events = self
+            .count(
+                "SELECT COUNT(*) AS count FROM finding_events WHERE NOT EXISTS \
+                 (SELECT 1 FROM findings WHERE findings.id = finding_events.finding_id)",
+            )
+            .await;
+        if events > 0 {
+            misplaced.push(("finding_events", events));
+        }
         for table in VERSIONED {
             let count = self
                 .count(&format!(
@@ -290,6 +307,26 @@ async fn every_row_names_a_version_of_its_project() {
         .unwrap();
     assert_eq!(findings.len(), 1);
     assert_eq!(findings[0].status, findings::Status::Ignored);
+
+    // A deleted version leaves nothing behind, and takes nothing of the other versions.
+    let before = fixture.rows().await;
+    fixture.upload_to("shop", Some("2.0")).await;
+    fixture.run().await;
+    assert_eq!(fixture.misplaced_rows().await, []);
+    versions::set_latest(&fixture.database, &fixture.owner, shop, "")
+        .await
+        .unwrap();
+    versions::delete(&fixture.database, &fixture.owner, shop, "2.0")
+        .await
+        .unwrap();
+    assert_eq!(fixture.misplaced_rows().await, []);
+    assert_eq!(fixture.rows().await, before);
+    assert_eq!(
+        fixture
+            .count("SELECT COUNT(*) AS count FROM project_versions")
+            .await,
+        3
+    );
 
     projects::delete(&fixture.database, &fixture.owner, shop)
         .await
