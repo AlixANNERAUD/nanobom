@@ -1,0 +1,42 @@
+name: GitLab template
+
+# Tests the GitLab CI template in ci/gitlab/ against a mock nanobom, without GitLab, when it
+# changes.
+on:
+  pull_request:
+    paths:
+      - "ci/gitlab/**"
+      - ".github/workflows/gitlab-template.yml"
+  push:
+    branches: [main]
+    paths:
+      - "ci/gitlab/**"
+      - ".github/workflows/gitlab-template.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gitlab-template-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test the GitLab template
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: astral-sh/setup-uv@v10.3.3
+      # The template's default image is Alpine, whose shell is BusyBox's.
+      - name: Install BusyBox
+        run: sudo apt-get update --quiet && sudo apt-get install --yes --quiet busybox
+      - name: Shellcheck the job's script
+        run: |
+          uv run ci/gitlab/tests/test_template.py --extract "$RUNNER_TEMP/job.sh"
+          uvx --from shellcheck-py==0.11.0.1 shellcheck --shell=sh "$RUNNER_TEMP/job.sh"
+      - name: Test with dash
+        run: uv run ci/gitlab/tests/test_template.py
+      - name: Test with BusyBox
+        run: uv run ci/gitlab/tests/test_template.py
+        env:
+          NANOBOM_TEST_SHELL: busybox sh

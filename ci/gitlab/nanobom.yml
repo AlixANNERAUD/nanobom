@@ -1,0 +1,322 @@
+# Uploads a CycloneDX or SPDX SBOM to nanobom from GitLab CI and reports the project's
+# evaluation in the job log, optionally failing the job on vulnerable or known-exploited
+# components or forbidden licenses. Include it from a release tag:
+#
+#   include:
+#     - remote: https://raw.githubusercontent.com/AlixANNERAUD/nanobom/vX.Y.Z/ci/gitlab/nanobom.yml
+#       inputs:
+#         organization: acme
+#         fail-on: high
+#
+# The upload token comes from the NANOBOM_TOKEN CI/CD variable (masked), never from an input:
+# inputs are visible in the pipeline configuration. The guide documents every input:
+# https://alixanneraud.github.io/nanobom/reference/gitlab-template.html
+spec:
+  inputs:
+    url:
+      description: Address of the nanobom instance, such as https://nanobom.example.org.
+      default: $NANOBOM_URL
+    organization:
+      description: Slug of the organization.
+    project:
+      description: Slug of the project; created by the first upload when the token covers the organization.
+      default: $CI_PROJECT_NAME
+    sbom:
+      description: Path of an existing CycloneDX or SPDX JSON SBOM. Empty, Syft generates one from scan-path or scan-image.
+      default: ""
+    scan-path:
+      description: Directory Syft scans when no sbom is given.
+      default: "."
+    scan-image:
+      description: Container image Syft scans instead of scan-path when no sbom is given.
+      default: ""
+    fail-on:
+      description: Fail the job on critical, high, medium or low (open findings at or above that severity), exploited (a known-exploited finding) or license (a forbidden license), or several separated by commas. Implies wait.
+      default: ""
+    wait:
+      description: Wait for the project's evaluation and report it.
+      default: "true"
+      options: ["true", "false"]
+    version:
+      description: Project version the SBOM describes; empty, the unnamed version.
+      default: ""
+    latest:
+      description: "true makes the version the latest; false keeps a version this upload creates from becoming the latest; empty, the server's default."
+      default: ""
+    source-commit:
+      description: Commit the SBOM was built from.
+      default: $CI_COMMIT_SHA
+    image-tag:
+      description: Container image tag the SBOM describes.
+      default: $CI_COMMIT_TAG
+    stage:
+      description: Stage of the job.
+      default: test
+    job-name:
+      description: Name of the job, to extend or override it, or to include the template twice.
+      default: nanobom
+    image:
+      description: Image of the job. It needs a POSIX shell, and curl and jq or apk to install them.
+      default: alpine:3.24
+---
+"$[[ inputs.job-name ]]":
+  stage: $[[ inputs.stage ]]
+  image:
+    name: $[[ inputs.image ]]
+    entrypoint: [""]
+  # Inputs reach the script as variables rather than as text in it, so no value can break the
+  # script's quoting, and values may refer to other variables ($CI_COMMIT_REF_NAME). The
+  # names avoid NANOBOM_URL and the like, which a project variable of the same name would
+  # override.
+  variables:
+    NANOBOM_INPUT_URL: $[[ inputs.url ]]
+    NANOBOM_INPUT_ORGANIZATION: $[[ inputs.organization ]]
+    NANOBOM_INPUT_PROJECT: $[[ inputs.project ]]
+    NANOBOM_INPUT_SBOM: $[[ inputs.sbom ]]
+    NANOBOM_INPUT_SCAN_PATH: $[[ inputs.scan-path ]]
+    NANOBOM_INPUT_SCAN_IMAGE: $[[ inputs.scan-image ]]
+    NANOBOM_INPUT_FAIL_ON: $[[ inputs.fail-on ]]
+    NANOBOM_INPUT_WAIT: $[[ inputs.wait ]]
+    NANOBOM_INPUT_VERSION: $[[ inputs.version ]]
+    NANOBOM_INPUT_LATEST: $[[ inputs.latest ]]
+    NANOBOM_INPUT_SOURCE_COMMIT: $[[ inputs.source-commit ]]
+    NANOBOM_INPUT_IMAGE_TAG: $[[ inputs.image-tag ]]
+  script:
+    - |
+      set -eu
+
+      fail() {
+        printf '\033[31mERROR: %s\033[0m\n' "$1"
+        exit 1
+      }
+      warn() { printf '\033[33mWARNING: %s\033[0m\n' "$1"; }
+      section_start() { printf '\033[0Ksection_start:%s:%s\r\033[0K%s\n' "$(date +%s)" "$1" "$2"; }
+      section_end() { printf '\033[0Ksection_end:%s:%s\r\033[0K\n' "$(date +%s)" "$1"; }
+
+      # The dotenv report, for later jobs. Created first so that the artifact exists whatever
+      # fails; empty values are left out, so later jobs see them unset.
+      : > nanobom.env
+      output() {
+        if [ -n "$2" ]; then printf 'NANOBOM_%s=%s\n' "$1" "$2" >> nanobom.env; fi
+      }
+
+      work="$(mktemp -d)"
+      trap 'rm -rf "$work"' EXIT
+
+      if ! command -v curl > /dev/null || ! command -v jq > /dev/null; then
+        command -v apk > /dev/null || fail "the image needs curl and jq, or apk to install them"
+        apk add --no-cache --quiet curl jq > /dev/null || fail "could not install curl and jq"
+      fi
+
+      # A variable that is not defined, such as NANOBOM_URL in the url input's default or
+      # CI_COMMIT_TAG outside tag pipelines, may be left unexpanded rather than emptied.
+      unset_if_variable() { case "$1" in '$'*) ;; *) printf '%s' "$1" ;; esac; }
+      url="$(unset_if_variable "${NANOBOM_INPUT_URL:-}")"
+      url="${url%/}"
+      [ -n "$url" ] || fail "no nanobom address: set the url input, or the NANOBOM_URL variable"
+      token="${NANOBOM_TOKEN:-}"
+      [ -n "$token" ] || fail "no upload token: define the NANOBOM_TOKEN CI/CD variable (masked)"
+      organization="${NANOBOM_INPUT_ORGANIZATION:-}"
+      [ -n "$organization" ] || fail "the organization input is empty"
+      project="${NANOBOM_INPUT_PROJECT:-}"
+      [ -n "$project" ] || fail "the project input is empty"
+      fail_on="$(printf '%s' "${NANOBOM_INPUT_FAIL_ON:-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+      wait="${NANOBOM_INPUT_WAIT:-true}"
+      version="${NANOBOM_INPUT_VERSION:-}"
+      latest="${NANOBOM_INPUT_LATEST:-}"
+      source_commit="$(unset_if_variable "${NANOBOM_INPUT_SOURCE_COMMIT:-}")"
+      image_tag="$(unset_if_variable "${NANOBOM_INPUT_IMAGE_TAG:-}")"
+      case "$wait" in
+        true | false) ;;
+        *) fail "wait must be true or false, not '$wait'" ;;
+      esac
+      case "$latest" in
+        "" | true | false) ;;
+        *) fail "latest must be true, false or empty, not '$latest'" ;;
+      esac
+
+      sbom="${NANOBOM_INPUT_SBOM:-}"
+      if [ -z "$sbom" ]; then
+        if command -v syft > /dev/null; then
+          syft=syft
+        else
+          # Pinned release, checked against digests written here rather than against the
+          # release's own checksum file, which would come from the same place as the archive.
+          syft_version=1.57.0
+          case "$(uname -m)" in
+            x86_64) syft_arch=amd64 syft_sha256=9c077a7d43029b3b13e98a8db720661e700c4d58db6352153a06395ae4a2a704 ;;
+            aarch64 | arm64) syft_arch=arm64 syft_sha256=410cbfa0ae0f63246bc0057843760b1de2833cd23919e025e368fd7681308cdb ;;
+            *) fail "no Syft build for $(uname -m): give an sbom, or use an image that has syft" ;;
+          esac
+          curl --fail --silent --show-error --location --retry 2 --output "$work/syft.tar.gz" \
+            "https://github.com/anchore/syft/releases/download/v$syft_version/syft_${syft_version}_linux_$syft_arch.tar.gz" \
+            || fail "could not download Syft $syft_version"
+          [ "$(sha256sum "$work/syft.tar.gz" | cut -d ' ' -f 1)" = "$syft_sha256" ] \
+            || fail "the Syft $syft_version archive does not match its pinned checksum"
+          tar -xzf "$work/syft.tar.gz" -C "$work" syft
+          syft="$work/syft"
+        fi
+        scan_image="${NANOBOM_INPUT_SCAN_IMAGE:-}"
+        if [ -n "$scan_image" ]; then
+          target="$scan_image"
+          # The project's own registry needs the job's credentials, unless others are given.
+          if [ -n "${CI_REGISTRY:-}" ] && [ -z "${SYFT_REGISTRY_AUTH_AUTHORITY:-}" ]; then
+            case "$scan_image" in
+              "$CI_REGISTRY"/*)
+                export SYFT_REGISTRY_AUTH_AUTHORITY="$CI_REGISTRY" \
+                  SYFT_REGISTRY_AUTH_USERNAME="${CI_REGISTRY_USER:-}" \
+                  SYFT_REGISTRY_AUTH_PASSWORD="${CI_REGISTRY_PASSWORD:-}"
+                ;;
+            esac
+          fi
+        else
+          target="dir:${NANOBOM_INPUT_SCAN_PATH:-.}"
+        fi
+        sbom="$work/sbom.cdx.json"
+        section_start nanobom_syft "Generating the SBOM of $target with Syft"
+        SYFT_CHECK_FOR_APP_UPDATE=false "$syft" scan "$target" --quiet --output "cyclonedx-json=$sbom" \
+          || fail "Syft could not generate the SBOM of $target"
+        section_end nanobom_syft
+      fi
+      [ -f "$sbom" ] || fail "SBOM not found: $sbom"
+
+      # nanobom lower-cases slugs; the project URL is built the same way.
+      project_slug="$(printf '%s' "$project" | tr '[:upper:]' '[:lower:]')"
+      project_url="$url/organizations/$organization/projects/$project_slug"
+      output PROJECT_URL "$project_url"
+
+      query="$(
+        jq --raw-output --null-input \
+          --arg version "$version" \
+          --arg latest "$latest" \
+          --arg source_commit "$source_commit" \
+          --arg image_tag "$image_tag" \
+          --arg fail_on "$fail_on" \
+          --arg wait "$wait" \
+          '[
+            {key: "version", value: $version},
+            {key: "latest", value: $latest},
+            {key: "source_commit", value: $source_commit},
+            {key: "image_tag", value: $image_tag},
+            {key: "fail_on", value: $fail_on},
+            {key: "wait", value: (if $wait == "true" and $fail_on == "" then "true" else "" end)}
+          ]
+          | map(select(.value != "") | "\(.key)=\(.value | @uri)")
+          | join("&")'
+      )"
+      encode() { jq --raw-output --null-input --arg value "$1" '$value | @uri'; }
+      endpoint="$url/api/organizations/$(encode "$organization")/projects/$(encode "$project")/sbom"
+      if [ -n "$query" ]; then endpoint="$endpoint?$query"; fi
+
+      echo "Uploading $sbom to $organization/$project_slug${version:+, version $version}"
+      response="$work/response.json"
+      # The server waits up to NANOBOM_UPLOAD_WAIT_SECONDS (300 by default) for the evaluation.
+      if ! status="$(
+        curl --silent --show-error --request PUT \
+          --header "Authorization: Bearer $token" \
+          --header "Content-Type: application/json" \
+          --data-binary "@$sbom" \
+          --output "$response" --write-out '%{http_code}' \
+          --max-time 600 --retry 2 --retry-connrefused \
+          "$endpoint"
+      )"; then
+        fail "could not reach $url"
+      fi
+      output HTTP_STATUS "$status"
+
+      body_is_json=true
+      jq empty "$response" 2> /dev/null || body_is_json=false
+      field() {
+        if $body_is_json; then jq --raw-output "$1 // empty" "$response"; fi
+      }
+      error="$(field '.error')"
+
+      case "$status" in
+        200 | 201 | 409 | 503) ;;
+        401) fail "the upload token was refused (401): ${error:-check the NANOBOM_TOKEN variable}" ;;
+        403) fail "this token cannot upload to $organization/$project (403): $error" ;;
+        404) fail "unknown organization or project $organization/$project (404): $error" ;;
+        413) fail "the SBOM is larger than the server accepts (413)" ;;
+        422) fail "nanobom refused the request (422): $error" ;;
+        *) fail "unexpected answer from nanobom (HTTP $status): ${error:-$(head -c 500 "$response")}" ;;
+      esac
+      $body_is_json || fail "nanobom answered HTTP $status without a JSON body"
+
+      skipped="$(field '.components_without_purl')"
+      if [ -n "$skipped" ] && [ "$skipped" != 0 ]; then
+        warn "$skipped components have no package URL, so OSV cannot check them; see the generator's settings"
+      fi
+
+      evaluation_status="$(field '.evaluation.status')"
+      output EVALUATION_STATUS "$evaluation_status"
+      output CRITICAL "$(field '.evaluation.open.critical')"
+      output HIGH "$(field '.evaluation.open.high')"
+      output MEDIUM "$(field '.evaluation.open.medium')"
+      output LOW "$(field '.evaluation.open.low')"
+      output KNOWN_EXPLOITED "$(field '.evaluation.known_exploited')"
+      output FORBIDDEN_LICENSES "$(field '.evaluation.licenses.forbidden')"
+      output WARNED_LICENSES "$(field '.evaluation.licenses.warned')"
+
+      components="$(field '.component_count')"
+      echo "Uploaded $components components to $project_url (HTTP $status)"
+
+      # jq definitions, shared by the two reports: rows of cells as aligned, indented lines.
+      # shellcheck disable=SC2016
+      table='def table:
+        . as $rows
+        | ([$rows[] | map(tostring | length)] | transpose | map(max)) as $widths
+        | $rows[]
+        | [range(length) as $i | .[$i] | tostring | . + " " * ($widths[$i] - length)]
+        | "  " + join("  ")
+        | sub(" +$"; "");
+      def findings: map([.severity, .vulnerability, .component,
+        (if .known_exploited then "known exploited" else "" end), .url]);'
+
+      if [ -n "$evaluation_status" ]; then
+        section_start nanobom_evaluation "nanobom evaluation"
+        jq --raw-output "$table"'
+          .evaluation as $e
+          | "Evaluation: \($e.status)",
+            "Open findings: \($e.open.critical) critical, \($e.open.high) high, \($e.open.medium) medium, \($e.open.low) low, \($e.open.unknown) unknown; \($e.known_exploited) known exploited",
+            ($e.findings[:25] | findings | table),
+            (if ($e.findings | length) > 25 then "  Showing 25 of \($e.findings | length) listed findings." else empty end),
+            (if $e.licenses then
+              "License policy: \($e.licenses.forbidden) forbidden, \($e.licenses.warned) warned",
+              ($e.licenses.violations[:25] | map([.verdict, .component, (.license // "unknown")]) | table)
+            else empty end)
+        ' "$response"
+        section_end nanobom_evaluation
+      fi
+
+      case "$status" in
+        409)
+          # fail_on is a comma-separated list, such as high,license.
+          echo "Over the threshold ($fail_on):"
+          jq --raw-output --arg fail_on "$fail_on" "$table"'
+            ["critical", "high", "medium", "low"] as $levels
+            | ($fail_on | split(",")) as $items
+            | ([$items[] | . as $item | $levels | index($item) | select(. != null)] | max) as $threshold
+            | ($items | index("exploited") != null) as $exploited
+            | ([.evaluation.findings[]?
+                | select((.known_exploited and $exploited)
+                         or ($threshold != null
+                             and (.severity as $severity | ($levels | index($severity)) as $i
+                                  | $i != null and $i <= $threshold)))]
+               | .[:25] | findings | table),
+              (if $items | index("license") != null then
+                 [.evaluation.licenses.violations[]? | select(.verdict == "forbid")]
+                 | .[:25]
+                 | map(["forbidden license", .component, (.license // "unknown"), (.licenses | join(", "))])
+                 | table
+               else empty end)
+          ' "$response"
+          fail "$error"
+          ;;
+        503) fail "${error:-the evaluation did not complete}" ;;
+      esac
+
+      echo "Done: $project_url (HTTP $status${evaluation_status:+, evaluation $evaluation_status})"
+  artifacts:
+    when: always
+    reports:
+      dotenv: nanobom.env
