@@ -39,6 +39,8 @@
 //!   about new findings through webhooks ([`notifications`]), whose deliveries are queued and
 //!   retried ([`deliveries`]); they can post to Slack and Microsoft Teams ([`chat`]) instead of
 //!   sending JSON.
+//! - An organization's **license policy** ([`licenses`]) allows, warns about or forbids the
+//!   licenses of its components; violations are computed when read.
 //!
 //! The crate builds on [`nanobom_entity`] (the tables), `nanobom_migration` (the schema) and
 //! [`nanobom_osv`] (the vulnerability source and severity scoring). The `app` crate calls it
@@ -68,6 +70,7 @@ pub mod evaluation;
 pub mod exploitation;
 pub mod findings;
 pub mod inventory;
+pub mod licenses;
 pub mod memberships;
 pub mod names;
 pub mod notifications;

@@ -13,10 +13,14 @@ pub struct Model {
     pub name: String,
     pub is_personal: bool,
     pub created_at: DateTimeWithTimeZone,
+    pub license_unlisted_action: String,
+    pub license_unknown_action: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
+    #[sea_orm(has_many = "super::license_rules::Entity")]
+    LicenseRules,
     #[sea_orm(has_many = "super::memberships::Entity")]
     Memberships,
     #[sea_orm(has_one = "super::organization_webhooks::Entity")]
@@ -29,6 +33,12 @@ pub enum Relation {
     UploadTokens,
     #[sea_orm(has_many = "super::webhook_deliveries::Entity")]
     WebhookDeliveries,
+}
+
+impl Related<super::license_rules::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::LicenseRules.def()
+    }
 }
 
 impl Related<super::memberships::Entity> for Entity {

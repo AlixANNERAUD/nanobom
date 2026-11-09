@@ -51,6 +51,10 @@
     "only_ignored_can_be_restored": "seules les vulnérabilités ignorées peuvent être rétablies",
     "invalid_webhook_url": "l’URL du webhook n’est pas une URL valide",
     "webhook_scheme": "l’URL du webhook doit commencer par http ou https",
-    "unknown_webhook_format": "format de webhook inconnu"
+    "unknown_webhook_format": "format de webhook inconnu",
+    "unknown_license_id": "« {license} » n’est pas un identifiant de licence SPDX (voir https://spdx.org/licenses) ni LicenseRef- suivi de lettres, de chiffres, de « . » ou de « - »",
+    "unknown_license_action": "action de licence « {action} » inconnue ; actions possibles : allow, warn ou forbid",
+    "conflicting_license_rule": "« {license} » figure avec deux actions différentes",
+    "too_many_license_rules": "une politique de licences compte au plus {maximum} règles"
   }
 }

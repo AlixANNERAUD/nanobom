@@ -5,6 +5,7 @@ pub use super::components::Entity as Components;
 pub use super::exploitation::Entity as Exploitation;
 pub use super::finding_events::Entity as FindingEvents;
 pub use super::findings::Entity as Findings;
+pub use super::license_rules::Entity as LicenseRules;
 pub use super::memberships::Entity as Memberships;
 pub use super::organization_webhooks::Entity as OrganizationWebhooks;
 pub use super::organizations::Entity as Organizations;

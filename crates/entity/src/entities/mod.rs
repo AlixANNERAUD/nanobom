@@ -7,6 +7,7 @@ pub mod components;
 pub mod exploitation;
 pub mod finding_events;
 pub mod findings;
+pub mod license_rules;
 pub mod memberships;
 pub mod organization_webhooks;
 pub mod organizations;
