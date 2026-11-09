@@ -20,6 +20,11 @@
 //! - `503 Service Unavailable` when the run did not complete in time or failed, since the
 //!   findings would be out of date: an incomplete evaluation never passes the gate.
 //!
+//! At most `--max-waiting-uploads` uploads wait at once; another one is refused with `503` and
+//! `Retry-After` before its body is parsed, so nothing is stored. The token is checked again
+//! once the wait is over: one revoked meanwhile gets `401`, as an invalid token would, and its
+//! SBOM, accepted while the token was valid, stays stored.
+//!
 //! VEX statements in the SBOM's `vulnerabilities` ([`nanobom_domain::vex`]) are imported with
 //! the upload's token: after the run and before the gate when the upload waits, so they cover
 //! the findings this run opened and the gate does not count them; at once otherwise.
@@ -48,6 +53,7 @@ use nanobom_osv::Severity;
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+use tokio::sync::OwnedSemaphorePermit;
 
 use crate::{
     runner::{RunRequest, Waited},
@@ -59,6 +65,8 @@ use crate::{
 pub struct ApiError {
     status: StatusCode,
     message: String,
+    /// Seconds after which the client may try again, sent as `Retry-After`.
+    retry_after: Option<u64>,
 }
 
 impl ApiError {
@@ -68,6 +76,7 @@ impl ApiError {
         Self {
             status,
             message: message.into(),
+            retry_after: None,
         }
     }
 
@@ -97,6 +106,11 @@ impl IntoResponse for ApiError {
             response
                 .headers_mut()
                 .insert(header::WWW_AUTHENTICATE, "Bearer".parse().expect("valid"));
+        }
+        if let Some(seconds) = self.retry_after {
+            response
+                .headers_mut()
+                .insert(header::RETRY_AFTER, seconds.into());
         }
         response
     }
@@ -279,6 +293,31 @@ impl Threshold {
     }
 }
 
+/// The `Retry-After` of an upload refused because `--max-waiting-uploads` uploads already wait.
+/// A guess: slots free up as runs finish, which takes seconds to minutes.
+const WAITING_UPLOADS_RETRY_AFTER_SECONDS: u64 = 30;
+
+/// A slot among the uploads allowed to wait at once, or `503` when none is free.
+///
+/// Taken before the body is parsed, so that a refused upload stores nothing and the client can
+/// send it again unchanged.
+fn waiting_slot(state: &AppState) -> Result<OwnedSemaphorePermit, ApiError> {
+    // The semaphore is never closed, so the only failure is that no permit is left.
+    std::sync::Arc::clone(&state.waiting_uploads)
+        .try_acquire_owned()
+        .map_err(|_| ApiError {
+            retry_after: Some(WAITING_UPLOADS_RETRY_AFTER_SECONDS),
+            ..ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!(
+                    "too many uploads are waiting for their evaluation (at most {}, \
+                     NANOBOM_MAX_WAITING_UPLOADS): nothing was stored, retry later",
+                    state.options.max_waiting_uploads
+                ),
+            )
+        })
+}
+
 /// At most this many findings are listed in an upload's evaluation; all are counted.
 const MAXIMUM_LISTED_FINDINGS: usize = 100;
 
@@ -411,6 +450,8 @@ async fn upload_sbom(
         ));
     }
     let wait = parse_wait(parameters.wait.as_deref())? || threshold.is_some();
+    // Held through the wait, until the handler returns.
+    let _waiting_slot = wait.then(|| waiting_slot(&state)).transpose()?;
 
     let mut sbom = parse_sbom(&state, body)
         .await
@@ -445,6 +486,11 @@ async fn upload_sbom(
         // Waiting runs the project even when runs after uploads are disabled.
         let timeout = Duration::from_secs(state.options.upload_wait_seconds);
         let run = state.runner.request_and_wait(request, timeout).await;
+        // The wait can last minutes: a token revoked meanwhile gets neither the evaluation nor
+        // its VEX statements imported. The SBOM stays, accepted while the token was valid.
+        if !tokens::is_active(&state.database, token.id).await? {
+            return Err(ApiError::unauthorized());
+        }
         // After the run, so that the statements also reach the findings it opened, and before
         // the gate, which then counts only what the SBOM does not say is unaffected.
         if !statements.is_empty() {

@@ -16,6 +16,8 @@ the [logs reference](../reference/metrics.md#log-messages).
 - Check the token in **Settings → API tokens**: its first characters, whether it is revoked,
   and when it was last used. A token that was never used never reached nanobom.
 - Tokens are shown once. If in doubt, create a new one and revoke the old one.
+- A token revoked while its upload waited for the evaluation also gets this answer; the SBOM
+  was stored anyway (see [waiting for the evaluation](../reference/upload-api.md#waiting-for-the-evaluation)).
 
 ### Upload answers 403
 
@@ -84,6 +86,11 @@ decide.
 - `timed_out`: the run took longer than `NANOBOM_UPLOAD_WAIT_SECONDS`, often because it waited
   behind another run, such as the nightly run of a large instance. Retry, raise the setting, or
   move the schedule away from your busiest CI hours.
+
+`too many uploads are waiting for their evaluation`, with `wait` or `fail_on`: a burst of CI jobs
+reached `NANOBOM_MAX_WAITING_UPLOADS`. Nothing was stored: send the upload again after the
+seconds of the `Retry-After` header, spread the jobs out, or raise the setting
+([configuration](../reference/configuration.md#runs)).
 
 ### Upload answers 502 or 504 after a minute
 

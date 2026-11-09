@@ -148,6 +148,10 @@ jq -r '.evaluation | "\(.status): \(.open.critical) critical, \(.open.high) high
   wrap it in a multipart form, which nanobom does not read.
 - `--fail-with-body` makes `curl` exit with an error on any status from 400, so the job fails on
   `409` and `503` as well as on configuration mistakes, while keeping the body for the log.
+- When many jobs wait at once, the instance may refuse one with a `503` and a `Retry-After`
+  header, before storing anything ([limit](../reference/upload-api.md#waiting-for-the-evaluation)).
+  `--retry 3` sends it again after that delay, but also after a `503` for an evaluation that did
+  not complete, which uploads the SBOM again.
 
 Without `fail_on` (and `wait`), the request returns as soon as the SBOM is stored. To fail the
 job on vulnerabilities, see [Fail CI on vulnerabilities](fail-ci.md).
