@@ -1378,3 +1378,156 @@ async fn read_tokens_are_refused_on_the_multipart_upload() {
         .await;
     assert_eq!(response.status(), StatusCode::OK);
 }
+
+#[tokio::test]
+async fn license_policies_and_violations_are_read() {
+    use nanobom_domain::licenses::{self, Action, Policy, Rule};
+    let setup = setup().await;
+    let server = &setup.server;
+    let token = Caller::Bearer(&setup.acme_read);
+    let policy_path = "/api/organizations/acme/license-policy";
+    let violations_path = "/api/organizations/acme/projects/web/license-violations";
+
+    let policy = read(server, policy_path, token).await;
+    assert_documented("/api/organizations/{organization}/license-policy", &policy);
+    assert_eq!(
+        policy,
+        json!({"active": false, "unlisted": "allow", "unknown": "allow", "rules": []})
+    );
+    let violations = read(server, violations_path, token).await;
+    assert_documented(
+        "/api/organizations/{organization}/projects/{project}/license-violations",
+        &violations,
+    );
+    assert_eq!(
+        violations,
+        json!({"items": [], "total": 0, "limit": 100, "offset": 0, "active": false, "forbidden": 0, "warned": 0})
+    );
+
+    let acme = organizations::find(&server.database, &setup.alice, "acme")
+        .await
+        .unwrap();
+    // Every component of the npm fixture is MIT.
+    licenses::set_policy(
+        &server.database,
+        &setup.alice,
+        acme.id,
+        &Policy {
+            unlisted: Action::Forbid,
+            unknown: Action::Warn,
+            rules: vec![
+                Rule {
+                    license: "mit".to_owned(),
+                    action: Action::Warn,
+                },
+                Rule {
+                    license: "Apache-2.0".to_owned(),
+                    action: Action::Allow,
+                },
+            ],
+        },
+    )
+    .await
+    .unwrap();
+    let policy = read(server, policy_path, Caller::Session(&setup.cookie)).await;
+    assert_documented("/api/organizations/{organization}/license-policy", &policy);
+    assert_eq!(
+        policy,
+        json!({
+            "active": true,
+            "unlisted": "forbid",
+            "unknown": "warn",
+            "rules": [
+                {"license": "Apache-2.0", "action": "allow"},
+                {"license": "MIT", "action": "warn"},
+            ],
+        })
+    );
+
+    let page = read(server, &format!("{violations_path}?limit=2"), token).await;
+    assert_documented(
+        "/api/organizations/{organization}/projects/{project}/license-violations",
+        &page,
+    );
+    assert_eq!(page["total"], 3);
+    assert_eq!(
+        (page["forbidden"].clone(), page["warned"].clone()),
+        (json!(0), json!(3))
+    );
+    assert_eq!(page["active"], true);
+    assert_eq!(
+        page["items"][0],
+        json!({
+            "component": {
+                "purl": "pkg:npm/%40babel/helper-string-parser@7.25.9",
+                "name": "@babel/helper-string-parser",
+                "version": "7.25.9",
+                "ecosystem": "npm",
+                "license": "MIT",
+            },
+            "verdict": "warn",
+            "licenses": ["MIT"],
+        })
+    );
+    assert_eq!(page["items"].as_array().unwrap().len(), 2);
+    let rest = read(server, &format!("{violations_path}?offset=2"), token).await;
+    let names: Vec<&str> = rest["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["component"]["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, vec!["minimist"]);
+    refused(
+        server,
+        &format!("{violations_path}?limit=0"),
+        token,
+        StatusCode::UNPROCESSABLE_ENTITY,
+    )
+    .await;
+
+    // Revalidation, as on every route.
+    let response = get(server, violations_path, token).await;
+    let etag = response.headers()[header::ETAG].clone();
+    let response = server
+        .send(
+            Request::get(violations_path)
+                .header(header::AUTHORIZATION, format!("Bearer {}", setup.acme_read))
+                .header(header::IF_NONE_MATCH, etag)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::NOT_MODIFIED);
+
+    // Isolation: another organization's token, and a project token outside its project.
+    for path in [policy_path, violations_path] {
+        refused(
+            server,
+            path,
+            Caller::Bearer(&setup.globex_read),
+            StatusCode::NOT_FOUND,
+        )
+        .await;
+    }
+    read(
+        server,
+        violations_path,
+        Caller::Bearer(&setup.acme_web_read),
+    )
+    .await;
+    refused(
+        server,
+        "/api/organizations/acme/projects/api/license-violations",
+        Caller::Bearer(&setup.acme_web_read),
+        StatusCode::NOT_FOUND,
+    )
+    .await;
+    refused(
+        server,
+        policy_path,
+        Caller::Anonymous,
+        StatusCode::UNAUTHORIZED,
+    )
+    .await;
+}

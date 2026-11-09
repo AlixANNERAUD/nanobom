@@ -9,7 +9,12 @@ use axum::{
     body::Body,
     http::{Request, StatusCode, header},
 };
-use nanobom_domain::{inventory, notifications, organizations, projects, tokens};
+use nanobom_domain::{
+    access::Actor,
+    inventory,
+    licenses::{self, Action, Policy, Rule},
+    notifications, organizations, projects, tokens, users,
+};
 use nanobom_osv::Severity;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait, PaginatorTrait};
 use serde_json::json;
@@ -372,6 +377,128 @@ async fn fail_on_exploited_fails_uploads_with_known_exploited_findings() {
     assert_eq!(body["evaluation"]["findings"][0]["known_exploited"], true);
 }
 
+/// Sets the license policy of `acme`, created by [`acme_token`]: the given action for MIT,
+/// the license of every component of `cyclonedx-npm.json`.
+async fn acme_policy_for_mit(server: &TestServer, action: Action) {
+    let owner = users::find_by_username(&server.database, "owner")
+        .await
+        .unwrap()
+        .unwrap();
+    let owner = Actor::from_user(&owner);
+    let acme = organizations::find(&server.database, &owner, "acme")
+        .await
+        .unwrap();
+    licenses::set_policy(
+        &server.database,
+        &owner,
+        acme.id,
+        &Policy {
+            rules: vec![Rule {
+                license: "MIT".to_owned(),
+                action,
+            }],
+            ..Policy::default()
+        },
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn fail_on_license_fails_uploads_with_forbidden_licenses() {
+    let server = server(&[]).await;
+    let token = acme_token(&server).await;
+
+    // Without a policy, nothing is forbidden and the evaluation says nothing of licenses.
+    let (status, body) = upload_web(&server, &token, "?fail_on=license").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert!(body.get("error").is_none(), "{body}");
+    assert!(body["evaluation"].get("licenses").is_none(), "{body}");
+
+    acme_policy_for_mit(&server, Action::Forbid).await;
+    let (status, body) = upload_web(&server, &token, "?fail_on=license").await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"], "3 components have forbidden licenses");
+    let licenses = &body["evaluation"]["licenses"];
+    assert_eq!(licenses["forbidden"], 3);
+    assert_eq!(licenses["warned"], 0);
+    assert_eq!(
+        licenses["violations"][0],
+        json!({
+            "component": "pkg:npm/%40babel/helper-string-parser@7.25.9",
+            "name": "@babel/helper-string-parser",
+            "version": "7.25.9",
+            "license": "MIT",
+            "verdict": "forbid",
+            "licenses": ["MIT"],
+        })
+    );
+    assert_eq!(licenses["violations"].as_array().unwrap().len(), 3);
+
+    // Other thresholds do not look at licenses, but the evaluation still counts them.
+    let (status, body) = upload_web(&server, &token, "?fail_on=high").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["evaluation"]["licenses"]["forbidden"], 3);
+}
+
+#[tokio::test]
+async fn fail_on_license_passes_with_warnings_only() {
+    let server = server(&[]).await;
+    let token = acme_token(&server).await;
+    acme_policy_for_mit(&server, Action::Warn).await;
+    let (status, body) = upload_web(&server, &token, "?fail_on=license").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert!(body.get("error").is_none(), "{body}");
+    assert_eq!(body["evaluation"]["licenses"]["forbidden"], 0);
+    assert_eq!(body["evaluation"]["licenses"]["warned"], 3);
+    assert_eq!(
+        body["evaluation"]["licenses"]["violations"][1]["verdict"],
+        "warn"
+    );
+    // Waiting without a threshold returns the counts too.
+    let (status, body) = upload_web(&server, &token, "?wait=true").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["evaluation"]["licenses"]["warned"], 3);
+}
+
+#[tokio::test]
+async fn several_thresholds_fail_on_any_of_them() {
+    let server = server(&[]).await;
+    server
+        .source
+        .publish(lodash_advisory(), &["pkg:npm/lodash@4.17.20"]);
+    let token = acme_token(&server).await;
+    let (status, body) = upload_web(&server, &token, "?fail_on=critical,license").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    acme_policy_for_mit(&server, Action::Forbid).await;
+    let (status, body) = upload_web(&server, &token, "?fail_on=high,license").await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(
+        body["error"],
+        "1 open finding at or above high; 3 components have forbidden licenses"
+    );
+}
+
+#[tokio::test]
+async fn licenses_do_not_wait_for_a_completed_run() {
+    let server = server(&[]).await;
+    server.source.set_failing(true);
+    let token = acme_token(&server).await;
+    acme_policy_for_mit(&server, Action::Warn).await;
+    // Licenses are known without the run: a failed run does not fail the license gate.
+    let (status, body) = upload_web(&server, &token, "?fail_on=license").await;
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["evaluation"]["status"], "failed");
+    // Findings are not: with a vulnerability threshold too, the upload fails as before.
+    acme_policy_for_mit(&server, Action::Forbid).await;
+    let (status, body) = upload_web(&server, &token, "?fail_on=license,critical").await;
+    assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{body}");
+    assert_eq!(
+        body["error"],
+        "the evaluation did not complete; 3 components have forbidden licenses"
+    );
+}
+
 #[tokio::test]
 async fn invalid_wait_parameters_are_refused_before_storing_anything() {
     let server = server(&[]).await;
@@ -380,7 +507,7 @@ async fn invalid_wait_parameters_are_refused_before_storing_anything() {
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
     assert_eq!(
         body,
-        json!({"error": "fail_on must be critical, high, medium, low or exploited"})
+        json!({"error": "fail_on must be critical, high, medium, low, exploited or license, or several of them separated by commas"})
     );
     let (status, body) = upload_web(&server, &token, "?wait=yes").await;
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
