@@ -767,6 +767,27 @@ async fn update_version(
 ) -> std::result::Result<ProjectChanges, sea_orm::DbErr> {
     let version_id = version.id;
     let transaction = crate::database::begin_write(database).await?;
+    let mut changes = ProjectChanges {
+        fixed: 0,
+        new_findings: Vec::new(),
+    };
+    // Locks the version's row, and skips a version deleted or made inactive since the run
+    // listed it: deleting a version removes this row first (`versions::delete`), so on
+    // PostgreSQL either the deletion waits for this transaction and removes what it wrote, or
+    // this finds the row gone and writes nothing that would outlive the version.
+    let locked = project_versions::Entity::update_many()
+        .col_expr(
+            project_versions::Column::Active,
+            Expr::col(project_versions::Column::Active),
+        )
+        .filter(project_versions::Column::Id.eq(version_id))
+        .filter(project_versions::Column::Active.eq(true))
+        .exec(&transaction)
+        .await?
+        .rows_affected;
+    if locked == 0 {
+        return Ok(changes);
+    }
     let now = Utc::now().fixed_offset();
     // Ordered, because the first stored finding matching an alias group is the one kept and the
     // others are marked fixed: the oldest must win, as it does on SQLite, or a triaged finding
@@ -784,10 +805,6 @@ async fn update_version(
             .push(finding);
     }
     let mut seen: BTreeSet<i64> = BTreeSet::new();
-    let mut changes = ProjectChanges {
-        fixed: 0,
-        new_findings: Vec::new(),
-    };
 
     for target in targets {
         let reported: Vec<&VulnerabilityReference> = references

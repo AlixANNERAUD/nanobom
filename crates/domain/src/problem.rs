@@ -108,6 +108,10 @@ pub enum Problem {
     TooManyLicenseRules { maximum: usize },
     InvalidVersionName { maximum: usize },
     TooManyVersions { maximum: u64 },
+    LatestVersionInactive,
+    InactiveVersionLatest,
+    LatestVersionDeleted,
+    LastVersion,
 }
 
 impl Problem {
@@ -385,6 +389,21 @@ impl Problem {
                 "problems.too_many_versions",
                 maximum = maximum
             ),
+            P::LatestVersionInactive => output.write_str(translate!(
+                locale = locale,
+                "problems.latest_version_inactive"
+            )),
+            P::InactiveVersionLatest => output.write_str(translate!(
+                locale = locale,
+                "problems.inactive_version_latest"
+            )),
+            P::LatestVersionDeleted => output.write_str(translate!(
+                locale = locale,
+                "problems.latest_version_deleted"
+            )),
+            P::LastVersion => {
+                output.write_str(translate!(locale = locale, "problems.last_version"))
+            }
         }
     }
 

@@ -526,14 +526,67 @@ pub struct Event {
     pub run_id: Option<i64>,
 }
 
-/// Another component affected by the same vulnerability, in a project the reader can see.
+/// Another component affected by the same vulnerability, in an active version of a project the
+/// reader can see.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AffectedComponent {
     pub finding_id: i64,
     pub organization_slug: String,
     pub project_slug: String,
+    /// The project version the component is in; empty for the unnamed version.
+    pub version: String,
     pub purl: String,
     pub status: Status,
+}
+
+/// Where a version of a project stands with a vulnerability, as [`VersionFinding`] reports it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VersionStatus {
+    /// A finding of the version is open.
+    Open,
+    /// None is open, one is ignored.
+    Ignored,
+    /// Every finding of the version is fixed.
+    Fixed,
+    /// The version never had a finding for the vulnerability.
+    NotAffected,
+}
+
+impl VersionStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            VersionStatus::Open => "open",
+            VersionStatus::Ignored => "ignored",
+            VersionStatus::Fixed => "fixed",
+            VersionStatus::NotAffected => "not_affected",
+        }
+    }
+
+    /// The finding statuses in the order they decide a version's: an open finding outweighs an
+    /// ignored one, which outweighs a fixed one.
+    fn rank(status: Status) -> u8 {
+        match status {
+            Status::Open => 0,
+            Status::Ignored => 1,
+            Status::Fixed => 2,
+        }
+    }
+}
+
+/// A version of a finding's project and where it stands with the finding's vulnerability.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VersionFinding {
+    /// Empty for the unnamed version.
+    pub version: String,
+    pub latest: bool,
+    pub active: bool,
+    /// The version of the finding itself.
+    pub current: bool,
+    pub status: VersionStatus,
+    /// The version's finding that decides its status, the one of the same component when there
+    /// is one; `None` when the version is not affected.
+    pub finding_id: Option<i64>,
 }
 
 async fn token_names(
@@ -572,6 +625,9 @@ pub struct FindingDetail {
     /// The name of the upload token that ignored the finding from a VEX document.
     pub ignored_by_token: Option<String>,
     pub affected_components: Vec<AffectedComponent>,
+    /// Every version of the project, newest first, with its status for the vulnerability (or
+    /// any of its aliases).
+    pub versions: Vec<VersionFinding>,
     pub events: Vec<Event>,
     /// How the project pulls in the component; `None` when its latest SBOM did not say which
     /// components the project depends on directly.
@@ -683,7 +739,7 @@ pub async fn detail(
         .into_iter()
         .map(|organization| (organization.id, organization.slug))
         .collect::<HashMap<_, _>>();
-    let mut affected_components = Vec::new();
+    let mut affected = Vec::new();
     for (other, other_project) in findings::Entity::find()
         .filter(findings::Column::VulnerabilityId.eq(finding.vulnerability_id.clone()))
         .filter(findings::Column::Id.ne(finding.id))
@@ -701,21 +757,45 @@ pub async fn detail(
         if !reader.reaches_project(other_project.id) {
             continue;
         }
-        affected_components.push(AffectedComponent {
-            finding_id: other.id,
-            organization_slug: organization_slug.clone(),
-            project_slug: other_project.slug,
-            purl: other.purl,
-            status: Status::parse(&other.status),
-        });
+        affected.push((other, organization_slug.clone(), other_project.slug));
     }
+    let affected_versions = version_names(
+        database,
+        affected.iter().filter_map(|(other, _, _)| other.version_id),
+    )
+    .await?;
+    let mut affected_components: Vec<AffectedComponent> = affected
+        .into_iter()
+        .map(
+            |(other, organization_slug, project_slug)| AffectedComponent {
+                finding_id: other.id,
+                organization_slug,
+                project_slug,
+                version: other
+                    .version_id
+                    .and_then(|id| affected_versions.get(&id).cloned())
+                    .unwrap_or_default(),
+                purl: other.purl,
+                status: Status::parse(&other.status),
+            },
+        )
+        .collect();
     affected_components.sort_by(|left, right| {
-        (&left.organization_slug, &left.project_slug, &left.purl).cmp(&(
-            &right.organization_slug,
-            &right.project_slug,
-            &right.purl,
-        ))
+        (
+            &left.organization_slug,
+            &left.project_slug,
+            &left.version,
+            &left.purl,
+        )
+            .cmp(&(
+                &right.organization_slug,
+                &right.project_slug,
+                &right.version,
+                &right.purl,
+            ))
     });
+    let aliases: Vec<String> = serde_json::from_str(&vulnerability.aliases).unwrap_or_default();
+    let versions = across_versions(database, &finding, &aliases).await?;
 
     Ok(FindingDetail {
         organization_slug: organization.slug,
@@ -748,10 +828,11 @@ pub async fn detail(
             })
             .collect(),
         affected_components,
+        versions,
         dependency_paths,
         finding: {
             let facts = VulnerabilityFacts {
-                aliases: serde_json::from_str(&vulnerability.aliases).unwrap_or_default(),
+                aliases,
                 summary: vulnerability.summary.clone(),
                 cvss_score: vulnerability.cvss_score,
             };
@@ -770,6 +851,121 @@ pub async fn detail(
             view
         },
     })
+}
+
+/// The names of these versions, by identifier.
+async fn version_names(
+    database: &impl ConnectionTrait,
+    identifiers: impl Iterator<Item = i64>,
+) -> Result<HashMap<i64, String>> {
+    let identifiers: Vec<i64> = identifiers
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let mut names = HashMap::with_capacity(identifiers.len());
+    for chunk in identifiers.chunks(QUERY_CHUNK) {
+        let rows: Vec<(i64, String)> = project_versions::Entity::find()
+            .select_only()
+            .column(project_versions::Column::Id)
+            .column(project_versions::Column::Name)
+            .filter(project_versions::Column::Id.is_in(chunk.iter().copied()))
+            .into_tuple()
+            .all(database)
+            .await?;
+        names.extend(rows);
+    }
+    Ok(names)
+}
+
+/// Every version of a finding's project with its status for the finding's vulnerability, for
+/// comparing releases. A version's findings filed under an alias count too (OSV often lists one
+/// issue under a GHSA and a CVE, and which identifier a version's finding carries depends on
+/// what OSV reported when it was opened): identifiers match when they or their aliases meet,
+/// ignoring case, as for VEX statements ([`crate::vex`]).
+///
+/// The project's distinct vulnerabilities are read through the index on findings'
+/// `(project_id, vulnerability_id)`; only the matching findings are then loaded.
+async fn across_versions(
+    database: &impl ConnectionTrait,
+    finding: &findings::Model,
+    aliases: &[String],
+) -> Result<Vec<VersionFinding>> {
+    let wanted: std::collections::HashSet<String> = std::iter::once(&finding.vulnerability_id)
+        .chain(aliases)
+        .map(|identifier| identifier.to_uppercase())
+        .collect();
+    let identifiers: Vec<String> = findings::Entity::find()
+        .select_only()
+        .column(findings::Column::VulnerabilityId)
+        .distinct()
+        .filter(findings::Column::ProjectId.eq(finding.project_id))
+        .order_by_asc(findings::Column::VulnerabilityId)
+        .into_tuple()
+        .all(database)
+        .await?;
+    let facts = vulnerability_facts(database, identifiers.iter().map(String::as_str)).await?;
+    let matching: Vec<String> = identifiers
+        .into_iter()
+        .filter(|identifier| {
+            let its_aliases = facts
+                .get(identifier)
+                .map_or(&[][..], |facts| facts.aliases.as_slice());
+            std::iter::once(identifier)
+                .chain(its_aliases)
+                .any(|name| wanted.contains(&name.to_uppercase()))
+        })
+        .collect();
+    let mut related: Vec<findings::Model> = Vec::new();
+    for chunk in matching.chunks(QUERY_CHUNK) {
+        related.extend(
+            findings::Entity::find()
+                .filter(findings::Column::ProjectId.eq(finding.project_id))
+                .filter(findings::Column::VulnerabilityId.is_in(chunk.iter().cloned()))
+                .order_by_asc(findings::Column::Id)
+                .all(database)
+                .await?,
+        );
+    }
+    let mut by_version: HashMap<i64, Vec<findings::Model>> = HashMap::new();
+    for other in related {
+        if let Some(version_id) = other.version_id {
+            by_version.entry(version_id).or_default().push(other);
+        }
+    }
+    let versions = project_versions::Entity::find()
+        .filter(project_versions::Column::ProjectId.eq(finding.project_id))
+        .order_by_desc(project_versions::Column::CreatedAt)
+        .order_by_desc(project_versions::Column::Id)
+        .all(database)
+        .await?;
+    Ok(versions
+        .into_iter()
+        .map(|version| {
+            // Ordered by identifier, so among equals the oldest finding decides.
+            let deciding = by_version.get(&version.id).and_then(|candidates| {
+                candidates.iter().min_by_key(|candidate| {
+                    (
+                        VersionStatus::rank(Status::parse(&candidate.status)),
+                        candidate.purl != finding.purl,
+                        candidate.id,
+                    )
+                })
+            });
+            VersionFinding {
+                current: Some(version.id) == finding.version_id,
+                version: version.name,
+                latest: version.latest,
+                active: version.active,
+                status: match deciding.map(|candidate| Status::parse(&candidate.status)) {
+                    Some(Status::Open) => VersionStatus::Open,
+                    Some(Status::Ignored) => VersionStatus::Ignored,
+                    Some(Status::Fixed) => VersionStatus::Fixed,
+                    None => VersionStatus::NotAffected,
+                },
+                finding_id: deciding.map(|candidate| candidate.id),
+            }
+        })
+        .collect())
 }
 
 async fn triaged_finding(

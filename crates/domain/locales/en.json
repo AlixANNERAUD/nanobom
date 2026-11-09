@@ -64,7 +64,11 @@
     "conflicting_license_rule": "\"{license}\" is listed with two different actions",
     "too_many_license_rules": "a license policy holds at most {maximum} rules",
     "invalid_version_name": "the version must be 1 to {maximum} characters: letters, digits, '.', '_', '+', '/' or '-'",
-    "too_many_versions": "this project already has {maximum} active versions: upload to an existing version instead"
+    "too_many_versions": "this project already has {maximum} active versions: make one inactive first",
+    "latest_version_inactive": "the latest version cannot be made inactive: mark another version latest first",
+    "inactive_version_latest": "an inactive version cannot be the latest: make it active first",
+    "latest_version_deleted": "the latest version cannot be deleted: mark another version latest first",
+    "last_version": "a project keeps at least one version: delete the project instead"
   },
   "email": {
     "new_findings_subject": {
