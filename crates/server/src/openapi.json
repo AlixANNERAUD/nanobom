@@ -1817,7 +1817,7 @@
             "items": {
               "type": "string"
             },
-            "description": "The license identifiers that lead to the verdict (`OR` keeps the least severe side, `AND` the most severe). Empty when the license is unknown."
+            "description": "The license identifiers that lead to the verdict (`OR` keeps the least severe side, `AND` the most severe). Empty when the action for unknown licenses alone gives the verdict."
           }
         },
         "required": [

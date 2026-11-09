@@ -281,7 +281,8 @@ pub struct LicenseViolation {
     /// As read from the SBOM.
     pub license: Option<String>,
     pub verdict: LicenseAction,
-    /// The identifiers that lead to the verdict; empty when the license is unknown.
+    /// The identifiers that lead to the verdict; empty when the action for unknown licenses alone
+    /// gives it.
     pub licenses: Vec<String>,
 }
 

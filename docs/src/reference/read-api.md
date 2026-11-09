@@ -222,7 +222,7 @@ the API reads it:
 A page of violations adds `active`, `forbidden` and `warned` (the number of components with
 each verdict across the project; `total` is their sum) to the usual page fields. Each item is
 `component` (as above), `verdict` (`forbid` or `warn`) and `licenses`, the identifiers that
-lead to the verdict, empty when the license is unknown. Items are forbidden components first,
+lead to the verdict, empty when the action for unknown licenses alone gives it. Items are forbidden components first,
 then warned ones, each by name then package URL. Violations are computed at each request from
 the current policy and the latest SBOM ([how](license-policy.md#evaluation)); without an active
 policy the list is empty and `active` is `false`.

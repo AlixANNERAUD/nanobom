@@ -33,14 +33,23 @@ alternatives. nanobom joins them with `AND` when it reads the SBOM
 only produce a warning you then review, while reading them as a choice could hide a forbidden
 license. Generators that mean a choice can write one `expression` with `OR`.
 
-## Unknown is judged as a whole
+## Unknown is never better than what it names
 
 An expression that is not valid SPDX (a free-text name such as `Apache License 2.0`, an
-identifier outside the SPDX list, broken parentheses) gets the action for unknown licenses,
-whatever valid licenses it also contains. Judging the valid part alone would be guessing: in
-`MIT AND Some-Custom-License`, the unrecognized part might be the one that matters. nanobom
-does not guess identifiers either (`Apache` is not taken for `Apache-2.0`), for the same
-reason. Identifiers and operators are compared without case, since SPDX says case does not
+identifier outside the SPDX list, broken parentheses) is unknown: judging the valid part alone
+would be guessing, since in `MIT AND Some-Custom-License` the unrecognized part might be the one
+that matters. So it gets at least the action for unknown licenses, even when every identifier it
+names is allowed.
+
+It can get more. Invalid text often still names real licenses, for instance when a CycloneDX
+component lists a free-text name next to an SPDX identifier and nanobom joins them, giving
+`(GNU Affero General Public License v3) AND AGPL-3.0-only`. Taking the action for unknown
+licenses alone would let a forbidden `AGPL-3.0-only` through only because the text next to it
+is not SPDX. nanobom therefore also reads the identifiers in the text and keeps the most severe action,
+as if they were all joined with `AND`: without a valid expression, an `OR` cannot be trusted to
+offer a choice. The result errs on the side of a warning or a block you then review, never on
+a forbidden license passing. nanobom does not guess identifiers either (`Apache` is not taken
+for `Apache-2.0`), for the same reason. Identifiers and operators are compared without case, since SPDX says case does not
 matter, and SBOMs in the wild write `mit` and `Apache-2.0 or MIT`.
 
 ## Computed when read, not stored

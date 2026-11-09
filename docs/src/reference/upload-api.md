@@ -275,7 +275,7 @@ A successful upload returns `201 Created` when it created the project, `200 OK` 
 | `findings` | The open findings, most severe first, known exploited first within a severity, then by EPSS score; at most 100, so a long list drops the least severe. Each has `vulnerability`, `component` (package URL), `severity`, `known_exploited`, `introduced_via` and `url` (the finding's page) |
 | `findings[].introduced_via` | The names of the project's direct dependencies that lead to the component, sorted; the component's own name when it is one; empty when the SBOM's dependency graph does not say ([Dependency paths](../explanation/dependency-paths.md)) |
 | `licenses` | Only when the organization has an active [license policy](license-policy.md), whatever `fail_on` says: `forbidden` and `warned`, the number of components with each verdict, and `violations`, the first 20 of them, forbidden first, then by name |
-| `licenses.violations[]` | `component` (package URL), `name`, `version`, `license` (as read from the SBOM, `null` when it gave none), `verdict` (`forbid` or `warn`) and `licenses`, the identifiers that lead to the verdict (empty when the license is unknown) |
+| `licenses.violations[]` | `component` (package URL), `name`, `version`, `license` (as read from the SBOM, `null` when it gave none), `verdict` (`forbid` or `warn`) and `licenses`, the identifiers that lead to the verdict (empty when the action for unknown licenses alone gives it) |
 
 `open` and `findings` describe the project's findings as they are when the response is written.
 After a `failed` or `timed_out` evaluation, they are the findings of the previous successful run,

@@ -417,7 +417,8 @@ struct LicenseViolation {
     /// The license as read from the SBOM.
     license: Option<String>,
     verdict: Action,
-    /// The identifiers that lead to the verdict; empty when the license is unknown.
+    /// The identifiers that lead to the verdict; empty when the action for unknown licenses
+    /// alone gives it.
     licenses: Vec<String>,
 }
 

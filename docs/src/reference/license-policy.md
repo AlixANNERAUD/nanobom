@@ -28,13 +28,15 @@ Each list holds identifiers separated by spaces, commas or new lines:
 
 - an identifier of the [SPDX license list](https://spdx.org/licenses) that nanobom is built
   with, in any case (`mit` is stored as `MIT`); the deprecated GNU identifiers without a suffix
-  (`GPL-2.0`, `LGPL-2.1`, `AGPL-3.0`) are stored as their `-only` variant, which they mean;
+  (`GPL-2.0`, `LGPL-2.1`, `AGPL-3.0`) are stored as their `-only` variant, which they mean, and
+  the deprecated ones with an exception (`GPL-2.0-with-classpath-exception`) as the `-only`
+  variant of their license;
 - or `LicenseRef-` followed by letters, digits, `.` and `-` (`LicenseRef-Proprietary`), for
   licenses outside the SPDX list.
 
 An identifier with `+` (`GPL-2.0+`) is refused: name the `-or-later` variant, or the license
-itself. Exception identifiers (`Classpath-exception-2.0`) are refused too: a rule judges a
-license whatever exception follows it.
+itself. Exception identifiers (`Classpath-exception-2.0`) and `NOASSERTION` are refused too: a
+rule judges a license whatever exception follows it, and `NOASSERTION` is an unknown license.
 
 The same identifier, ignoring case, may appear once; in two lists it is refused. A policy holds
 at most 1000 rules, and an identifier is at most 200 characters. Refused input changes nothing,
@@ -51,24 +53,29 @@ and the settings page says why:
 Each component has one license, an SPDX license expression as read from its latest SBOM
 ([how licenses are read](upload-api.md#the-document)). Its verdict:
 
-1. A component without a license is **unknown**.
+1. A component without a license is **unknown**: it gets the action for unknown licenses, and
+   the verdict names no identifier.
 2. The expression is parsed, ignoring the case of identifiers and operators. Deprecated
-   identifiers, `/` for `OR` and `+` after an identifier are accepted. An expression that does
-   not parse is **unknown**: a free-text name (`Apache License 2.0`), an identifier outside the
-   SPDX list (`Apache`, which is not guessed), an exception outside the list, unbalanced
-   parentheses.
-3. An unknown license gets the action for unknown licenses, and the verdict names no
-   identifier.
-4. Otherwise each license of the expression gets its rule, or the action for licenses not
-   listed. `WITH` exceptions are ignored: `GPL-2.0-only WITH Classpath-exception-2.0` is judged
-   as `GPL-2.0-only`. `GPL-2.0` matches a rule on `GPL-2.0-only`, `GPL-2.0+` one on
-   `GPL-2.0-or-later`; `+` after another license is ignored (`Apache-1.0+` is judged as
-   `Apache-1.0`). `DocumentRef-…:LicenseRef-…` names a license of another document, which a
-   rule on the `LicenseRef-…` alone does not match.
-5. `OR` keeps the least severe side, `AND` the most severe. `AND` binds tighter than `OR`
+   identifiers, `/` for `OR` and `+` after an identifier are accepted.
+3. Each license of the expression gets its rule, or the action for licenses not listed.
+   `WITH` exceptions are ignored: `GPL-2.0-only WITH Classpath-exception-2.0` is judged as
+   `GPL-2.0-only`. `GPL-2.0` matches a rule on `GPL-2.0-only`, `GPL-2.0+` one on
+   `GPL-2.0-or-later`, and `GPL-2.0-with-classpath-exception` one on `GPL-2.0-only`; `+` after
+   another license is ignored (`Apache-1.0+` is judged as `Apache-1.0`).
+   `DocumentRef-…:LicenseRef-…` names a license of another document, which a rule on the
+   `LicenseRef-…` alone does not match. `NOASSERTION` gets the action for unknown licenses.
+4. `OR` keeps the least severe side, `AND` the most severe. `AND` binds tighter than `OR`
    (`A OR B AND C` is `A OR (B AND C)`); parentheses group as written.
-6. The verdict is the resulting action, with the identifiers that lead to it; when both sides
+5. The verdict is the resulting action, with the identifiers that lead to it; when both sides
    of an operator give the same action, both are named.
+6. An expression that does not parse is **unknown**: a free-text name (`Apache License 2.0`),
+   an identifier outside the SPDX list (`Apache`, which is not guessed), an exception outside
+   the list, unbalanced parentheses. Its words are still read: each SPDX identifier or
+   `LicenseRef-…` among them gets its action as in step 3, and the verdict is the most severe
+   of these actions and the action for unknown licenses, as if everything were joined with
+   `AND`. It names the identifiers that give it, none when only the action for unknown
+   licenses does. A forbidden identifier is therefore never allowed because the rest of the
+   text is not SPDX.
 
 With a policy that forbids `GPL-3.0-only`, warns about `LGPL-2.1-only`, allows the licenses
 not listed and warns about unknown ones:
@@ -84,6 +91,9 @@ not listed and warns about unknown ones:
 | `gpl-3.0-only with classpath-exception-2.0` | forbid | `GPL-3.0-only` |
 | none | warn | |
 | `Apache License 2.0` | warn | |
+| `(GNU Affero General Public License v3) AND GPL-3.0-only` | forbid | `GPL-3.0-only` |
+| `GPL-3.0-only WITH Some-Custom-exception` | forbid | `GPL-3.0-only` |
+| `MIT AND Some-Custom-License` | warn | |
 
 A component whose verdict is `warn` or `forbid` is a **violation**. Violations are computed
 when read, from the current policy and each project's latest SBOM: a policy change applies to

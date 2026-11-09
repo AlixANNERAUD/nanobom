@@ -13,9 +13,14 @@
 //! rule, else the default for unlisted licenses; `WITH` exceptions are ignored, the license
 //! decides), then combines them: `OR` takes the least severe side, since the user may pick that
 //! license, and `AND` the most severe, since every license applies. Identifiers and operators
-//! match case-insensitively. A license that is missing, or is not a valid SPDX expression (a
-//! free-text name, an identifier outside the SPDX list), is unknown and gets the default for
-//! unknown licenses as a whole.
+//! match case-insensitively. A missing license, or `NOASSERTION` within an expression, is
+//! unknown and gets the default for unknown licenses.
+//!
+//! A license that is not a valid SPDX expression (a free-text name, an identifier outside the
+//! SPDX list, CycloneDX entries of both kinds joined with `AND`) is unknown too, but its words
+//! are still read: it gets the most severe of the default for unknown licenses and the actions
+//! of the SPDX identifiers and `LicenseRef-…` it names, as if they were joined with `AND`. A
+//! forbidden identifier can then not pass because something else in the text is not SPDX.
 //!
 //! Evaluation is pure, and nothing is stored: violations are computed when read, so changing
 //! the policy applies to every project at once, without a run.
@@ -121,7 +126,7 @@ impl Default for Policy {
 pub struct Verdict {
     pub action: Action,
     /// The license identifiers that lead to the action, sorted; empty when the action is
-    /// [`Action::Allow`] or the license is unknown.
+    /// [`Action::Allow`] or comes from the default for unknown licenses alone.
     pub licenses: Vec<String>,
 }
 
@@ -159,49 +164,67 @@ impl<'a> Matcher<'a> {
         }
     }
 
-    fn unknown(&self) -> Verdict {
-        Verdict {
-            action: self.policy.unknown,
-            licenses: Vec::new(),
-        }
+    /// The action of one identifier: its rule, else the default for unlisted licenses.
+    fn action(&self, license: &str) -> Action {
+        self.actions
+            .get(&license.to_ascii_lowercase())
+            .copied()
+            .unwrap_or(self.policy.unlisted)
     }
 
     fn evaluate(&self, license: Option<&str>) -> Verdict {
-        let Some(expression) = license.and_then(parse_expression) else {
-            return self.unknown();
+        let Some(text) = license else {
+            return verdict(self.policy.unknown, BTreeSet::new());
+        };
+        let Some(expression) = parse_expression(text) else {
+            return self.scan(text);
         };
         // The expression is in postfix order: each operator combines the two entries above it.
         let mut stack: Vec<(Action, BTreeSet<String>)> = Vec::new();
         for node in expression.iter() {
             match node {
                 ExprNode::Req(requirement) => {
-                    let license = license_name(&requirement.req.license);
-                    let action = self
-                        .actions
-                        .get(&license.to_ascii_lowercase())
-                        .copied()
-                        .unwrap_or(self.policy.unlisted);
-                    stack.push((action, BTreeSet::from([license])));
+                    stack.push(match license_name(&requirement.req.license) {
+                        Some(license) => (self.action(&license), BTreeSet::from([license])),
+                        None => (self.policy.unknown, BTreeSet::new()),
+                    });
                 }
                 ExprNode::Op(operator) => {
                     let (Some(right), Some(left)) = (stack.pop(), stack.pop()) else {
-                        return self.unknown();
+                        return self.scan(text);
                     };
                     stack.push(combine(*operator, left, right));
                 }
             }
         }
         match (stack.pop(), stack.is_empty()) {
-            (Some((Action::Allow, _)), true) => Verdict {
-                action: Action::Allow,
-                licenses: Vec::new(),
-            },
-            (Some((action, licenses)), true) => Verdict {
-                action,
-                licenses: licenses.into_iter().collect(),
-            },
-            _ => self.unknown(),
+            (Some((action, licenses)), true) => verdict(action, licenses),
+            _ => self.scan(text),
         }
+    }
+
+    /// The verdict on a license that is not a valid expression (see the
+    /// [module documentation](self)): the identifiers it names are joined with `AND`, along with
+    /// the default for unknown licenses, which is therefore the least it gets.
+    fn scan(&self, text: &str) -> Verdict {
+        let mut found = (self.policy.unknown, BTreeSet::new());
+        for license in named_licenses(text) {
+            let action = self.action(&license);
+            found = combine(Operator::And, found, (action, BTreeSet::from([license])));
+        }
+        verdict(found.0, found.1)
+    }
+}
+
+/// A verdict names no license when it allows: nothing needs explaining.
+fn verdict(action: Action, licenses: BTreeSet<String>) -> Verdict {
+    Verdict {
+        action,
+        licenses: if action == Action::Allow {
+            Vec::new()
+        } else {
+            licenses.into_iter().collect()
+        },
     }
 }
 
@@ -247,29 +270,73 @@ fn parse_expression(text: &str) -> Option<Expression> {
     Expression::parse_mode(&canonical_case(text), PARSE_MODE).ok()
 }
 
-/// SPDX identifiers and operators are case-insensitive, but the `spdx` crate compares them
-/// exactly: every word is rewritten in its canonical spelling before parsing. A word is what
-/// the crate's lexer reads as one (`[-A-Za-z0-9.:]+`), so `+`, `/` and parentheses stay as
-/// they are.
-fn canonical_case(text: &str) -> String {
-    let mut output = String::with_capacity(text.len());
-    let mut word = String::new();
-    let flush = |word: &mut String, output: &mut String| {
-        if !word.is_empty() {
-            output.push_str(&canonical_word(word));
-            word.clear();
-        }
-    };
-    for character in text.chars() {
-        if character.is_ascii_alphanumeric() || matches!(character, '-' | '.' | ':') {
-            word.push(character);
+/// The text split into words, as the `spdx` crate's lexer reads them (`[-A-Za-z0-9.:]+`), and
+/// the characters between them, one at a time; `true` marks a word.
+fn tokens(text: &str) -> impl Iterator<Item = (bool, &str)> {
+    let is_word = |character: char| character.is_ascii_alphanumeric() || "-.:".contains(character);
+    let mut rest = text;
+    std::iter::from_fn(move || {
+        let first = rest.chars().next()?;
+        let end = if is_word(first) {
+            rest.find(|character| !is_word(character))
+                .unwrap_or(rest.len())
         } else {
-            flush(&mut word, &mut output);
-            output.push(character);
+            first.len_utf8()
+        };
+        let (token, after) = rest.split_at(end);
+        rest = after;
+        Some((is_word(first), token))
+    })
+}
+
+/// SPDX identifiers and operators are case-insensitive, but the `spdx` crate compares them
+/// exactly: every word is rewritten in its canonical spelling before parsing, while `+`, `/`
+/// and parentheses stay as they are.
+fn canonical_case(text: &str) -> String {
+    tokens(text)
+        .map(|(word, token)| {
+            if word {
+                canonical_word(token)
+            } else {
+                token.to_owned()
+            }
+        })
+        .collect()
+}
+
+/// The identifiers a rule matches among the words of a text that is not a valid expression,
+/// read as [`license_name`] reads those of an expression: an SPDX license identifier, `+`
+/// right after a GNU one meaning its `-or-later` variant, or a license reference.
+fn named_licenses(text: &str) -> impl Iterator<Item = String> {
+    let tokens: Vec<(bool, &str)> = tokens(text).collect();
+    (0..tokens.len()).filter_map(move |index| {
+        let (true, word) = tokens[index] else {
+            return None;
+        };
+        let word = canonical_word(word);
+        if let Some(id) = spdx::license_id(&word) {
+            let mut id = current_id(id);
+            if tokens.get(index + 1) == Some(&(false, "+")) && id.is_gnu() {
+                id = or_later(id).unwrap_or(id);
+            }
+            return license_name(&LicenseItem::Spdx {
+                id,
+                or_later: false,
+            });
         }
-    }
-    flush(&mut word, &mut output);
-    output
+        // `canonical_word` spelled the prefixes as an expression does.
+        let reference = |part: &str, prefix: &str| {
+            part.strip_prefix(prefix)
+                .is_some_and(|rest| !rest.is_empty() && !rest.contains(':'))
+        };
+        let is_reference = match word.split_once(':') {
+            Some((document, license)) => {
+                reference(document, "DocumentRef-") && reference(license, "LicenseRef-")
+            }
+            None => reference(&word, "LicenseRef-"),
+        };
+        is_reference.then_some(word)
+    })
 }
 
 fn canonical_word(word: &str) -> String {
@@ -322,22 +389,42 @@ fn names() -> &'static Names {
     })
 }
 
-/// The identifier a rule matches for one license of an expression. The bare GNU identifiers,
-/// deprecated (`GPL-2.0`), mean the `-only` variant, so a rule on `GPL-2.0-only` covers both;
-/// `+` on other licenses (`Apache-1.0+`) is ignored.
-fn license_name(license: &LicenseItem) -> String {
+/// The identifier a rule matches for one license of an expression (see [`current_id`]); `+`
+/// on licenses other than GNU ones (`Apache-1.0+`) is ignored. `None` for `NOASSERTION`, which
+/// the `spdx` crate lists as a license but which says the license is unknown.
+fn license_name(license: &LicenseItem) -> Option<String> {
     match license {
-        LicenseItem::Spdx { id, .. } => gnu_only(*id).name.to_owned(),
-        LicenseItem::Other(reference) => reference.to_string(),
+        LicenseItem::Spdx { id, .. } if id.name == "NOASSERTION" => None,
+        LicenseItem::Spdx { id, .. } => Some(current_id(*id).name.to_owned()),
+        LicenseItem::Other(reference) => Some(reference.to_string()),
     }
 }
 
-fn gnu_only(id: LicenseId) -> LicenseId {
+/// The identifier that replaces a deprecated GNU one, so that a rule on the current identifier
+/// covers both. A bare identifier (`GPL-2.0`) means the `-only` variant, and an identifier
+/// with an exception (`GPL-2.0-with-classpath-exception`) means its license, since exceptions
+/// are ignored (the current form, `GPL-2.0-only WITH Classpath-exception-2.0`, is judged by
+/// `GPL-2.0-only`).
+fn current_id(id: LicenseId) -> LicenseId {
+    let id = id
+        .name
+        .split_once("-with-")
+        .filter(|(_, exception)| exception.ends_with("-exception"))
+        .and_then(|(license, _)| spdx::license_id(license))
+        .unwrap_or(id);
     if id.is_gnu() && !id.name.ends_with("-only") && !id.name.ends_with("-or-later") {
         spdx::gnu_license_id(id.name, false).unwrap_or(id)
     } else {
         id
     }
+}
+
+/// The `-or-later` variant of a GNU license, which `+` asks for.
+fn or_later(id: LicenseId) -> Option<LicenseId> {
+    if id.name.ends_with("-or-later") {
+        return Some(id);
+    }
+    spdx::gnu_license_id(id.name.strip_suffix("-only").unwrap_or(id.name), true)
 }
 
 /// The longest identifier a rule accepts. SPDX identifiers are far shorter; the bound is for
@@ -348,8 +435,11 @@ pub const MAXIMUM_IDENTIFIER_LENGTH: usize = 200;
 pub const MAXIMUM_RULES: usize = 1000;
 
 /// The canonical spelling of a rule's identifier: an SPDX license identifier, in any case, or
-/// `LicenseRef-` followed by letters, digits, `.` and `-`. Anything else, an exception
-/// identifier or `GPL-2.0+` included, is [`Problem::UnknownLicenseId`].
+/// `LicenseRef-` followed by letters, digits, `.` and `-`. Deprecated GNU identifiers are
+/// replaced by the current ones they mean: `GPL-3.0` and `GPL-3.0-with-GCC-exception` are
+/// stored as `GPL-3.0-only`. Anything else, an
+/// exception identifier, `NOASSERTION` or `GPL-2.0+` included, is
+/// [`Problem::UnknownLicenseId`].
 pub fn canonical_identifier(text: &str) -> Result<String> {
     let text = text.trim();
     let unknown = || {
@@ -382,7 +472,11 @@ pub fn canonical_identifier(text: &str) -> Result<String> {
         .copied()
         .ok_or_else(unknown)?;
     let id = spdx::license_id(name).ok_or_else(unknown)?;
-    Ok(gnu_only(id).name.to_owned())
+    license_name(&LicenseItem::Spdx {
+        id,
+        or_later: false,
+    })
+    .ok_or_else(unknown)
 }
 
 /// The identifiers of a list typed in a form: separated by whitespace or commas.
@@ -532,7 +626,8 @@ pub struct Violation {
     pub license: Option<String>,
     /// [`Action::Warn`] or [`Action::Forbid`].
     pub verdict: Action,
-    /// The identifiers that lead to the verdict; empty when the license is unknown.
+    /// The identifiers that lead to the verdict; empty when the action for unknown licenses
+    /// alone gives it.
     pub licenses: Vec<String>,
 }
 
@@ -891,6 +986,43 @@ mod tests {
     }
 
     #[test]
+    fn deprecated_gnu_identifiers_with_an_exception_mean_their_license() {
+        let policy = policy(
+            Allow,
+            Allow,
+            &[("GPL-2.0-only", Forbid), ("GPL-3.0-only", Warn)],
+        );
+        for license in [
+            "GPL-2.0-with-classpath-exception",
+            "gpl-2.0-with-gcc-exception",
+            "GPL-2.0-with-autoconf-exception",
+            "GPL-2.0-with-bison-exception",
+            "GPL-2.0-with-font-exception",
+        ] {
+            assert_eq!(
+                verdict(&policy, license),
+                (Forbid, "GPL-2.0-only"),
+                "{license}"
+            );
+        }
+        assert_eq!(
+            verdict(
+                &policy,
+                "GPL-3.0-with-GCC-exception OR GPL-3.0-with-autoconf-exception"
+            ),
+            (Warn, "GPL-3.0-only")
+        );
+        assert_eq!(
+            canonical_identifier("GPL-2.0-with-classpath-exception").unwrap(),
+            "GPL-2.0-only"
+        );
+        assert_eq!(
+            canonical_identifier("gpl-3.0-with-gcc-exception").unwrap(),
+            "GPL-3.0-only"
+        );
+    }
+
+    #[test]
     fn an_allowlist_forbids_unlisted_licenses() {
         let policy = policy(Forbid, Allow, &[("MIT", Allow), ("Apache-2.0", Allow)]);
         assert_eq!(verdict(&policy, "MIT"), (Allow, ""));
@@ -914,9 +1046,69 @@ mod tests {
             "MIT AND",
             "(MIT",
             "MIT WITH Some-exception",
+            "NOASSERTION",
+            "MIT AND noassertion",
+            "MIT AND NONE",
         ] {
             assert_eq!(verdict(&policy, license), (Warn, ""), "{license}");
         }
+        assert_eq!(verdict(&policy, "MIT OR NOASSERTION"), (Allow, ""));
+    }
+
+    #[test]
+    fn invalid_licenses_get_the_most_severe_identifier_they_name() {
+        let policy = policy(
+            Allow,
+            Warn,
+            &[
+                ("AGPL-3.0-only", Forbid),
+                ("GPL-3.0-only", Forbid),
+                ("GPL-2.0-or-later", Forbid),
+                ("LicenseRef-Proprietary", Forbid),
+                ("MIT", Forbid),
+                ("MPL-2.0", Warn),
+            ],
+        );
+        for (license, expected) in [
+            // CycloneDX entries of both kinds, joined by the inventory.
+            (
+                "(GNU Affero General Public License v3) AND AGPL-3.0-only",
+                "AGPL-3.0-only",
+            ),
+            ("GPL-3.0-only WITH Some-Custom-exception", "GPL-3.0-only"),
+            ("MIT AND NOASSERTION", "MIT"),
+            ("mit and NONE", "MIT"),
+            // `+` and deprecated identifiers read as in an expression.
+            ("GPL-2.0+ AND Custom", "GPL-2.0-or-later"),
+            ("Custom AND gpl-2.0-only+", "GPL-2.0-or-later"),
+            (
+                "licenseref-proprietary AND Custom",
+                "LicenseRef-proprietary",
+            ),
+            ("GPL-3.0 OR Custom", "GPL-3.0-only"),
+        ] {
+            assert_eq!(verdict(&policy, license), (Forbid, expected), "{license}");
+        }
+        // Without an expression, `OR` gives no choice.
+        assert_eq!(verdict(&policy, "Apache-2.0 OR GPL-3.0-only"), (Allow, ""));
+        assert_eq!(
+            verdict(&policy, "Apache-2.0 OR GPL-3.0-only OR Custom"),
+            (Forbid, "GPL-3.0-only")
+        );
+        // The default for unknown licenses is the least: an allowed identifier does not lower
+        // it, an identifier with the same action is named.
+        assert_eq!(verdict(&policy, "Apache-2.0 AND Custom"), (Warn, ""));
+        assert_eq!(verdict(&policy, "GPL-2.0 AND Custom"), (Warn, ""));
+        assert_eq!(verdict(&policy, "MPL-2.0 AND Custom"), (Warn, "MPL-2.0"));
+        // A reference to another document is another license; exceptions are not licenses.
+        assert_eq!(
+            verdict(&policy, "DocumentRef-x:LicenseRef-Proprietary AND Custom"),
+            (Warn, "")
+        );
+        assert_eq!(
+            verdict(&policy, "Classpath-exception-2.0 Custom"),
+            (Warn, "")
+        );
     }
 
     #[test]
@@ -951,6 +1143,7 @@ mod tests {
             "Apache",
             "GPL-2.0+",
             "LLVM-exception",
+            "NOASSERTION",
             "LicenseRef-",
             "LicenseRef-a b",
             "MIT OR Apache-2.0",
