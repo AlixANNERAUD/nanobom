@@ -52,5 +52,27 @@ async fn log_request(request: Request, next: Next) -> Response {
 }
 
 fn is_routine(path: &str) -> bool {
-    path == "/healthz" || path == "/metrics" || path.starts_with("/pkg/") || path == "/favicon.svg"
+    path == "/healthz"
+        || path == "/metrics"
+        || path.starts_with("/pkg/")
+        || path.starts_with("/fonts/")
+        || path == "/favicon.svg"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_routine;
+
+    #[test]
+    fn assets_are_routine() {
+        for path in [
+            "/pkg/nanobom.css",
+            "/favicon.svg",
+            "/fonts/inter-latin-wght-normal.woff2",
+        ] {
+            assert!(is_routine(path), "{path}");
+        }
+        assert!(!is_routine("/organizations"));
+        assert!(!is_routine("/fonts"));
+    }
 }

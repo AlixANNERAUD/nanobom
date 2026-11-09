@@ -163,4 +163,23 @@ mod tests {
         // Light, dark by class, dark by system preference.
         assert_eq!(definitions, 3);
     }
+
+    /// The stylesheet names its fonts by address. The build copies `public/` to the site root,
+    /// so each address must be a file there, or the page silently falls back to system fonts.
+    #[test]
+    fn fonts_of_the_stylesheet_are_bundled() {
+        let stylesheet = include_str!("../../../style/main.css");
+        let public = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../public");
+        let fonts: Vec<&str> = stylesheet
+            .split("url(\"/")
+            .skip(1)
+            .map(|rest| rest.split('"').next().expect("a closing quote"))
+            .collect();
+        // Inter (variable) and two weights of IBM Plex Mono.
+        assert_eq!(fonts.len(), 3, "{fonts:?}");
+        for font in fonts {
+            assert!(font.starts_with("fonts/"), "{font}");
+            assert!(public.join(font).is_file(), "{font} is not in public/");
+        }
+    }
 }

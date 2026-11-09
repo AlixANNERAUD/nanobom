@@ -4,29 +4,67 @@
 /* Dark styles apply with the `dark` class, or with the system preference unless `light` is set. */
 @custom-variant dark (&:where(.dark, .dark *));
 
-/* Design tokens from shadcn/ui's neutral theme (MIT). */
+/* Bundled fonts (see public/fonts/README.md): the interface never asks a third party for one.
+   Latin subsets only; the `unicode-range` leaves other scripts to the system fonts listed after
+   them in the families below. `swap` shows text in the system font until the file arrives. */
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/inter-latin-wght-normal.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+    U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/ibm-plex-mono-latin-400-normal.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+    U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/fonts/ibm-plex-mono-latin-500-normal.woff2") format("woff2");
+  unicode-range:
+    U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+    U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* Design tokens after shadcn/ui's neutral theme (MIT). Neutrals carry a slight cool tint
+   (hue 285); the accent is violet (hue 293), the one hue no severity or state color uses. Text
+   keeps at least 4.5:1 contrast with the surface it sits on, in both themes. */
 :root {
-  --radius: 0.625rem;
+  --radius: 0.5rem;
   --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
+  --foreground: oklch(0.2 0.02 285);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
+  --card-foreground: oklch(0.2 0.02 285);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.5 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.2 0.02 285);
+  --primary: oklch(0.52 0.22 293);
+  --primary-foreground: oklch(1 0 0);
+  --secondary: oklch(0.965 0.006 285);
+  --secondary-foreground: oklch(0.25 0.02 285);
+  --muted: oklch(0.97 0.006 285);
+  --muted-foreground: oklch(0.5 0.02 285);
+  --accent: oklch(0.96 0.012 293);
+  --accent-foreground: oklch(0.25 0.02 285);
   --destructive: oklch(0.577 0.245 27.325);
   --success: oklch(0.5 0.13 150);
   --warning: oklch(0.55 0.14 70);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.85 0 0);
-  --ring: oklch(0.708 0 0);
+  --border: oklch(0.92 0.008 285);
+  --input: oklch(0.85 0.01 285);
+  --ring: oklch(0.52 0.22 293);
   /* Severity colors keep at least 4.5:1 contrast with white text. */
   --severity-critical: oklch(0.45 0.18 25);
   --severity-high: oklch(0.53 0.17 45);
@@ -35,58 +73,61 @@
 }
 
 /* The dark tokens stay outside any layer, like the light ones: unlayered rules always win over
-   layered ones, so dark tokens in a layer would never apply. */
+   layered ones, so dark tokens in a layer would never apply. The two dark blocks are identical. */
 :root.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.75 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --background: oklch(0.17 0.015 285);
+  --foreground: oklch(0.96 0.005 285);
+  --card: oklch(0.21 0.018 285);
+  --card-foreground: oklch(0.96 0.005 285);
+  --popover: oklch(0.21 0.018 285);
+  --popover-foreground: oklch(0.96 0.005 285);
+  --primary: oklch(0.74 0.15 293);
+  --primary-foreground: oklch(0.17 0.02 285);
+  --secondary: oklch(0.26 0.02 285);
+  --secondary-foreground: oklch(0.96 0.005 285);
+  --muted: oklch(0.26 0.02 285);
+  --muted-foreground: oklch(0.72 0.02 285);
+  --accent: oklch(0.27 0.03 293);
+  --accent-foreground: oklch(0.96 0.005 285);
   --destructive: oklch(0.704 0.191 22.216);
   --success: oklch(0.75 0.13 150);
   --warning: oklch(0.8 0.14 80);
-  --border: oklch(1 0 0 / 12%);
+  --border: oklch(1 0 0 / 11%);
   --input: oklch(1 0 0 / 20%);
-  --ring: oklch(0.556 0 0);
+  --ring: oklch(0.74 0.15 293);
 }
 
 @media (prefers-color-scheme: dark) {
   :root:not(.light) {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.75 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
+    --background: oklch(0.17 0.015 285);
+    --foreground: oklch(0.96 0.005 285);
+    --card: oklch(0.21 0.018 285);
+    --card-foreground: oklch(0.96 0.005 285);
+    --popover: oklch(0.21 0.018 285);
+    --popover-foreground: oklch(0.96 0.005 285);
+    --primary: oklch(0.74 0.15 293);
+    --primary-foreground: oklch(0.17 0.02 285);
+    --secondary: oklch(0.26 0.02 285);
+    --secondary-foreground: oklch(0.96 0.005 285);
+    --muted: oklch(0.26 0.02 285);
+    --muted-foreground: oklch(0.72 0.02 285);
+    --accent: oklch(0.27 0.03 293);
+    --accent-foreground: oklch(0.96 0.005 285);
     --destructive: oklch(0.704 0.191 22.216);
     --success: oklch(0.75 0.13 150);
     --warning: oklch(0.8 0.14 80);
-    --border: oklch(1 0 0 / 12%);
+    --border: oklch(1 0 0 / 11%);
     --input: oklch(1 0 0 / 20%);
-    --ring: oklch(0.556 0 0);
+    --ring: oklch(0.74 0.15 293);
   }
 }
 
 @layer base {
+  /* Focus rings are drawn at 70% of `--ring`, here and in the components: enough for 3:1
+     contrast with the page, card, secondary and muted surfaces in both themes (50% is not),
+     and still lighter than a primary button, which a full-strength ring would merge with. */
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border outline-ring/70;
   }
 
   summary::-webkit-details-marker {
@@ -95,6 +136,8 @@
 }
 
 @theme inline {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);

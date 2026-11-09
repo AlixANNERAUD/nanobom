@@ -4,7 +4,7 @@
 
 use leptos::prelude::*;
 
-const BUTTON_BASE: &str = "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] hover:cursor-pointer";
+const BUTTON_BASE: &str = "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/70 focus-visible:ring-[3px] hover:cursor-pointer";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ButtonVariant {
@@ -48,6 +48,24 @@ pub fn button_class(variant: ButtonVariant, size: ButtonSize) -> String {
     format!("{BUTTON_BASE} {variant} {size}")
 }
 
+/// The nanobom mark, a small box in a box. It is decorative: the wordmark next to it carries the
+/// name. `class` replaces the default size, since two size classes on one element would be
+/// settled by their order in the stylesheet.
+#[component]
+pub fn Mark(#[prop(optional, into)] class: String) -> impl IntoView {
+    let size = if class.is_empty() {
+        "size-[18px]"
+    } else {
+        class.as_str()
+    };
+    view! {
+        <svg viewBox="0 0 18 18" aria-hidden="true" class=format!("shrink-0 {size}")>
+            <rect width="18" height="18" rx="5" class="fill-primary" />
+            <rect x="8" y="8" width="6" height="6" rx="1.5" class="fill-primary-foreground" />
+        </svg>
+    }
+}
+
 /// A submit button.
 #[component]
 pub fn Button(
@@ -77,11 +95,16 @@ pub fn LinkButton(
     }
 }
 
-pub const INPUT: &str = "text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground border-input flex h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:border-destructive";
+pub const INPUT: &str = "text-foreground placeholder:text-muted-foreground selection:bg-primary selection:text-primary-foreground border-input flex h-9 w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base shadow-xs transition-[color,box-shadow] outline-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm focus-visible:border-ring focus-visible:ring-ring/70 focus-visible:ring-[3px] aria-invalid:border-destructive";
 
-pub const SELECT: &str = "text-foreground border-input flex h-9 w-full min-w-0 rounded-md border bg-background px-3 py-1 text-base shadow-xs outline-none md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]";
+pub const SELECT: &str = "text-foreground border-input flex h-9 w-full min-w-0 rounded-md border bg-background px-3 py-1 text-base shadow-xs outline-none md:text-sm focus-visible:border-ring focus-visible:ring-ring/70 focus-visible:ring-[3px]";
 
-pub const TEXTAREA: &str = "text-foreground placeholder:text-muted-foreground border-input flex min-h-20 w-full rounded-md border bg-transparent px-3 py-2 text-base shadow-xs outline-none md:text-sm focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]";
+pub const TEXTAREA: &str = "text-foreground placeholder:text-muted-foreground border-input flex min-h-20 w-full rounded-md border bg-transparent px-3 py-2 text-base shadow-xs outline-none md:text-sm focus-visible:border-ring focus-visible:ring-ring/70 focus-visible:ring-[3px]";
+
+/// Identifiers read character by character: vulnerability ids, versions, package URLs, CVSS
+/// vectors, token prefixes and scores. Slightly smaller than the text around it, since the
+/// monospace face runs wider.
+pub const MONO: &str = "font-mono text-[0.8125rem]";
 
 pub const LABEL: &str = "flex items-center gap-2 text-sm leading-none font-medium select-none";
 
@@ -150,9 +173,9 @@ pub fn Table(#[prop(into)] caption: String, children: Children) -> impl IntoView
 
 pub const TABLE_HEAD_ROW: &str = "border-b bg-muted/50";
 pub const TABLE_HEAD: &str =
-    "h-10 px-3 text-left align-middle font-medium text-muted-foreground whitespace-nowrap";
+    "h-9 px-3 text-left align-middle font-medium text-muted-foreground whitespace-nowrap";
 pub const TABLE_ROW: &str = "border-b last:border-0 transition-colors hover:bg-muted/50";
-pub const TABLE_CELL: &str = "p-3 align-middle";
+pub const TABLE_CELL: &str = "px-3 py-2 align-middle";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum BadgeVariant {
