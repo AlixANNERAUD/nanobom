@@ -386,7 +386,7 @@ async fn project_findings(
         })
         .collect();
     let mut exploitations = exploitation::for_findings(database, &keys).await?;
-    let (graph, mut licenses) = if findings.is_empty() {
+    let (graph, licenses) = if findings.is_empty() {
         (Graph::default(), HashMap::new())
     } else {
         (
@@ -397,7 +397,8 @@ async fn project_findings(
     for finding in &mut findings {
         finding.exploitation = exploitations.remove(&finding.id).unwrap_or_default();
         finding.introduced_via = graph.introduced_via(&finding.purl);
-        finding.license = licenses.remove(&finding.purl);
+        // Not `remove`: a component with several vulnerabilities has one finding for each.
+        finding.license = licenses.get(&finding.purl).cloned();
     }
     if filter.exploited_only {
         findings.retain(|finding| finding.exploitation.known_exploited);

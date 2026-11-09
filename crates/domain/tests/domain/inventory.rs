@@ -1063,6 +1063,10 @@ fn cyclonedx_licenses_become_one_expression() {
         json!([]),
         serde_json::Value::Null,
         json!([{"license": {"name": long_name}}]),
+        // An expression written as a name keeps its meaning next to another license.
+        json!([{"license": {"id": "BSD-3-Clause"}}, {"license": {"name": "MIT OR Apache-2.0"}}]),
+        // Repeated entries count once towards the length bound.
+        serde_json::Value::Array(vec![json!({"license": {"id": "MIT"}}); 400]),
     ]))
     .unwrap();
     assert_eq!(
@@ -1079,6 +1083,11 @@ fn cyclonedx_licenses_become_one_expression() {
             ("pkg:npm/f@1.0.0", None),
             ("pkg:npm/g@1.0.0", None),
             ("pkg:npm/h@1.0.0", None),
+            (
+                "pkg:npm/i@1.0.0",
+                Some("BSD-3-Clause AND (MIT OR Apache-2.0)")
+            ),
+            ("pkg:npm/j@1.0.0", Some("MIT")),
         ]
     );
 }

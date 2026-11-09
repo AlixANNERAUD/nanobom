@@ -7,7 +7,7 @@ use nanobom_domain::{
     findings, organizations, projects, testing, tokens,
     users::{self, NewUser},
 };
-use nanobom_entity::{findings as findings_entity, upload_tokens, vulnerabilities};
+use nanobom_entity::{components, findings as findings_entity, upload_tokens, vulnerabilities};
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection};
 
 /// An open finding of `vulnerability_id` in a project.
@@ -135,4 +135,57 @@ async fn upload_tokens_read_only_the_open_findings_of_projects_they_cover() {
         findings::open_for_upload_token(&database, &acme_token, api + web + 100).await,
         Err(Error::NotFound)
     ));
+}
+
+#[tokio::test]
+async fn every_finding_of_a_component_carries_its_license() {
+    let database = testing::database().await;
+    let user = users::create(
+        &database,
+        NewUser {
+            username: "owner".to_owned(),
+            ..NewUser::default()
+        },
+        false,
+    )
+    .await
+    .unwrap();
+    let owner = Actor::from_user(&user);
+    let acme = organizations::create(&database, &owner, "acme", "Acme")
+        .await
+        .unwrap()
+        .id;
+    let web = projects::create(&database, &owner, acme, "web", "Web")
+        .await
+        .unwrap()
+        .id;
+    components::ActiveModel {
+        project_id: Set(web),
+        purl: Set("pkg:npm/lodash@4.17.20".to_owned()),
+        query_purl: Set("pkg:npm/lodash@4.17.20".to_owned()),
+        ecosystem: Set("npm".to_owned()),
+        name: Set("lodash".to_owned()),
+        version: Set(Some("4.17.20".to_owned())),
+        license: Set(Some("MIT".to_owned())),
+        ..Default::default()
+    }
+    .insert(&database)
+    .await
+    .unwrap();
+    // Two vulnerabilities of the same component.
+    open_finding(&database, web, "GHSA-0000-0000-0001").await;
+    open_finding(&database, web, "GHSA-0000-0000-0002").await;
+
+    let findings = findings::list(&database, &owner, web, &findings::Filter::default())
+        .await
+        .unwrap();
+    assert_eq!(findings.len(), 2);
+    for finding in &findings {
+        assert_eq!(
+            finding.license.as_deref(),
+            Some("MIT"),
+            "{}",
+            finding.vulnerability_id
+        );
+    }
 }

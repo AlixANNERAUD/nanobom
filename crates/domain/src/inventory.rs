@@ -450,19 +450,16 @@ fn cyclonedx_license(licenses: Option<&Licenses>) -> Option<String> {
     let mut terms = BTreeSet::new();
     let mut length = 0;
     for choice in &licenses?.0 {
-        let (term, compound) = match choice {
-            LicenseChoice::Expression(expression) => {
-                let expression = expression.to_string();
-                let compound = expression.trim().contains(char::is_whitespace);
-                (expression, compound)
-            }
+        let term = match choice {
+            LicenseChoice::Expression(expression) => expression.to_string(),
             LicenseChoice::License(license) => match &license.license_identifier {
-                LicenseIdentifier::SpdxId(identifier) => (identifier.to_string(), false),
-                LicenseIdentifier::Name(name) => (name.to_string(), false),
+                LicenseIdentifier::SpdxId(identifier) => identifier.to_string(),
+                // Some generators write an expression here too.
+                LicenseIdentifier::Name(name) => name.to_string(),
             },
         };
         let term = term.trim();
-        if term.is_empty() {
+        if term.is_empty() || terms.contains(term) {
             continue;
         }
         // Checked as entries come, so a component with countless entries stops early.
@@ -470,14 +467,22 @@ fn cyclonedx_license(licenses: Option<&Licenses>) -> Option<String> {
         if length > MAXIMUM_LICENSE_LENGTH {
             return None;
         }
-        terms.insert((term.to_owned(), compound));
+        terms.insert(term.to_owned());
     }
     let license = match terms.len() {
         0 => return None,
-        1 => terms.pop_first()?.0,
+        1 => terms.pop_first()?,
         _ => terms
             .into_iter()
-            .map(|(term, compound)| if compound { format!("({term})") } else { term })
+            .map(|term| {
+                // `AND` binds tighter than `OR` and `WITH` terms read fine either way, so any
+                // term with a space is put in parentheses.
+                if term.contains(char::is_whitespace) {
+                    format!("({term})")
+                } else {
+                    term
+                }
+            })
             .collect::<Vec<_>>()
             .join(" AND "),
     };
