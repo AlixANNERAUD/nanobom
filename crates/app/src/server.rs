@@ -321,6 +321,7 @@ pub fn organization(value: nanobom_domain::organizations::Organization) -> model
 pub fn finding(value: nanobom_domain::findings::Finding) -> model::FindingRow {
     model::FindingRow {
         id: value.id,
+        version: value.version,
         component_name: value.component_name,
         component_version: value.component_version,
         license: value.license,

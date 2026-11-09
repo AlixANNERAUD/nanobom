@@ -340,6 +340,8 @@ pub struct Exploitation {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FindingRow {
     pub id: i64,
+    /// The project version the finding belongs to; empty for the unnamed version.
+    pub version: String,
     pub component_name: String,
     pub component_version: Option<String>,
     /// `None` when the latest SBOM gives no license, or no longer has the component.
@@ -387,6 +389,8 @@ pub struct DependencyPaths {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Upload {
+    /// The project version uploaded to; empty for the unnamed version.
+    pub version: String,
     pub uploaded_at: DateTime<FixedOffset>,
     pub specification_version: String,
     pub source_commit: Option<String>,
@@ -403,6 +407,17 @@ pub struct FindingFilter {
     pub ecosystem: Option<String>,
     /// Only known exploited findings (`exploited=1`).
     pub exploited: bool,
+    /// The project version shown (`version=`, empty for the unnamed version); the latest when
+    /// `None`.
+    pub version: Option<String>,
+}
+
+/// A version of a project, for the version selector.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VersionOption {
+    /// Empty for the unnamed version.
+    pub name: String,
+    pub latest: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -412,7 +427,14 @@ pub struct ProjectData {
     pub name: String,
     pub findings: Vec<FindingRow>,
     pub ecosystems: Vec<String>,
+    /// The latest uploads of the project, every version included.
     pub uploads: Vec<Upload>,
+    /// The project's versions, newest first.
+    pub versions: Vec<VersionOption>,
+    /// The version shown, which findings, components and license violations are about.
+    pub version: VersionOption,
+    /// The latest upload of the version shown.
+    pub version_upload: Option<Upload>,
     pub component_count: usize,
     pub last_upload_at: Option<DateTime<FixedOffset>>,
     pub created_at: DateTime<FixedOffset>,
@@ -439,7 +461,7 @@ pub struct AffectedComponent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FindingEvent {
     pub created_at: DateTime<FixedOffset>,
-    /// `opened`, `fixed`, `reopened`, `ignored`, `restored` or `ignore_expired`.
+    /// `opened`, `fixed`, `reopened`, `ignored`, `restored`, `ignore_expired` or `inherited`.
     pub kind: String,
     pub actor: Option<String>,
     /// The upload token that imported a VEX statement.

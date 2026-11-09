@@ -149,7 +149,8 @@ pub async fn load_project(
     project: String,
     filter: FindingFilter,
 ) -> Result<ProjectData, ServerFnError> {
-    use nanobom_domain::{findings, inventory, organizations, projects};
+    use nanobom_domain::{findings, inventory, organizations, projects, versions};
+    use std::collections::HashMap;
     let actor = actor().await?;
     let database = &context()?.database;
     let found = organizations::find(database, &actor, &organization)
@@ -173,17 +174,58 @@ pub async fn load_project(
         ecosystem: filter.ecosystem.filter(|ecosystem| !ecosystem.is_empty()),
         exploited_only: filter.exploited,
     };
-    let list = findings::list(database, &actor, model.id, &domain_filter)
+    let version = filter.version.as_deref();
+    let list = findings::list_in_version(database, &actor, model.id, version, &domain_filter)
         .await
         .map_err(failure)?;
-    let ecosystems = findings::ecosystems(database, &actor, model.id)
+    let ecosystems = findings::ecosystems_in_version(database, &actor, model.id, version)
         .await
         .map_err(failure)?;
-    let uploads = inventory::uploads(database, &actor, model.id)
+    let summaries = versions::list(database, &actor, model.id)
         .await
         .map_err(failure)?;
-    // The latest upload replaced the project's components, so its count is theirs.
-    let component_count = uploads.first().map_or(0, |upload| {
+    let selected = match version {
+        Some(name) => summaries.iter().find(|summary| summary.name == name),
+        None => summaries.iter().find(|summary| summary.latest),
+    }
+    .ok_or_else(|| failure(nanobom_domain::Error::NotFound))?;
+    let selected_id = selected.id;
+    let selected_version = VersionOption {
+        name: selected.name.clone(),
+        latest: selected.latest,
+    };
+    let names: HashMap<i64, String> = summaries
+        .iter()
+        .map(|summary| (summary.id, summary.name.clone()))
+        .collect();
+    let uploads: Vec<(Option<i64>, Upload)> = inventory::uploads(database, &actor, model.id)
+        .await
+        .map_err(failure)?
+        .into_iter()
+        .map(|upload| {
+            (
+                upload.version_id,
+                Upload {
+                    version: upload
+                        .version_id
+                        .and_then(|id| names.get(&id).cloned())
+                        .unwrap_or_default(),
+                    uploaded_at: upload.uploaded_at,
+                    specification_version: upload.specification_version,
+                    source_commit: upload.source_commit,
+                    image_tag: upload.image_tag,
+                    component_count: upload.component_count,
+                    components_without_purl: upload.components_without_purl,
+                },
+            )
+        })
+        .collect();
+    // The latest upload of a version replaced its components, so its count is theirs.
+    let version_upload = uploads
+        .iter()
+        .find(|(version_id, _)| *version_id == Some(selected_id))
+        .map(|(_, upload)| upload.clone());
+    let component_count = version_upload.as_ref().map_or(0, |upload| {
         usize::try_from(upload.component_count).unwrap_or_default()
     });
     let stale = nanobom_domain::staleness::is_stale(
@@ -192,10 +234,11 @@ pub async fn load_project(
         chrono::Utc::now().fixed_offset(),
         context()?.settings.stale_after_days,
     );
-    let violations = nanobom_domain::licenses::violations(
+    let violations = nanobom_domain::licenses::violations_in_version(
         database,
         &actor,
         model.id,
+        version,
         0,
         LicenseViolations::LISTED,
     )
@@ -228,15 +271,17 @@ pub async fn load_project(
         uploads: uploads
             .into_iter()
             .take(10)
-            .map(|upload| Upload {
-                uploaded_at: upload.uploaded_at,
-                specification_version: upload.specification_version,
-                source_commit: upload.source_commit,
-                image_tag: upload.image_tag,
-                component_count: upload.component_count,
-                components_without_purl: upload.components_without_purl,
+            .map(|(_, upload)| upload)
+            .collect(),
+        versions: summaries
+            .into_iter()
+            .map(|summary| VersionOption {
+                name: summary.name,
+                latest: summary.latest,
             })
             .collect(),
+        version: selected_version,
+        version_upload,
         component_count,
         licenses,
     })

@@ -1287,3 +1287,89 @@ async fn smtp_settings_are_checked_at_startup_without_revealing_the_password() {
             .is_none()
     );
 }
+
+#[tokio::test]
+async fn the_project_page_shows_one_version_at_a_time() {
+    let server = server(&[]).await;
+    server.source.publish(
+        json!({
+            "id": "GHSA-35jh-r3h4-6jhm",
+            "modified": "2024-01-01T00:00:00Z",
+            "summary": "Command Injection in lodash",
+            "database_specific": {"severity": "HIGH"}
+        }),
+        &["pkg:npm/lodash@4.17.20"],
+    );
+    let owner = local_user(&server.database, "alice", PASSWORD).await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let secret = tokens::create(&server.database, &owner, organization.id, None, "CI")
+        .await
+        .unwrap()
+        .secret;
+    let upload = |project: &str, query: &str, document: &str| {
+        Request::put(format!(
+            "/api/organizations/acme/projects/{project}/sbom{query}"
+        ))
+        .header(header::AUTHORIZATION, format!("Bearer {secret}"))
+        .body(Body::from(sbom_document(document)))
+        .unwrap()
+    };
+    server.send(upload("web", "", "cyclonedx-npm.json")).await;
+    server.runner.wait_until_idle().await;
+    server
+        .send(upload("web", "?version=2.0", "cyclonedx-py.json"))
+        .await;
+    server.send(upload("api", "", "cyclonedx-npm.json")).await;
+    server.runner.wait_until_idle().await;
+    let alice = Browser::sign_in(&server, "alice").await;
+
+    // A project that never named a version has no selector.
+    let html = alice.page("/organizations/acme/projects/api").await;
+    assert!(!html.contains("name=\"version\""));
+
+    // The latest version by default: 2.0 has no lodash.
+    let html = alice.page("/organizations/acme/projects/web").await;
+    assert!(
+        html.contains("<select id=\"version\" name=\"version\""),
+        "{html}"
+    );
+    assert!(html.contains("2.0 (latest)"));
+    assert!(html.contains("Unnamed version"));
+    assert!(!html.contains("GHSA-35jh-r3h4-6jhm"));
+    assert!(html.contains("href=\"/api/organizations/acme/projects/web/vex\""));
+    // The upload history covers every version and says which.
+    assert!(html.contains("version 2.0"));
+    assert!(html.contains("· unnamed version"));
+
+    // `version=` (empty) names the unnamed version, whose findings and links follow.
+    let html = alice
+        .page("/organizations/acme/projects/web?version=")
+        .await;
+    assert!(html.contains("GHSA-35jh-r3h4-6jhm"));
+    assert!(html.contains("href=\"/api/organizations/acme/projects/web/vex?version=\""));
+    assert!(html.contains("<input type=\"hidden\" name=\"version\" value=\"\""));
+    let response = alice
+        .get("/organizations/acme/projects/web?version=9.9")
+        .await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+    // A finding's page names its version, and what 2.0 inherited says where it comes from.
+    let project = projects::find(&server.database, &owner, organization.id, "web")
+        .await
+        .unwrap();
+    let inherited = findings::list_in_version(
+        &server.database,
+        &owner,
+        project.id,
+        Some("2.0"),
+        &Filter::default(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(inherited.len(), 1, "fixed by the run, still listed");
+    let html = alice.page(&format!("/findings/{}", inherited[0].id)).await;
+    assert!(html.contains("href=\"/organizations/acme/projects/web?version=2.0\""));
+    assert!(html.contains("Inherited from the unnamed version"));
+}
