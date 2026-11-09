@@ -1,8 +1,9 @@
-//! The component inventory: parsing CycloneDX and SPDX SBOMs and replacing a project's
-//! components with each new upload, keeping the upload history.
+//! The component inventory: parsing CycloneDX and SPDX SBOMs and replacing the components of
+//! a project version ([`crate::versions`]) with each new upload, keeping the upload history.
 //!
-//! An upload is a full snapshot: [`ingest`] deletes the project's components and inserts the
-//! new ones in one transaction, so a project's components are always those of exactly one SBOM.
+//! An upload is a full snapshot: [`ingest`] deletes the version's components and inserts the
+//! new ones in one transaction, so a version's components are always those of exactly one SBOM.
+//! Uploads go to the project's unnamed version.
 //! Findings are not touched here; the next run ([`crate::evaluation`]) compares them with the
 //! new components.
 //!
@@ -764,13 +765,14 @@ async fn store(
     };
 
     let now = Utc::now().fixed_offset();
+    let version = crate::versions::unnamed(&transaction, project.id, now).await?;
     // Before the components, which the edges reference.
     component_dependencies::Entity::delete_many()
-        .filter(component_dependencies::Column::ProjectId.eq(project.id))
+        .filter(component_dependencies::Column::VersionId.eq(version.id))
         .exec(&transaction)
         .await?;
     components::Entity::delete_many()
-        .filter(components::Column::ProjectId.eq(project.id))
+        .filter(components::Column::VersionId.eq(version.id))
         .exec(&transaction)
         .await?;
     let component_count = sbom.components.len();
@@ -780,6 +782,7 @@ async fn store(
         .into_iter()
         .map(|component| components::ActiveModel {
             project_id: Set(project.id),
+            version_id: Set(Some(version.id)),
             purl: Set(component.purl),
             query_purl: Set(component.query_purl),
             ecosystem: Set(component.ecosystem),
@@ -795,9 +798,10 @@ async fn store(
             .exec(&transaction)
             .await?;
     }
-    store_dependencies(&transaction, project.id, &sbom.dependencies).await?;
+    store_dependencies(&transaction, project.id, version.id, &sbom.dependencies).await?;
     let upload = sbom_uploads::ActiveModel {
         project_id: Set(project.id),
+        version_id: Set(Some(version.id)),
         upload_token_id: Set(Some(token.id)),
         uploaded_at: Set(now),
         specification_version: Set(sbom.specification_version),
@@ -810,9 +814,11 @@ async fn store(
     }
     .insert(&transaction)
     .await?;
+    crate::versions::record_upload(&transaction, version, now, dependencies_partial).await?;
+    // The project's own time is that of its last upload to any version: staleness is per
+    // project.
     let mut updated: projects::ActiveModel = project.clone().into();
     updated.last_upload_at = Set(Some(now));
-    updated.dependencies_partial = Set(dependencies_partial);
     updated.update(&transaction).await?;
     transaction.commit().await?;
 
@@ -835,10 +841,11 @@ async fn store(
     })
 }
 
-/// Stores the dependency graph of a project whose components were just inserted.
+/// Stores the dependency graph of a version whose components were just inserted.
 async fn store_dependencies(
     database: &impl ConnectionTrait,
     project_id: i64,
+    version_id: i64,
     dependencies: &[DependencyEdge],
 ) -> Result<()> {
     if dependencies.is_empty() {
@@ -846,7 +853,7 @@ async fn store_dependencies(
     }
     // Multi-row inserts do not return every identifier on all databases: read them back.
     let identifiers: HashMap<String, i64> = components::Entity::find()
-        .filter(components::Column::ProjectId.eq(project_id))
+        .filter(components::Column::VersionId.eq(version_id))
         .all(database)
         .await?
         .into_iter()
@@ -862,6 +869,7 @@ async fn store_dependencies(
             };
             Some(component_dependencies::ActiveModel {
                 project_id: Set(project_id),
+                version_id: Set(Some(version_id)),
                 parent_component_id: Set(parent),
                 child_component_id: Set(child),
                 ..Default::default()
@@ -876,7 +884,8 @@ async fn store_dependencies(
     Ok(())
 }
 
-/// The upload history of a project, newest first. Requires [`Permission::View`].
+/// The upload history of a project, every version included, newest first. Requires
+/// [`Permission::View`].
 pub async fn uploads(
     database: &impl ConnectionTrait,
     reader: impl Into<Reader>,
@@ -891,16 +900,16 @@ pub async fn uploads(
         .await?)
 }
 
-/// The current components of a project, sorted by package URL. Requires
+/// The current components of a project's latest version, sorted by package URL. Requires
 /// [`Permission::View`].
 pub async fn components(
     database: &impl ConnectionTrait,
     reader: impl Into<Reader>,
     project_id: i64,
 ) -> Result<Vec<components::Model>> {
-    crate::projects::authorize(database, reader, project_id, Permission::View).await?;
+    let version = crate::versions::find(database, reader, project_id, None).await?;
     Ok(components::Entity::find()
-        .filter(components::Column::ProjectId.eq(project_id))
+        .filter(components::Column::VersionId.eq(version.id))
         .order_by_asc(components::Column::Purl)
         .all(database)
         .await?)
@@ -930,7 +939,8 @@ pub struct SearchResults {
     pub truncated: bool,
 }
 
-/// Finds components by name across the projects the reader can see: `openssl` matches
+/// Finds components by name across the active versions of the projects the reader can see:
+/// `openssl` matches
 /// names containing it, `openssl 3.` (or `openssl@3.`) also requires the version to start with
 /// `3.`. Names and versions match case-insensitively; `%` and `_` are taken literally.
 /// Results are sorted by name then version and capped at [`MAXIMUM_SEARCH_RESULTS`]; an empty
@@ -997,7 +1007,8 @@ pub async fn search_by_license(
     // case-sensitive on PostgreSQL (and on SQLite for non-ASCII letters), so both sides are
     // compared in lower case.
     let mut select = components::Entity::find()
-        .filter(components::Column::ProjectId.is_in(projects.keys().copied()));
+        .filter(components::Column::ProjectId.is_in(projects.keys().copied()))
+        .filter(components::Column::VersionId.in_subquery(crate::versions::active_ids()));
     if !name.is_empty() {
         select = select.filter(contains_text(components::Column::Name, name));
     }

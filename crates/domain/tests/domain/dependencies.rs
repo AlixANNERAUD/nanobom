@@ -14,8 +14,9 @@ use nanobom_domain::{
     testing::FakeSource,
     tokens,
     users::{self, NewUser},
+    versions,
 };
-use nanobom_entity::{component_dependencies, projects};
+use nanobom_entity::component_dependencies;
 use nanobom_osv::Severity;
 use sea_orm::{DatabaseConnection, EntityTrait, PaginatorTrait};
 use serde_json::json;
@@ -492,12 +493,10 @@ impl Fixture {
             .unwrap()
     }
 
-    /// The flag stored on the project by its latest upload.
+    /// The flag stored on the project's latest version by its latest upload.
     async fn partial(&self, project: i64) -> bool {
-        projects::Entity::find_by_id(project)
-            .one(&self.database)
+        versions::find(&self.database, &self.owner, project, None)
             .await
-            .unwrap()
             .unwrap()
             .dependencies_partial
     }

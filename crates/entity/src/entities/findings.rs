@@ -8,12 +8,11 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i64,
-    #[sea_orm(unique_key = "index_findings_project_purl_vulnerability")]
     pub project_id: i64,
-    #[sea_orm(unique_key = "index_findings_project_purl_vulnerability")]
+    #[sea_orm(unique_key = "index_findings_version_purl_vulnerability")]
     pub purl: String,
     pub ecosystem: String,
-    #[sea_orm(unique_key = "index_findings_project_purl_vulnerability")]
+    #[sea_orm(unique_key = "index_findings_version_purl_vulnerability")]
     pub vulnerability_id: String,
     pub status: String,
     pub severity: String,
@@ -28,6 +27,8 @@ pub struct Model {
     pub exploited_notified_at: Option<DateTimeWithTimeZone>,
     pub ignore_justification: Option<String>,
     pub ignored_by_upload_token_id: Option<i64>,
+    #[sea_orm(unique_key = "index_findings_version_purl_vulnerability")]
+    pub version_id: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

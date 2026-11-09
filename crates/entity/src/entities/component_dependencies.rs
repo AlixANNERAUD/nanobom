@@ -11,6 +11,7 @@ pub struct Model {
     pub project_id: i64,
     pub parent_component_id: Option<i64>,
     pub child_component_id: i64,
+    pub version_id: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

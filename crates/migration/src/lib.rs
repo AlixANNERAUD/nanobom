@@ -22,6 +22,7 @@ mod m20261108_000007_token_scope;
 mod m20261109_000001_component_license;
 mod m20261109_000002_license_policy;
 mod m20261109_000003_email_notifications;
+mod m20261109_000004_project_versions;
 
 /// Every migration of nanobom, in the order they apply; used by
 /// `nanobom_domain::database::migrate` and by the `migrate` command.
@@ -42,6 +43,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261109_000001_component_license::Migration),
             Box::new(m20261109_000002_license_policy::Migration),
             Box::new(m20261109_000003_email_notifications::Migration),
+            Box::new(m20261109_000004_project_versions::Migration),
         ]
     }
 }

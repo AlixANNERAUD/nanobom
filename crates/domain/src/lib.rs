@@ -25,10 +25,12 @@
 //! # Concepts
 //!
 //! - An **organization** ([`organizations`]) owns **projects** ([`projects`]); users belong to
-//!   organizations through **memberships** ([`memberships`]) that carry a role.
+//!   organizations through **memberships** ([`memberships`]) that carry a role. A project's
+//!   components and findings belong to one of its **versions** ([`versions`]); a project that
+//!   never names one has a single, unnamed version.
 //! - CI uploads a CycloneDX or SPDX SBOM with an **upload token** ([`tokens`]); the upload
-//!   replaces the project's **components** ([`inventory`]) and their **dependency graph**
-//!   ([`dependencies`]), which tells which direct dependency of the project pulls in a
+//!   replaces the **components** of a project version ([`inventory`]) and their **dependency
+//!   graph** ([`dependencies`]), which tells which direct dependency of the project pulls in a
 //!   vulnerable component.
 //! - A **run** ([`evaluation`]) matches components against a
 //!   [`VulnerabilitySource`](nanobom_osv::VulnerabilitySource) and opens, fixes and reopens
@@ -82,6 +84,7 @@ pub mod projects;
 pub mod staleness;
 pub mod tokens;
 pub mod users;
+pub mod versions;
 pub mod vex;
 
 pub use error::{Error, Result};

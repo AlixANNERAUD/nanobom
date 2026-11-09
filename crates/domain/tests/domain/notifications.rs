@@ -401,6 +401,9 @@ impl Exploited {
         .unwrap();
         findings::ActiveModel {
             project_id: Set(self.project),
+            version_id: Set(Some(
+                testing::latest_version(&self.database, self.project).await,
+            )),
             purl: Set(format!("pkg:npm/{id}@1.0.0")),
             ecosystem: Set("npm".to_owned()),
             vulnerability_id: Set(id.to_owned()),

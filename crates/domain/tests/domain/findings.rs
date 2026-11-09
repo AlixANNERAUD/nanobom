@@ -26,6 +26,7 @@ async fn open_finding(database: &DatabaseConnection, project_id: i64, vulnerabil
     .unwrap();
     findings_entity::ActiveModel {
         project_id: Set(project_id),
+        version_id: Set(Some(testing::latest_version(database, project_id).await)),
         purl: Set("pkg:npm/lodash@4.17.20".to_owned()),
         ecosystem: Set("npm".to_owned()),
         vulnerability_id: Set(vulnerability_id.to_owned()),
@@ -161,6 +162,7 @@ async fn every_finding_of_a_component_carries_its_license() {
         .id;
     components::ActiveModel {
         project_id: Set(web),
+        version_id: Set(Some(testing::latest_version(&database, web).await)),
         purl: Set("pkg:npm/lodash@4.17.20".to_owned()),
         query_purl: Set("pkg:npm/lodash@4.17.20".to_owned()),
         ecosystem: Set("npm".to_owned()),

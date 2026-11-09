@@ -249,7 +249,7 @@ fn component(purl: &str) -> DocumentComponent {
     }
 }
 
-/// A project's findings as a CycloneDX VEX document. Requires [`crate::access::Permission::View`]
+/// The findings of a project's latest version as a CycloneDX VEX document. Requires [`crate::access::Permission::View`]
 /// in the organization; a missing organization or project, or one outside a token's reach, is
 /// [`Error::NotFound`].
 pub async fn export(
@@ -705,7 +705,7 @@ pub struct ImportOutcome {
     pub results: Vec<StatementOutcome>,
 }
 
-/// Imports VEX statements into a project with an upload token: the project must be in the
+/// Imports VEX statements into a project's latest version with an upload token: the project must be in the
 /// token's organization, and be the token's project when it has one; any other project is
 /// [`Error::NotFound`]. A read token ([`crate::tokens::Scope::Read`]) is [`Error::Forbidden`].
 /// The ignores are recorded as made by the token. Runs in one transaction.
@@ -765,8 +765,9 @@ async fn apply(
 ) -> Result<ImportOutcome> {
     crate::tokens::require_upload_scope(token)?;
     let transaction = crate::database::begin_write(database).await?;
+    let version = crate::versions::select(&transaction, project_id, None).await?;
     let candidates = findings::Entity::find()
-        .filter(findings::Column::ProjectId.eq(project_id))
+        .filter(findings::Column::VersionId.eq(version.id))
         .filter(findings::Column::Status.ne(Status::Fixed.as_str()))
         .order_by_asc(findings::Column::Id)
         .all(&transaction)

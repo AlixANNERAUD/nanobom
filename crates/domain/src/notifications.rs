@@ -52,7 +52,7 @@ use nanobom_osv::Severity;
 use reqwest::Url;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DatabaseConnection,
-    EntityTrait, ModelTrait, QueryFilter, QueryOrder,
+    EntityTrait, ModelTrait, QueryFilter, QueryOrder, QuerySelect,
 };
 use serde::{Deserialize, Serialize};
 
@@ -458,7 +458,8 @@ async fn destinations(
 struct Entry {
     finding_id: i64,
     organization_id: i64,
-    project_id: i64,
+    /// The version whose dependency graph tells how the component is pulled in.
+    version_id: Option<i64>,
     project_slug: String,
     purl: String,
     vulnerability_id: String,
@@ -509,6 +510,7 @@ async fn unnotified_open_findings(
     let mut query = findings::Entity::find()
         .filter(findings::Column::Status.eq("open"))
         .filter(findings::Column::ExploitedNotifiedAt.is_null())
+        .filter(findings::Column::VersionId.in_subquery(crate::versions::active_ids()))
         .order_by_asc(findings::Column::Id);
     let mut project_query = projects::Entity::find();
     match scope {
@@ -623,6 +625,22 @@ pub async fn new_findings_deliveries(
         .collect();
     let exploitation = exploitation::for_findings(database, &keyed).await?;
     let exploitation_of = |id: i64| exploitation.get(&id).cloned().unwrap_or_default();
+    let opened_ids: Vec<i64> = opened.iter().copied().collect();
+    let mut version_of: HashMap<i64, i64> = HashMap::new();
+    for chunk in opened_ids.chunks(QUERY_CHUNK) {
+        let rows: Vec<(i64, Option<i64>)> = findings::Entity::find()
+            .select_only()
+            .column(findings::Column::Id)
+            .column(findings::Column::VersionId)
+            .filter(findings::Column::Id.is_in(chunk.iter().copied()))
+            .into_tuple()
+            .all(database)
+            .await?;
+        version_of.extend(
+            rows.into_iter()
+                .filter_map(|(id, version_id)| Some((id, version_id?))),
+        );
+    }
 
     let mut entries: Vec<Entry> = outcome
         .new_findings
@@ -630,7 +648,7 @@ pub async fn new_findings_deliveries(
         .map(|finding| Entry {
             finding_id: finding.finding_id,
             organization_id: finding.organization_id,
-            project_id: finding.project_id,
+            version_id: version_of.get(&finding.finding_id).copied(),
             project_slug: finding.project_slug.clone(),
             purl: finding.purl.clone(),
             vulnerability_id: finding.vulnerability_id.clone(),
@@ -663,7 +681,7 @@ pub async fn new_findings_deliveries(
         entries.push(Entry {
             finding_id: candidate.finding.id,
             organization_id: candidate.organization_id,
-            project_id: candidate.finding.project_id,
+            version_id: candidate.finding.version_id,
             project_slug: candidate.project_slug,
             purl: candidate.finding.purl,
             vulnerability_id: candidate.finding.vulnerability_id,
@@ -689,6 +707,7 @@ pub async fn new_findings_deliveries(
     }
     let mut deliveries = Vec::new();
     let mut graphs: HashMap<i64, Graph> = HashMap::new();
+    let empty = Graph::default();
     for (organization_id, entries) in by_organization {
         let destinations = destinations(database, organization_id, email).await?;
         if destinations.is_empty() {
@@ -710,11 +729,14 @@ pub async fn new_findings_deliveries(
             }
             let mut findings = Vec::with_capacity(entries.len());
             for entry in &entries {
-                let graph = match graphs.entry(entry.project_id) {
-                    std::collections::hash_map::Entry::Occupied(graph) => graph.into_mut(),
-                    std::collections::hash_map::Entry::Vacant(vacant) => {
-                        vacant.insert(Graph::load(database, entry.project_id).await?)
-                    }
+                let graph: &Graph = match entry.version_id {
+                    None => &empty,
+                    Some(version_id) => match graphs.entry(version_id) {
+                        std::collections::hash_map::Entry::Occupied(graph) => graph.into_mut(),
+                        std::collections::hash_map::Entry::Vacant(vacant) => {
+                            vacant.insert(Graph::load(database, version_id).await?)
+                        }
+                    },
                 };
                 let mut introduced_via: Vec<String> = graph
                     .introduced_via(&entry.purl)

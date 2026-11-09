@@ -46,6 +46,15 @@ pub async fn database() -> DatabaseConnection {
     }
 }
 
+/// The identifier of a project's latest version, for tests that insert components or findings
+/// themselves: every such row names its version.
+pub async fn latest_version(database: &impl sea_orm::ConnectionTrait, project_id: i64) -> i64 {
+    crate::versions::select(database, project_id, None)
+        .await
+        .expect("the project has a latest version")
+        .id
+}
+
 /// An in-memory vulnerability source: records are attached to package URLs and can change
 /// between runs, and the source can be told to fail, to panic once or to hold queries until
 /// resumed.

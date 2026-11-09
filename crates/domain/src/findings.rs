@@ -1,9 +1,9 @@
 //! Findings: a vulnerability affecting a component of a project, with its lifecycle (open,
 //! fixed, ignored) and the full history of what happened to it.
 //!
-//! A finding is identified by its project, its package URL and its vulnerability identifier,
-//! and is never deleted while its project exists: a fixed finding that comes back is reopened,
-//! keeping its history. Runs ([`crate::evaluation`]) open, fix and reopen findings; members
+//! A finding is identified by its project version ([`crate::versions`]), its package URL and
+//! its vulnerability identifier, and is never deleted while its version exists: a fixed
+//! finding that comes back is reopened, keeping its history. Runs ([`crate::evaluation`]) open, fix and reopen findings; members
 //! only ignore and restore them ([`ignore`], [`restore`]). Every status change appends an
 //! [`Event`] in the same transaction:
 //!
@@ -306,8 +306,8 @@ fn view(
     }
 }
 
-/// The findings of a project: known exploited first, then most severe first, then by EPSS
-/// score (findings without one last). Requires [`Permission::View`].
+/// The findings of a project's latest version: known exploited first, then most severe first,
+/// then by EPSS score (findings without one last). Requires [`Permission::View`].
 pub async fn list(
     database: &impl ConnectionTrait,
     reader: impl Into<Reader>,
@@ -316,7 +316,8 @@ pub async fn list(
 ) -> Result<Vec<Finding>> {
     let project =
         crate::projects::authorize(database, reader, project_id, Permission::View).await?;
-    project_findings(database, project, filter).await
+    let version = crate::versions::select(database, project_id, None).await?;
+    version_findings(database, project, version.id, filter).await
 }
 
 /// The open findings of a project an upload token covers, most severe first (then as `list`
@@ -337,16 +338,16 @@ pub async fn open_for_upload_token(
     Ok(findings)
 }
 
-/// The findings of a project, without authorization: known exploited first, then most severe
-/// first, then by EPSS score (findings without one last), then by CVSS score, component and
-/// vulnerability.
-async fn project_findings(
+/// The findings of a version of a project, without authorization: known exploited first, then
+/// most severe first, then by EPSS score (findings without one last), then by CVSS score,
+/// component and vulnerability.
+async fn version_findings(
     database: &impl ConnectionTrait,
     project: projects::Model,
+    version_id: i64,
     filter: &Filter,
 ) -> Result<Vec<Finding>> {
-    let project_id = project.id;
-    let mut query = findings::Entity::find().filter(findings::Column::ProjectId.eq(project_id));
+    let mut query = findings::Entity::find().filter(findings::Column::VersionId.eq(version_id));
     if !filter.severities.is_empty() {
         query = query.filter(
             findings::Column::Severity.is_in(filter.severities.iter().map(|value| value.as_str())),
@@ -390,8 +391,8 @@ async fn project_findings(
         (Graph::default(), HashMap::new())
     } else {
         (
-            Graph::load(database, project_id).await?,
-            licenses(database, project_id, None).await?,
+            Graph::load(database, version_id).await?,
+            licenses(database, version_id, None).await?,
         )
     };
     for finding in &mut findings {
@@ -428,18 +429,18 @@ async fn project_findings(
     Ok(findings)
 }
 
-/// The licenses of a project's components, by package URL, of every component or of the one
+/// The licenses of a version's components, by package URL, of every component or of the one
 /// `purl` names; components without a license are left out.
 async fn licenses(
     database: &impl ConnectionTrait,
-    project_id: i64,
+    version_id: i64,
     purl: Option<&str>,
 ) -> Result<HashMap<String, String>> {
     let mut query = components::Entity::find()
         .select_only()
         .column(components::Column::Purl)
         .column(components::Column::License)
-        .filter(components::Column::ProjectId.eq(project_id))
+        .filter(components::Column::VersionId.eq(version_id))
         .filter(components::Column::License.is_not_null());
     if let Some(purl) = purl {
         query = query.filter(components::Column::Purl.eq(purl));
@@ -452,16 +453,16 @@ async fn licenses(
         .collect())
 }
 
-/// The ecosystems present among a project's findings, for filters. Requires
-/// [`Permission::View`].
+/// The ecosystems present among the findings of a project's latest version, for filters.
+/// Requires [`Permission::View`].
 pub async fn ecosystems(
     database: &impl ConnectionTrait,
     reader: impl Into<Reader>,
     project_id: i64,
 ) -> Result<Vec<String>> {
-    crate::projects::authorize(database, reader, project_id, Permission::View).await?;
+    let version = crate::versions::find(database, reader, project_id, None).await?;
     let mut ecosystems: Vec<String> = findings::Entity::find()
-        .filter(findings::Column::ProjectId.eq(project_id))
+        .filter(findings::Column::VersionId.eq(version.id))
         .all(database)
         .await?
         .into_iter()
@@ -582,7 +583,12 @@ pub async fn detail(
         .await?
         .ok_or(Error::NotFound)?;
     let record: Option<Vulnerability> = serde_json::from_str(&vulnerability.record).ok();
-    let graph = Graph::load(database, project.id).await?;
+    let version_id = finding.version_id;
+    // The finding's own version, whichever is latest: its page describes that version.
+    let graph = match version_id {
+        Some(version_id) => Graph::load(database, version_id).await?,
+        None => Graph::default(),
+    };
     let dependency_paths = graph.paths(&finding.purl);
     let (component_name, _) = component_name_and_version(&finding.purl);
     let package_name = component_name
@@ -634,6 +640,7 @@ pub async fn detail(
     for (other, other_project) in findings::Entity::find()
         .filter(findings::Column::VulnerabilityId.eq(finding.vulnerability_id.clone()))
         .filter(findings::Column::Id.ne(finding.id))
+        .filter(findings::Column::VersionId.in_subquery(crate::versions::active_ids()))
         .find_also_related(projects::Entity)
         .all(database)
         .await?
@@ -703,9 +710,11 @@ pub async fn detail(
             };
             let mut view = view(finding, project.slug, Some(&facts));
             view.introduced_via = graph.introduced_via(&view.purl);
-            view.license = licenses(database, project.id, Some(&view.purl))
-                .await?
-                .remove(&view.purl);
+            if let Some(version_id) = version_id {
+                view.license = licenses(database, version_id, Some(&view.purl))
+                    .await?
+                    .remove(&view.purl);
+            }
             view.exploitation = exploitation::for_cves(
                 database,
                 &exploitation::cve_ids(&view.vulnerability_id, &view.aliases),
@@ -913,8 +922,8 @@ pub struct ProjectOverview {
     pub stale: bool,
 }
 
-/// The projects of an organization with their open findings by severity; `stale_after_days`
-/// is the stale threshold (0: never stale).
+/// The projects of an organization with the open findings of their active versions by
+/// severity; `stale_after_days` is the stale threshold (0: never stale).
 pub async fn overview(
     database: &impl ConnectionTrait,
     reader: impl Into<Reader>,
@@ -950,6 +959,7 @@ pub async fn overview(
     for chunk in identifiers.chunks(QUERY_CHUNK) {
         let rows = findings::Entity::find()
             .filter(findings::Column::ProjectId.is_in(chunk.iter().copied()))
+            .filter(findings::Column::VersionId.in_subquery(crate::versions::active_ids()))
             .filter(findings::Column::Status.ne(Status::Fixed.as_str()))
             .all(database)
             .await?;
@@ -992,11 +1002,12 @@ pub async fn overview(
     Ok(overviews)
 }
 
-/// Open findings by severity across the whole instance, for metrics.
+/// Open findings of active versions by severity across the whole instance, for metrics.
 pub async fn open_counts(database: &impl ConnectionTrait) -> Result<SeverityCounts> {
     let mut counts = SeverityCounts::default();
     for finding in findings::Entity::find()
         .filter(findings::Column::Status.eq(Status::Open.as_str()))
+        .filter(findings::Column::VersionId.in_subquery(crate::versions::active_ids()))
         .all(database)
         .await?
     {
