@@ -1,7 +1,7 @@
 # Read API
 
-The read API returns what nanobom knows as JSON: organizations, projects, findings, components
-and runs. It changes nothing. Scripts, dashboards and other tools use it instead of the
+The read API returns what nanobom knows as JSON: organizations, projects, findings, components,
+runs and license policies. It changes nothing. Scripts, dashboards and other tools use it instead of the
 interface. An example is in [Export findings to a spreadsheet](../how-to/export-findings.md);
 which token to give a tool is explained in [Tokens and scopes](../explanation/tokens.md).
 
@@ -21,6 +21,8 @@ Every endpoint is a `GET`.
 | `/api/organizations/{organization}/runs` | The latest runs that covered the organization, newest first | |
 | `/api/findings/{finding}` | One finding with its vulnerability, history and dependency paths | |
 | `/api/components?q={name}&license={license}` | Components by name, license or both across the projects the caller sees | |
+| `/api/organizations/{organization}/license-policy` | The organization's [license policy](license-policy.md) | |
+| `/api/organizations/{organization}/projects/{project}/license-violations` | The project's components whose license the policy forbids or warns about, forbidden first | ✓ |
 | `/api/openapi.json` | The OpenAPI description | |
 
 Slugs are case-insensitive. A project's findings as a CycloneDX VEX document come from the
@@ -47,7 +49,7 @@ Anything out of the caller's reach answers `404`, exactly like something that do
 
 ## Pagination
 
-Findings and components are paginated with `limit` and `offset`:
+Findings, components and license violations are paginated with `limit` and `offset`:
 
 | Parameter | Default | |
 | --- | --- | --- |
@@ -192,6 +194,38 @@ A run is `id`, `trigger` (`scheduled`, `manual`, `upload`), `scope` (`all`, `org
 `the run could not complete`, and `null` counts.
 
 An organization is `slug`, `name` and `role`: the caller's role, `viewer` for tokens.
+
+## License policy and violations
+
+The policy is changed in the interface only ([Enforce a license policy](../how-to/license-policy.md));
+the API reads it:
+
+```json
+{
+  "active": true,
+  "unlisted": "forbid",
+  "unknown": "warn",
+  "rules": [
+    {"license": "Apache-2.0", "action": "allow"},
+    {"license": "MIT", "action": "allow"}
+  ]
+}
+```
+
+| Field | |
+| --- | --- |
+| `active` | Whether the policy can report anything: a rule or a default other than `allow`. An organization that never set a policy is `false`, with `allow` everywhere |
+| `unlisted` | The action (`allow`, `warn`, `forbid`) for licenses no rule lists |
+| `unknown` | The action for components whose license is missing or is not a valid SPDX expression |
+| `rules` | `license` (canonical SPDX identifier or `LicenseRef-…`) and `action`, by identifier |
+
+A page of violations adds `active`, `forbidden` and `warned` (the number of components with
+each verdict across the project; `total` is their sum) to the usual page fields. Each item is
+`component` (as above), `verdict` (`forbid` or `warn`) and `licenses`, the identifiers that
+lead to the verdict, empty when the license is unknown. Items are forbidden components first,
+then warned ones, each by name then package URL. Violations are computed at each request from
+the current policy and the latest SBOM ([how](license-policy.md#evaluation)); without an active
+policy the list is empty and `active` is `false`.
 
 ## Caching
 

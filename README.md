@@ -83,7 +83,10 @@ upload to nanobom with a new address and key: see [Dependency-Track clients](htt
   Each component's license is kept from the SBOM, and searchable too.
 
 **Stop it before it ships**
-- `fail_on` on uploads: fail the build on critical, high, … or known-exploited findings.
+- `fail_on` on uploads: fail the build on critical, high, … or known-exploited findings, or on
+  licenses your organization forbids.
+- A license policy per organization: allow, warn about or forbid SPDX licenses (an allowlist if
+  you want), with each project's violations and SPDX `AND`/`OR` expressions understood.
 - CycloneDX VEX: export which vulnerabilities do not affect a project, and why, for customers
   and auditors; import a vendor's statements or your own to ignore findings.
 - Webhooks per organization for new and newly exploited vulnerabilities, and for projects whose
@@ -108,6 +111,7 @@ The full guide lives at **<https://alixanneraud.github.io/nanobom/>**:
   [gate a repository's CI](https://alixanneraud.github.io/nanobom/tutorials/gate-ci.html).
 - **How-to guides** - [install](https://alixanneraud.github.io/nanobom/how-to/install.html),
   [generate an SBOM](https://alixanneraud.github.io/nanobom/how-to/generate-sbom.html),
+  [enforce a license policy](https://alixanneraud.github.io/nanobom/how-to/license-policy.html),
   [single sign-on](https://alixanneraud.github.io/nanobom/how-to/single-sign-on.html),
   [reverse proxy and TLS](https://alixanneraud.github.io/nanobom/how-to/reverse-proxy.html),
   [monitoring](https://alixanneraud.github.io/nanobom/how-to/monitoring.html),
@@ -133,8 +137,9 @@ small container, sensible defaults, answers in the CI job and a webhook when som
 exploited.
 
 Choose a larger platform such as [Dependency-Track](https://dependencytrack.org) if you need
-license compliance and policy engines, a broad plugin and integration ecosystem, or very large
-portfolios managed by a dedicated team. nanobom deliberately stays small; see the
+full license compliance (obligations, attribution, licenses detected from source) or policy
+engines with conditions beyond licenses and vulnerabilities, a broad plugin and integration
+ecosystem, or very large portfolios managed by a dedicated team. nanobom deliberately stays small; see the
 [issues](https://github.com/AlixANNERAUD/nanobom/issues) for what is planned next.
 
 ## Contributing

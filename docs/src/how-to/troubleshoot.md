@@ -75,6 +75,10 @@ That is the gate doing its job: open findings reach `fail_on`. The response list
 `evaluation.findings`. Fix them by upgrading the components, or ignore the ones that do not
 apply, with a reason (see [Triage findings](triage.md)); ignored findings do not count.
 
+With `fail_on=license`, `components have forbidden licenses`: the components are listed in
+`evaluation.licenses.violations`. Replace them, or change the policy
+([Enforce a license policy](license-policy.md#deal-with-a-violation)).
+
 ### Upload answers 503
 
 `the evaluation did not complete`, with `fail_on`: the run failed (`evaluation.status` is

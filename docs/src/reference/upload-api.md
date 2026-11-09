@@ -144,10 +144,11 @@ In both formats:
 | `source_commit` | text, up to 300 characters | The commit the SBOM was built from, shown in the upload history |
 | `image_tag` | text, up to 300 characters | The container image tag the SBOM describes, shown in the upload history |
 | `wait` | `true` or `false` | Wait for the project's evaluation and return it |
-| `fail_on` | `critical`, `high`, `medium`, `low` or `exploited` | Fail the upload when open findings reach this threshold; implies `wait` |
+| `fail_on` | `critical`, `high`, `medium`, `low`, `exploited` or `license`, or several separated by commas | Fail the upload when one of these thresholds is reached; implies `wait` |
 
 All are optional. Empty `source_commit` and `image_tag` count as absent; control characters are
-refused. `fail_on` is trimmed and case-insensitive; `wait` accepts exactly `true` or `false`.
+refused. Each `fail_on` value is trimmed and case-insensitive (`fail_on=high,license`); `wait`
+accepts exactly `true` or `false`.
 
 ### `fail_on` thresholds
 
@@ -158,10 +159,20 @@ refused. `fail_on` is trimmed and case-insensitive; `wait` accepts exactly `true
 | `medium` | medium, high or critical |
 | `low` | low, medium, high or critical (anything but unknown) |
 | `exploited` | known exploited, whatever its severity |
+| `license` | not a finding: a component has a license the organization's [license policy](license-policy.md) forbids |
 
 Ignored findings do not count. Findings of unknown severity (`open.unknown`) never reach a
 severity threshold, not even `low`. `exploited` needs exploitation data: with
 `NANOBOM_EXPLOITATION_DATA=false` it is refused with a `422`.
+
+With several thresholds, the upload fails when any of them is reached, and `error` names each
+one, separated by `; ` (`1 open finding at or above high; 3 components have forbidden
+licenses`).
+
+`license` counts only `forbid` verdicts: licenses the policy warns about never fail the upload,
+and an organization without a policy always passes. Licenses come from the uploaded SBOM, not
+from the run, so a run that fails or times out does not fail `fail_on=license` alone; with a
+vulnerability threshold as well, it fails with `503` as before.
 
 ## Waiting for the evaluation
 
@@ -222,7 +233,21 @@ A successful upload returns `201 Created` when it created the project, `200 OK` 
         "introduced_via": ["web-framework"],
         "url": "https://nanobom.example.org/findings/17"
       }
-    ]
+    ],
+    "licenses": {
+      "forbidden": 1,
+      "warned": 2,
+      "violations": [
+        {
+          "component": "pkg:npm/left-pad@1.3.0",
+          "name": "left-pad",
+          "version": "1.3.0",
+          "license": "MIT AND GPL-3.0-only",
+          "verdict": "forbid",
+          "licenses": ["GPL-3.0-only"]
+        }
+      ]
+    }
   }
 }
 ```
@@ -249,6 +274,8 @@ A successful upload returns `201 Created` when it created the project, `200 OK` 
 | `known_exploited` | How many open findings are known exploited |
 | `findings` | The open findings, most severe first, known exploited first within a severity, then by EPSS score; at most 100, so a long list drops the least severe. Each has `vulnerability`, `component` (package URL), `severity`, `known_exploited`, `introduced_via` and `url` (the finding's page) |
 | `findings[].introduced_via` | The names of the project's direct dependencies that lead to the component, sorted; the component's own name when it is one; empty when the SBOM's dependency graph does not say ([Dependency paths](../explanation/dependency-paths.md)) |
+| `licenses` | Only when the organization has an active [license policy](license-policy.md), whatever `fail_on` says: `forbidden` and `warned`, the number of components with each verdict, and `violations`, the first 20 of them, forbidden first, then by name |
+| `licenses.violations[]` | `component` (package URL), `name`, `version`, `license` (as read from the SBOM, `null` when it gave none), `verdict` (`forbid` or `warn`) and `licenses`, the identifiers that lead to the verdict (empty when the license is unknown) |
 
 `open` and `findings` describe the project's findings as they are when the response is written.
 After a `failed` or `timed_out` evaluation, they are the findings of the previous successful run,
@@ -263,11 +290,11 @@ not of this SBOM.
 | `401` | No `Authorization: Bearer` header, or a token that is unknown or revoked, including one revoked while the upload waited | Check the secret in CI; the response has a `WWW-Authenticate: Bearer` header |
 | `403` | A project token used for another existing project, or a read token | Use that project's slug, or an organization token; upload with a token of the upload scope |
 | `404` | The organization does not exist or is not the token's; or a project token used for a project that does not exist | Check the organization slug in the URL; create the project first (with an organization token) |
-| `409` | With `fail_on`: the evaluation succeeded and open findings reach the threshold | Fix or triage the findings listed in `evaluation.findings` |
+| `409` | With `fail_on`: the evaluation succeeded and open findings reach a threshold, or, with `license`, a component has a forbidden license | Fix or triage the findings listed in `evaluation.findings`; replace the components listed in `evaluation.licenses.violations`, or change the policy |
 | `413` | The body is larger than `NANOBOM_MAXIMUM_SBOM_SIZE` (16 MiB by default) | Raise the limit, or split the SBOM; this error's body is plain text, not JSON |
 | `422` | Invalid parameter, invalid project slug, or invalid document (not JSON, neither CycloneDX nor SPDX, unsupported version) | Read `error` |
 | `500` | A database error | See the server's logs |
-| `503` | With `fail_on`: the evaluation failed or timed out, so the findings are not up to date | Retry later; see [Troubleshoot](../how-to/troubleshoot.md#upload-answers-503) |
+| `503` | With a `fail_on` threshold other than `license`: the evaluation failed or timed out, so the findings are not up to date | Retry later; see [Troubleshoot](../how-to/troubleshoot.md#upload-answers-503) |
 | `503` | With `wait` or `fail_on`: `NANOBOM_MAX_WAITING_UPLOADS` uploads are already waiting; the response has a `Retry-After` header (in seconds) | Send the upload again after `Retry-After`; nothing was stored |
 
 The `409` and `503` responses still stored the SBOM, except a `503` for too many waiting uploads:
@@ -287,7 +314,7 @@ cut to 200 characters, followed by `…`.
 | `403` | `this token is read-only: uploads need a token with the upload scope` |
 | `404` | `not found` |
 | `422` | `wait must be true or false` |
-| `422` | `fail_on must be critical, high, medium, low or exploited` |
+| `422` | `fail_on must be critical, high, medium, low, exploited or license, or several of them separated by commas` |
 | `422` | `fail_on=exploited needs exploitation data (NANOBOM_EXPLOITATION_DATA)`: exploitation data is off on this instance, so no finding could ever be known exploited and the gate would always pass |
 | `422` | `the source commit must be at most 300 printable characters` (or `the image tag …`) |
 | `422` | `the project slug must be 1 to 64 characters: letters, digits, '.', '_' or '-', starting with a letter or a digit` |

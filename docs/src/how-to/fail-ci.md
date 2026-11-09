@@ -16,6 +16,10 @@ Add the threshold to the upload:
 and is refused with a `422` on an instance with `NANOBOM_EXPLOITATION_DATA=false` rather than
 always passing.
 
+Thresholds combine, separated by commas: `fail_on=high,exploited` fails on either. `license`
+fails on components whose license the organization forbids
+([Enforce a license policy](license-policy.md#fail-ci-on-forbidden-licenses)).
+
 The client must treat any status from 400 as a failure while printing the body, which lists the
 findings that crossed the threshold in `evaluation.findings`: the action does it, and so do
 `curl --fail-with-body` and `wget --content-on-error`.
