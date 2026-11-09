@@ -378,3 +378,16 @@ pub async fn authenticate(
         }
     }
 }
+
+/// Whether a token returned by [`authenticate`] is still active: not revoked since, nor deleted
+/// with its organization or project.
+///
+/// A request that holds a token for a long time, such as an upload waiting for its evaluation,
+/// asks again before answering, so a token revoked meanwhile is not answered with data.
+pub async fn is_active(database: &impl ConnectionTrait, token_id: i64) -> Result<bool> {
+    Ok(upload_tokens::Entity::find_by_id(token_id)
+        .filter(upload_tokens::Column::RevokedAt.is_null())
+        .one(database)
+        .await?
+        .is_some())
+}

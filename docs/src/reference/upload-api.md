@@ -157,6 +157,16 @@ time, so a waiting upload can queue behind a long scheduled run. The wait is bou
 still completes in the background. Waiting runs the project even when `NANOBOM_RUN_AFTER_UPLOAD`
 is `false`.
 
+At most `NANOBOM_MAX_WAITING_UPLOADS` uploads (32 by default) wait at once. Another upload with
+`wait` or `fail_on` is refused with a `503` and a `Retry-After` header, before its body is read,
+so nothing is stored and it can be sent again unchanged. Uploads without `wait` or `fail_on` are
+not limited.
+
+The token is checked again when the wait ends. If it was revoked meanwhile, or deleted with its
+project or organization, the upload answers `401` with no evaluation, as an invalid token would,
+and VEX statements in the SBOM are not imported. The SBOM, accepted while the token was valid,
+stays stored.
+
 When exploitation data is on, the run refreshes the KEV and EPSS data of the CVEs it found before
 the upload is answered, so `fail_on=exploited` sees a vulnerability first reported by this very
 run. That refresh is bounded to 60 seconds. Webhooks are sent after waiting uploads are answered.
@@ -230,7 +240,7 @@ not of this SBOM.
 | --- | --- | --- |
 | `200` | The SBOM replaced the project's components | |
 | `201` | The SBOM created the project | |
-| `401` | No `Authorization: Bearer` header, or a token that is unknown or revoked | Check the secret in CI; the response has a `WWW-Authenticate: Bearer` header |
+| `401` | No `Authorization: Bearer` header, or a token that is unknown or revoked, including one revoked while the upload waited | Check the secret in CI; the response has a `WWW-Authenticate: Bearer` header |
 | `403` | A project token used for another existing project, or a read token | Use that project's slug, or an organization token; upload with a token of the upload scope |
 | `404` | The organization does not exist or is not the token's; or a project token used for a project that does not exist | Check the organization slug in the URL; create the project first (with an organization token) |
 | `409` | With `fail_on`: the evaluation succeeded and open findings reach the threshold | Fix or triage the findings listed in `evaluation.findings` |
@@ -238,9 +248,11 @@ not of this SBOM.
 | `422` | Invalid parameter, invalid project slug, or invalid document (not JSON, neither CycloneDX nor SPDX, unsupported version) | Read `error` |
 | `500` | A database error | See the server's logs |
 | `503` | With `fail_on`: the evaluation failed or timed out, so the findings are not up to date | Retry later; see [Troubleshoot](../how-to/troubleshoot.md#upload-answers-503) |
+| `503` | With `wait` or `fail_on`: `NANOBOM_MAX_WAITING_UPLOADS` uploads are already waiting; the response has a `Retry-After` header (in seconds) | Send the upload again after `Retry-After`; nothing was stored |
 
-The `409` and `503` responses still stored the SBOM: the inventory is up to date even when the
-gate fails. A `422` for a parameter is answered before anything is stored.
+The `409` and `503` responses still stored the SBOM, except a `503` for too many waiting uploads:
+the inventory is up to date even when the gate fails. So did a `401` for a token revoked while
+the upload waited. A `422` for a parameter is answered before anything is stored.
 
 ## Error messages
 
@@ -269,6 +281,7 @@ cut to 200 characters, followed by `…`.
 | `422` | `invalid CycloneDX document: …` |
 | `422` | `invalid SPDX document: …` |
 | `503` | `the evaluation did not complete` |
+| `503` | `too many uploads are waiting for their evaluation (at most 32, NANOBOM_MAX_WAITING_UPLOADS): nothing was stored, retry later` |
 
 ## Dependency-Track API
 

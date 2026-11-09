@@ -279,3 +279,32 @@ async fn token_readers_see_their_reach_as_viewers() {
         Err(Error::NotFound)
     ));
 }
+
+#[tokio::test]
+async fn revoked_and_deleted_tokens_are_no_longer_active() {
+    let database = testing::database().await;
+    let owner = owner(&database).await;
+    let acme = organizations::create(&database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let revoked = tokens::create(&database, &owner, acme.id, None, "CI")
+        .await
+        .unwrap();
+    let token = authenticated(&database, &revoked.secret).await;
+    assert!(tokens::is_active(&database, token.id).await.unwrap());
+    tokens::revoke(&database, &owner, token.id).await.unwrap();
+    assert!(!tokens::is_active(&database, token.id).await.unwrap());
+
+    let deleted = tokens::create(&database, &owner, acme.id, None, "Release")
+        .await
+        .unwrap();
+    upload_tokens::Entity::delete_by_id(deleted.token.id)
+        .exec(&database)
+        .await
+        .unwrap();
+    assert!(
+        !tokens::is_active(&database, deleted.token.id)
+            .await
+            .unwrap()
+    );
+}

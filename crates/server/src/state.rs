@@ -23,6 +23,9 @@ pub struct AppState {
     pub leptos_options: LeptosOptions,
     /// Bounds how many SBOMs are parsed at once, which bounds memory use.
     pub sbom_parsing: Arc<Semaphore>,
+    /// Bounds how many uploads wait for their evaluation at once (`--max-waiting-uploads`),
+    /// which bounds the connections and memory a burst of CI jobs holds.
+    pub waiting_uploads: Arc<Semaphore>,
     /// Queues runs; see [`crate::runner`].
     pub runner: Runner,
     /// The OpenID Connect provider, when configured.
@@ -42,11 +45,13 @@ impl AppState {
         runner: Runner,
         openid: Option<OpenId>,
     ) -> Self {
+        let waiting_uploads = Arc::new(Semaphore::new(options.max_waiting_uploads as usize));
         Self {
             database,
             options: Arc::new(options),
             leptos_options,
             sbom_parsing: Arc::new(Semaphore::new(CONCURRENT_SBOM_PARSING)),
+            waiting_uploads,
             runner,
             openid: openid.map(Arc::new),
             processing_tokens: ProcessingTokens::default(),

@@ -85,6 +85,11 @@ decide.
   behind another run, such as the nightly run of a large instance. Retry, raise the setting, or
   move the schedule away from your busiest CI hours.
 
+`too many uploads are waiting for their evaluation`, with `wait` or `fail_on`: a burst of CI jobs
+reached `NANOBOM_MAX_WAITING_UPLOADS`. Nothing was stored: send the upload again after the
+seconds of the `Retry-After` header, spread the jobs out, or raise the setting
+([configuration](../reference/configuration.md#runs)).
+
 ### Upload answers 502 or 504 after a minute
 
 A reverse proxy between CI and nanobom gave up on a waiting upload (most default to 60 seconds).

@@ -580,3 +580,101 @@ async fn a_hanging_exploitation_feed_holds_waiting_uploads_only_up_to_the_bound(
         "an abandoned refresh stores nothing"
     );
 }
+
+#[tokio::test]
+async fn tokens_revoked_while_their_upload_waits_get_no_evaluation() {
+    let server = server(&[]).await;
+    server
+        .source
+        .publish(lodash_advisory(), &["pkg:npm/lodash@4.17.20"]);
+    let owner = user(&server.database, "owner").await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let created = tokens::create(&server.database, &owner, organization.id, None, "CI")
+        .await
+        .unwrap();
+
+    server.source.pause();
+    let revoke = async {
+        server.source.query_started().await;
+        tokens::revoke(&server.database, &owner, created.token.id)
+            .await
+            .unwrap();
+        server.source.resume();
+    };
+    let (response, ()) = tokio::join!(
+        server.send(upload(
+            "/api/organizations/acme/projects/web/sbom?wait=true",
+            Some(&created.secret),
+            sbom_document("cyclonedx-npm.json"),
+        )),
+        revoke
+    );
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(response.headers()[header::WWW_AUTHENTICATE], "Bearer");
+    let body = body_json(response).await;
+    assert!(body.get("evaluation").is_none(), "{body}");
+    assert!(body.get("project").is_none(), "{body}");
+
+    // Accepted while the token was valid, the SBOM stays.
+    let project = projects::find(&server.database, &owner, organization.id, "web")
+        .await
+        .unwrap();
+    assert!(project.last_upload_at.is_some());
+}
+
+#[tokio::test]
+async fn waiting_uploads_beyond_the_limit_are_refused_until_one_finishes() {
+    let server = server(&["--max-waiting-uploads", "1"]).await;
+    let token = acme_token(&server).await;
+
+    server.source.pause();
+    let others = async {
+        server.source.query_started().await;
+        let response = server
+            .send(upload(
+                "/api/organizations/acme/projects/api/sbom?fail_on=high",
+                Some(&token),
+                sbom_document("cyclonedx-npm.json"),
+            ))
+            .await;
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(response.headers()[header::RETRY_AFTER], "30");
+        let body = body_json(response).await;
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap()
+                .starts_with("too many uploads are waiting"),
+            "{body}"
+        );
+        assert_eq!(
+            nanobom_entity::sbom_uploads::Entity::find()
+                .count(&server.database)
+                .await
+                .unwrap(),
+            1,
+            "a refused upload stores nothing"
+        );
+
+        // Uploads that do not wait are not limited.
+        let response = server
+            .send(upload(
+                "/api/organizations/acme/projects/worker/sbom",
+                Some(&token),
+                sbom_document("cyclonedx-npm.json"),
+            ))
+            .await;
+        assert_eq!(response.status(), StatusCode::CREATED);
+        server.source.resume();
+    };
+    let ((status, body), ()) = tokio::join!(upload_web(&server, &token, "?wait=true"), others);
+    assert_eq!(status, StatusCode::CREATED, "{body}");
+    assert_eq!(body["evaluation"]["status"], "succeeded", "{body}");
+
+    // The slot is free again.
+    let (status, body) = upload_web(&server, &token, "?fail_on=high").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["evaluation"]["status"], "succeeded", "{body}");
+}

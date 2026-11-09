@@ -204,6 +204,12 @@ pub struct ServeOptions {
     #[arg(long, env = "NANOBOM_UPLOAD_WAIT_SECONDS", default_value_t = 300)]
     pub upload_wait_seconds: u64,
 
+    /// Most uploads waiting for their evaluation at once (`wait` or `fail_on`); more are
+    /// refused with 503 and `Retry-After` until one finishes. Uploads that do not wait are not
+    /// counted.
+    #[arg(long, env = "NANOBOM_MAX_WAITING_UPLOADS", default_value_t = 32, value_parser = clap::value_parser!(u32).range(1..))]
+    pub max_waiting_uploads: u32,
+
     /// Address of the OSV API.
     #[arg(long, env = "NANOBOM_OSV_URL", default_value = "https://api.osv.dev/")]
     pub osv_url: reqwest::Url,
