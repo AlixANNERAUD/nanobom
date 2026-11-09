@@ -8,9 +8,8 @@ use serde::{Deserialize, Serialize};
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i64,
-    #[sea_orm(unique_key = "index_components_project_purl")]
     pub project_id: i64,
-    #[sea_orm(unique_key = "index_components_project_purl")]
+    #[sea_orm(unique_key = "index_components_version_purl")]
     pub purl: String,
     pub query_purl: String,
     pub ecosystem: String,
@@ -18,6 +17,8 @@ pub struct Model {
     pub version: Option<String>,
     #[sea_orm(column_type = "Text", nullable)]
     pub license: Option<String>,
+    #[sea_orm(unique_key = "index_components_version_purl")]
+    pub version_id: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

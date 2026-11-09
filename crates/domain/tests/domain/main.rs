@@ -13,4 +13,5 @@ mod lifecycle;
 mod notifications;
 mod staleness;
 mod tokens;
+mod versions;
 mod vex;

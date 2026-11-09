@@ -1,5 +1,5 @@
-//! The dependency graph of a project's latest SBOM, and the paths through which the project
-//! pulls in a component.
+//! The dependency graph of a project version's latest SBOM, and the paths through which the
+//! project pulls in a component.
 //!
 //! A CycloneDX document lists, for each component (by `bom-ref`), the components it depends on
 //! directly, and names the project itself in `metadata.component`. [`crate::inventory`] keeps
@@ -28,7 +28,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use nanobom_entity::{component_dependencies, components, projects};
+use nanobom_entity::{component_dependencies, components, project_versions};
 use sea_orm::{
     ColumnTrait, ConnectionTrait, EntityTrait, FromQueryResult, JoinType, QueryFilter, QueryOrder,
     QuerySelect, RelationTrait,
@@ -36,10 +36,7 @@ use sea_orm::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    access::{Actor, Permission},
-    error::Result,
-};
+use crate::{access::Actor, error::Result};
 
 /// At most this many paths are shown for a component, one per direct dependency.
 pub const MAXIMUM_PATHS: usize = 5;
@@ -80,7 +77,7 @@ struct Step {
     next: Option<i64>,
 }
 
-/// The dependency graph of a project, loaded whole: components are identified by their
+/// The dependency graph of a project version, loaded whole: components are identified by their
 /// identifier in the `components` table.
 #[derive(Debug, Default)]
 pub(crate) struct Graph {
@@ -108,14 +105,14 @@ struct EdgeRow {
 }
 
 impl Graph {
-    /// The graph of a project's latest SBOM, without authorization.
+    /// The graph of a version's latest SBOM, without authorization.
     ///
-    /// Edges, their components and the project's flag come from one statement: two reads could
+    /// Edges, their components and the version's flag come from one statement: two reads could
     /// straddle an upload (which replaces the components and their identifiers) and pair the
     /// edges of one SBOM with the components of another, and a transaction would not prevent
     /// it on PostgreSQL, whose default isolation level takes a snapshot per statement. Only the
     /// components that appear in an edge are loaded; the others are in no path anyway.
-    pub(crate) async fn load(database: &impl ConnectionTrait, project_id: i64) -> Result<Self> {
+    pub(crate) async fn load(database: &impl ConnectionTrait, version_id: i64) -> Result<Self> {
         let parent = Alias::new("parent_component");
         let child = Alias::new("child_component");
         let rows = component_dependencies::Entity::find()
@@ -132,9 +129,14 @@ impl Graph {
                 component_dependencies::Relation::Components2.def(),
                 child.clone(),
             )
+            // No foreign key relates the two tables (see `crate::versions`), so no generated
+            // relation either.
             .join(
                 JoinType::InnerJoin,
-                component_dependencies::Relation::Projects.def(),
+                component_dependencies::Entity::belongs_to(project_versions::Entity)
+                    .from(component_dependencies::Column::VersionId)
+                    .to(project_versions::Column::Id)
+                    .into(),
             )
             .column_as(
                 Expr::col((parent.clone(), components::Column::Purl)),
@@ -160,8 +162,8 @@ impl Graph {
                 Expr::col((child, components::Column::Version)),
                 "child_version",
             )
-            .column(projects::Column::DependenciesPartial)
-            .filter(component_dependencies::Column::ProjectId.eq(project_id))
+            .column(project_versions::Column::DependenciesPartial)
+            .filter(component_dependencies::Column::VersionId.eq(version_id))
             .order_by_asc(component_dependencies::Column::Id)
             .into_model::<EdgeRow>()
             .all(database)
@@ -355,17 +357,17 @@ impl Graph {
     }
 }
 
-/// How the project pulls in the component with this package URL, per its latest SBOM: `None`
-/// when the SBOM did not say which components the project depends on directly. Requires
-/// [`Permission::View`].
+/// How the project pulls in the component with this package URL, per the latest SBOM of its
+/// latest version: `None` when the SBOM did not say which components the project depends on
+/// directly. Requires [`Permission::View`](crate::access::Permission::View).
 pub async fn paths(
     database: &impl ConnectionTrait,
     actor: &Actor,
     project_id: i64,
     purl: &str,
 ) -> Result<Option<DependencyPaths>> {
-    crate::projects::authorize(database, actor, project_id, Permission::View).await?;
-    Ok(Graph::load(database, project_id).await?.paths(purl))
+    let version = crate::versions::find(database, actor, project_id, None).await?;
+    Ok(Graph::load(database, version.id).await?.paths(purl))
 }
 
 #[cfg(test)]

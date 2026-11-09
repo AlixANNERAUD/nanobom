@@ -8,7 +8,7 @@ use chrono::Utc;
 use nanobom_entity::projects;
 use sea_orm::{
     ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, ModelTrait,
-    QueryFilter, QueryOrder,
+    QueryFilter, QueryOrder, TransactionSession, TransactionTrait,
 };
 
 use crate::{
@@ -92,7 +92,9 @@ pub(crate) async fn authorize(
     Ok(project)
 }
 
-/// Inserts a project without checking any permission; the name defaults to the slug.
+/// Inserts a project with its unnamed version, without checking any permission; the name
+/// defaults to the slug. Callers pass a transaction, or a project could be seen without its
+/// version.
 pub(crate) async fn insert(
     database: &impl ConnectionTrait,
     organization_id: i64,
@@ -110,23 +112,26 @@ pub(crate) async fn insert(
     {
         return Err(Error::conflict(Problem::ProjectExists { slug }));
     }
-    Ok(projects::ActiveModel {
+    let now = Utc::now().fixed_offset();
+    let project = projects::ActiveModel {
         organization_id: Set(organization_id),
         slug: Set(slug),
         name: Set(name),
-        created_at: Set(Utc::now().fixed_offset()),
+        created_at: Set(now),
         last_upload_at: Set(None),
         ..Default::default()
     }
     .insert(database)
-    .await?)
+    .await?;
+    crate::versions::insert_unnamed(database, project.id, true, now).await?;
+    Ok(project)
 }
 
 /// Creates an empty project; projects are also created by the first upload of an
 /// organization-wide token. Requires [`Permission::ManageProjects`]; a taken slug is a
 /// [`Problem::ProjectExists`] conflict.
 pub async fn create(
-    database: &impl ConnectionTrait,
+    database: &(impl ConnectionTrait + TransactionTrait),
     actor: &Actor,
     organization_id: i64,
     slug: &str,
@@ -135,7 +140,10 @@ pub async fn create(
     actor
         .authorize(database, organization_id, Permission::ManageProjects)
         .await?;
-    insert(database, organization_id, slug, Some(name)).await
+    let transaction = crate::database::begin_write(database).await?;
+    let project = insert(&transaction, organization_id, slug, Some(name)).await?;
+    transaction.commit().await?;
+    Ok(project)
 }
 
 /// Changes the display name; the slug stays. Requires [`Permission::ManageProjects`].

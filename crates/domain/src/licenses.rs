@@ -762,7 +762,7 @@ const SCAN_BATCH: u64 = 500;
 /// offset, and that many distinct licenses with one verdict in one project is rare.
 async fn section(
     database: &impl ConnectionTrait,
-    project_id: i64,
+    version_id: i64,
     verdicts: &HashMap<Option<String>, Verdict>,
     verdict: Action,
     skip: u64,
@@ -774,7 +774,7 @@ async fn section(
         .filter_map(|(license, _)| license.as_deref())
         .collect();
     let ordered = components::Entity::find()
-        .filter(components::Column::ProjectId.eq(project_id))
+        .filter(components::Column::VersionId.eq(version_id))
         .order_by_asc(components::Column::Name)
         .order_by_asc(components::Column::Purl)
         .order_by_asc(components::Column::Id);
@@ -827,35 +827,39 @@ async fn section(
     }
 }
 
-/// The verdict on each distinct license of the components of these projects, with how many
-/// components have it, by project. Each distinct license is evaluated once.
-async fn verdicts_by_project(
+/// The verdict on each distinct license of the components of these versions, with how many
+/// components have it, by version. Each distinct license is evaluated once.
+async fn verdicts_by_version(
     database: &impl ConnectionTrait,
     matcher: &Matcher<'_>,
-    project_ids: &[i64],
+    version_ids: &[i64],
 ) -> Result<HashMap<i64, Vec<(Option<String>, u64, Verdict)>>> {
     let mut verdicts: HashMap<Option<String>, Verdict> = HashMap::new();
     let mut grouped: HashMap<i64, Vec<(Option<String>, u64, Verdict)>> = HashMap::new();
-    for chunk in project_ids.chunks(QUERY_CHUNK) {
-        let rows: Vec<(i64, Option<String>, i64)> = components::Entity::find()
+    for chunk in version_ids.chunks(QUERY_CHUNK) {
+        let rows: Vec<(Option<i64>, Option<String>, i64)> = components::Entity::find()
             .select_only()
-            .column(components::Column::ProjectId)
+            .column(components::Column::VersionId)
             .column(components::Column::License)
             .column_as(components::Column::Id.count(), "count")
-            .filter(components::Column::ProjectId.is_in(chunk.iter().copied()))
-            .group_by(components::Column::ProjectId)
+            .filter(components::Column::VersionId.is_in(chunk.iter().copied()))
+            .group_by(components::Column::VersionId)
             .group_by(components::Column::License)
-            .order_by_asc(components::Column::ProjectId)
+            .order_by_asc(components::Column::VersionId)
             .order_by_asc(components::Column::License)
             .into_tuple()
             .all(database)
             .await?;
-        for (project_id, license, count) in rows {
+        for (version_id, license, count) in rows {
+            // Never `None`: the filter above names the versions.
+            let Some(version_id) = version_id else {
+                continue;
+            };
             let verdict = verdicts
                 .entry(license.clone())
                 .or_insert_with(|| matcher.evaluate(license.as_deref()))
                 .clone();
-            grouped.entry(project_id).or_default().push((
+            grouped.entry(version_id).or_default().push((
                 license,
                 u64::try_from(count).unwrap_or_default(),
                 verdict,
@@ -877,9 +881,9 @@ fn count(verdicts: &[(Option<String>, u64, Verdict)]) -> ViolationCounts {
     counts
 }
 
-/// The components of a project that the organization's policy warns about or forbids:
-/// `limit` of them from `offset`, forbidden first (see [`Violations::items`]), with the counts
-/// of the whole project. Requires [`Permission::View`].
+/// The components of a project's latest version that the organization's policy warns about or
+/// forbids: `limit` of them from `offset`, forbidden first (see [`Violations::items`]), with
+/// the counts of the whole version. Requires [`Permission::View`].
 ///
 /// Licenses are evaluated once per distinct value and counted by the database, which then
 /// selects the page of each verdict by its licenses, so memory stays bounded by the page and
@@ -897,10 +901,13 @@ pub async fn violations(
     if !policy.is_active() {
         return Ok(Violations::default());
     }
-    let matcher = Matcher::new(&policy);
-    let grouped = verdicts_by_project(database, &matcher, &[project_id])
+    let version_id = crate::versions::select(database, project_id, None)
         .await?
-        .remove(&project_id)
+        .id;
+    let matcher = Matcher::new(&policy);
+    let grouped = verdicts_by_version(database, &matcher, &[version_id])
+        .await?
+        .remove(&version_id)
         .unwrap_or_default();
     let counts = count(&grouped);
     let verdicts: HashMap<Option<String>, Verdict> = grouped
@@ -922,7 +929,7 @@ pub async fn violations(
             continue;
         }
         let remaining = u64::try_from(limit - items.len()).unwrap_or(u64::MAX);
-        let found = section(database, project_id, &verdicts, verdict, skip, remaining).await?;
+        let found = section(database, version_id, &verdicts, verdict, skip, remaining).await?;
         skip = 0;
         items.extend(found.into_iter().map(|component| {
             Violation {
@@ -946,9 +953,9 @@ pub async fn violations(
     })
 }
 
-/// The violation counts of each project of an organization the reader sees, for the project
-/// list; `None` when the organization's policy is not active. Projects without violations are
-/// left out. Requires [`Permission::View`].
+/// The violation counts of the latest version of each project of an organization the reader
+/// sees, for the project list; `None` when the organization's policy is not active. Projects
+/// without violations are left out. Requires [`Permission::View`].
 pub async fn counts_by_project(
     database: &impl ConnectionTrait,
     reader: impl Into<Reader>,
@@ -960,12 +967,18 @@ pub async fn counts_by_project(
         return Ok(None);
     }
     let identifiers: Vec<i64> = projects.iter().map(|project| project.id).collect();
+    let project_of: HashMap<i64, i64> = crate::versions::latest_of(database, &identifiers)
+        .await?
+        .into_iter()
+        .map(|version| (version.id, version.project_id))
+        .collect();
+    let version_ids: Vec<i64> = project_of.keys().copied().collect();
     let matcher = Matcher::new(&policy);
     Ok(Some(
-        verdicts_by_project(database, &matcher, &identifiers)
+        verdicts_by_version(database, &matcher, &version_ids)
             .await?
             .into_iter()
-            .map(|(project_id, verdicts)| (project_id, count(&verdicts)))
+            .map(|(version_id, verdicts)| (project_of[&version_id], count(&verdicts)))
             .filter(|(_, counts)| counts.forbidden + counts.warned > 0)
             .collect(),
     ))

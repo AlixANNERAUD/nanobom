@@ -102,6 +102,7 @@ async fn finding(
     vulnerability(database, id, aliases).await;
     findings_entity::ActiveModel {
         project_id: Set(project),
+        version_id: Set(Some(testing::latest_version(database, project).await)),
         purl: Set(purl.to_owned()),
         ecosystem: Set(purl[4..].split('/').next().unwrap().to_owned()),
         vulnerability_id: Set(id.to_owned()),

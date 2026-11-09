@@ -43,10 +43,10 @@ run request (upload, schedule, manual)
   └─► runner queue: one run at a time; requests for a scope already waiting are merged
         └─► domain::evaluation::Evaluator::run
               1. ignored findings whose expiry passed return to open
-              2. versioned components of the scope are collected
+              2. components of the scope that have a package version are collected
               3. osv: one batch query per 1,000 distinct package URLs,
                  then the records that are new or modified since they were cached
-              4. per project, in one transaction: reported identifiers are grouped by alias,
+              4. per project version, in one transaction: identifiers are grouped by alias,
                  severity is computed, findings are opened, reopened or fixed, events recorded
               5. the run is recorded as succeeded or failed (a failure changes no finding)
         └─► if it succeeded: exploitation data (KEV, EPSS) refreshed for the scope (≤ 60 s)

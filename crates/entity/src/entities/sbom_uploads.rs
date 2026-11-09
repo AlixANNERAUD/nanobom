@@ -17,6 +17,7 @@ pub struct Model {
     pub image_tag: Option<String>,
     pub component_count: i64,
     pub components_without_purl: i64,
+    pub version_id: Option<i64>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

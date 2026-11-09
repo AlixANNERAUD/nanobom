@@ -14,10 +14,11 @@
 //! as failed, so a failure never reads as "no vulnerabilities".
 //!
 //! More precisely, everything that can fail on the network (querying and fetching records)
-//! happens before the first finding changes. Findings are then updated one project per
-//! transaction, so a database error halfway leaves earlier projects updated and later ones
-//! untouched; the next run converges. Expired ignores are reopened at the start of every run,
-//! even one that later fails.
+//! happens before the first finding changes. Findings are then updated one project version
+//! per transaction, so a database error halfway leaves earlier versions updated and later ones
+//! untouched; the next run converges. Only active versions ([`crate::versions`]) are evaluated,
+//! and a finding is matched within its own version, so each version keeps its own triage.
+//! Expired ignores are reopened at the start of every run, even one that later fails.
 //!
 //! Records are cached in the `vulnerabilities` table with the severity derived by
 //! [`nanobom_osv::assess`]; withdrawn records are cached but match nothing. When several
@@ -43,7 +44,8 @@ use std::{
 
 use chrono::{DateTime, FixedOffset, TimeDelta, Utc};
 use nanobom_entity::{
-    components, finding_events, findings, organizations, projects, runs, vulnerabilities,
+    components, finding_events, findings, organizations, project_versions, projects, runs,
+    vulnerabilities,
 };
 use nanobom_osv::{Severity, Vulnerability, VulnerabilityReference, VulnerabilitySource, assess};
 use sea_orm::{
@@ -214,7 +216,7 @@ pub struct Evaluator<S> {
 
 /// A component to evaluate.
 struct Target {
-    project_id: i64,
+    version_id: i64,
     purl: String,
     query_purl: String,
     ecosystem: String,
@@ -383,16 +385,26 @@ impl<S: VulnerabilitySource + 'static> Evaluator<S> {
         let projects = scope_projects(&self.database, scope)
             .await
             .map_err(database_error)?;
-        for project in projects {
-            let project_targets: Vec<&Target> = targets
+        let versions = crate::versions::active(
+            &self.database,
+            &projects
                 .iter()
-                .filter(|target| target.project_id == project.id)
+                .map(|project| project.id)
+                .collect::<Vec<_>>(),
+        )
+        .await
+        .map_err(database_error)?;
+        for project in projects {
+            let project_versions: Vec<&project_versions::Model> = versions
+                .iter()
+                .filter(|version| version.project_id == project.id)
                 .collect();
             let changes = update_project(
                 &self.database,
                 run_id,
                 &project,
-                &project_targets,
+                &project_versions,
+                &targets,
                 &references,
                 &records,
             )
@@ -544,29 +556,45 @@ async fn scope_projects(
     }
 }
 
-/// The versioned components in scope; components without a version cannot be matched.
-async fn targets(
+/// The identifiers of the active project versions in scope, which runs evaluate.
+async fn scope_versions(
     database: &impl ConnectionTrait,
     scope: Scope,
-) -> std::result::Result<Vec<Target>, sea_orm::DbErr> {
+) -> std::result::Result<Vec<i64>, sea_orm::DbErr> {
     let project_ids: Vec<i64> = scope_projects(database, scope)
         .await?
         .into_iter()
         .map(|project| project.id)
         .collect();
+    Ok(crate::versions::active(database, &project_ids)
+        .await?
+        .into_iter()
+        .map(|version| version.id)
+        .collect())
+}
+
+/// The components with a version (of the package, not the project) in the active project
+/// versions in scope; components without one cannot be matched.
+async fn targets(
+    database: &impl ConnectionTrait,
+    scope: Scope,
+) -> std::result::Result<Vec<Target>, sea_orm::DbErr> {
+    let version_ids = scope_versions(database, scope).await?;
     let mut targets = Vec::new();
-    for chunk in project_ids.chunks(500) {
+    for chunk in version_ids.chunks(500) {
         let models = components::Entity::find()
-            .filter(components::Column::ProjectId.is_in(chunk.iter().copied()))
+            .filter(components::Column::VersionId.is_in(chunk.iter().copied()))
             .filter(components::Column::Version.is_not_null())
             .order_by_asc(components::Column::Id)
             .all(database)
             .await?;
-        targets.extend(models.into_iter().map(|component| Target {
-            project_id: component.project_id,
-            purl: component.purl,
-            query_purl: component.query_purl,
-            ecosystem: component.ecosystem,
+        targets.extend(models.into_iter().filter_map(|component| {
+            Some(Target {
+                version_id: component.version_id?,
+                purl: component.purl,
+                query_purl: component.query_purl,
+                ecosystem: component.ecosystem,
+            })
         }));
     }
     Ok(targets)
@@ -579,16 +607,13 @@ async fn expire_ignores(
     run_id: i64,
 ) -> std::result::Result<(), sea_orm::DbErr> {
     let now = Utc::now().fixed_offset();
-    let project_ids: Vec<i64> = scope_projects(database, scope)
-        .await?
-        .into_iter()
-        .map(|project| project.id)
-        .collect();
-    for chunk in project_ids.chunks(500) {
+    let version_ids = scope_versions(database, scope).await?;
+    for chunk in version_ids.chunks(500) {
         let expired = findings::Entity::find()
-            .filter(findings::Column::ProjectId.is_in(chunk.iter().copied()))
+            .filter(findings::Column::VersionId.is_in(chunk.iter().copied()))
             .filter(findings::Column::Status.eq(Status::Ignored.as_str()))
             .filter(findings::Column::IgnoreExpiresAt.lte(now))
+            .order_by_asc(findings::Column::Id)
             .all(database)
             .await?;
         for finding in expired {
@@ -682,10 +707,50 @@ struct ProjectChanges {
     new_findings: Vec<NewFinding>,
 }
 
+/// Updates the findings of each active version of a project from its components, one
+/// transaction per version: a database error keeps the versions already updated, as it keeps
+/// the projects.
 async fn update_project(
     database: &DatabaseConnection,
     run_id: i64,
     project: &projects::Model,
+    versions: &[&project_versions::Model],
+    targets: &[Target],
+    references: &HashMap<&str, Vec<VulnerabilityReference>>,
+    records: &HashMap<String, Vulnerability>,
+) -> std::result::Result<ProjectChanges, sea_orm::DbErr> {
+    let mut changes = ProjectChanges {
+        fixed: 0,
+        new_findings: Vec::new(),
+    };
+    for version in versions {
+        let version_targets: Vec<&Target> = targets
+            .iter()
+            .filter(|target| target.version_id == version.id)
+            .collect();
+        let version_changes = update_version(
+            database,
+            run_id,
+            project,
+            version.id,
+            &version_targets,
+            references,
+            records,
+        )
+        .await?;
+        changes.fixed += version_changes.fixed;
+        changes.new_findings.extend(version_changes.new_findings);
+    }
+    Ok(changes)
+}
+
+/// Opens, reopens and fixes the findings of one version: a finding is matched within its
+/// version only, so each version keeps its own triage.
+async fn update_version(
+    database: &DatabaseConnection,
+    run_id: i64,
+    project: &projects::Model,
+    version_id: i64,
     targets: &[&Target],
     references: &HashMap<&str, Vec<VulnerabilityReference>>,
     records: &HashMap<String, Vulnerability>,
@@ -700,7 +765,7 @@ async fn update_project(
     // others are marked fixed: the oldest must win, as it does on SQLite, or a triaged finding
     // could lose to a newer duplicate on PostgreSQL, which returns rows in no set order.
     let existing = findings::Entity::find()
-        .filter(findings::Column::ProjectId.eq(project.id))
+        .filter(findings::Column::VersionId.eq(version_id))
         .order_by_asc(findings::Column::Id)
         .all(&transaction)
         .await?;
@@ -774,6 +839,7 @@ async fn update_project(
                     let vulnerability_id = identifiers[0].clone();
                     let created = findings::ActiveModel {
                         project_id: Set(project.id),
+                        version_id: Set(Some(version_id)),
                         purl: Set(target.purl.clone()),
                         ecosystem: Set(target.ecosystem.clone()),
                         vulnerability_id: Set(vulnerability_id.clone()),

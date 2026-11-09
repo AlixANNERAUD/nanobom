@@ -16,7 +16,6 @@ pub struct Model {
     pub created_at: DateTimeWithTimeZone,
     pub last_upload_at: Option<DateTimeWithTimeZone>,
     pub stale_notified_at: Option<DateTimeWithTimeZone>,
-    pub dependencies_partial: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -35,6 +34,8 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     Organizations,
+    #[sea_orm(has_many = "super::project_versions::Entity")]
+    ProjectVersions,
     #[sea_orm(has_many = "super::runs::Entity")]
     Runs,
     #[sea_orm(has_many = "super::sbom_uploads::Entity")]
@@ -64,6 +65,12 @@ impl Related<super::findings::Entity> for Entity {
 impl Related<super::organizations::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Organizations.def()
+    }
+}
+
+impl Related<super::project_versions::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::ProjectVersions.def()
     }
 }
 
