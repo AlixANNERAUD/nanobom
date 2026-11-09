@@ -21,7 +21,7 @@
 use std::collections::HashMap;
 
 use chrono::{DateTime, FixedOffset};
-use nanobom_entity::{finding_events, findings, project_versions};
+use nanobom_entity::{components, finding_events, findings, project_versions, sbom_uploads};
 use nanobom_osv::Severity;
 use sea_orm::{
     ActiveModelTrait,
@@ -44,7 +44,8 @@ pub const UNNAMED: &str = "";
 
 /// Inserts the first version of a new project, flagged latest, in the transaction that inserts
 /// the project, so a project is never seen without a version. Projects created in the interface
-/// start with the unnamed version; those created by an upload, with the version it names.
+/// start with the unnamed version, renamed by their first upload naming one if still unused;
+/// those created by an upload, with the version it names.
 pub(crate) async fn insert_first(
     database: &impl ConnectionTrait,
     project_id: i64,
@@ -146,6 +147,15 @@ pub(crate) async fn prepare_upload(
             inherits_from: None,
         });
     }
+    if name != UNNAMED
+        && let Some(version) = claim_unused_unnamed(database, project_id, name).await?
+    {
+        return Ok(UploadVersion {
+            version,
+            created: true,
+            inherits_from: None,
+        });
+    }
     let active = project_versions::Entity::find()
         .filter(project_versions::Column::ProjectId.eq(project_id))
         .filter(project_versions::Column::Active.eq(true))
@@ -200,6 +210,51 @@ pub(crate) async fn prepare_upload(
         created: true,
         inherits_from: previous,
     })
+}
+
+/// Renames a project's unnamed version to `name` when it is the project's only version and
+/// never received anything, and returns it. A project created in the interface starts with an
+/// unnamed version; without this, its first upload naming a version would leave that empty
+/// version next to the named one forever. The version is the only one, so it is already the
+/// latest whatever the upload asks.
+async fn claim_unused_unnamed(
+    database: &impl ConnectionTrait,
+    project_id: i64,
+    name: &str,
+) -> Result<Option<project_versions::Model>> {
+    let mut versions = project_versions::Entity::find()
+        .filter(project_versions::Column::ProjectId.eq(project_id))
+        .order_by_asc(project_versions::Column::Id)
+        .limit(2)
+        .all(database)
+        .await?;
+    let Some(version) = versions.pop() else {
+        return Ok(None);
+    };
+    if !versions.is_empty() || version.name != UNNAMED || version.last_upload_at.is_some() {
+        return Ok(None);
+    }
+    let used = components::Entity::find()
+        .filter(components::Column::VersionId.eq(version.id))
+        .count(database)
+        .await?
+        > 0
+        || findings::Entity::find()
+            .filter(findings::Column::VersionId.eq(version.id))
+            .count(database)
+            .await?
+            > 0
+        || sbom_uploads::Entity::find()
+            .filter(sbom_uploads::Column::VersionId.eq(version.id))
+            .count(database)
+            .await?
+            > 0;
+    if used {
+        return Ok(None);
+    }
+    let mut version: project_versions::ActiveModel = version.into();
+    version.name = Set(name.to_owned());
+    Ok(Some(version.update(database).await?))
 }
 
 /// Flags a version latest and clears the flag on the others of its project, in the caller's

@@ -40,6 +40,7 @@ fn finding(id: &str) -> PayloadFinding {
         epss_percentile: None,
         introduced_via: Vec::new(),
         versions: vec![String::new()],
+        project_names_versions: false,
         url: "https://nanobom.example.org/findings/7".to_owned(),
     }
 }

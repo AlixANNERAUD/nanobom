@@ -586,6 +586,7 @@ fn findings_payload(project: &str, summary: &str) -> notifications::NewFindingsP
                 epss_percentile: None,
                 introduced_via: vec!["express".to_owned()],
                 versions: vec![String::new()],
+                project_names_versions: false,
                 url: "https://nanobom.example.org/findings/1".to_owned(),
             },
             PayloadFinding {
@@ -604,6 +605,7 @@ fn findings_payload(project: &str, summary: &str) -> notifications::NewFindingsP
                 epss_percentile: None,
                 introduced_via: vec![],
                 versions: vec![String::new()],
+                project_names_versions: false,
                 url: "https://nanobom.example.org/findings/2".to_owned(),
             },
         ],
@@ -706,6 +708,14 @@ async fn emails_render_in_both_languages_and_escape_the_data() {
         email::new_findings(&versioned, Language::French)
             .text
             .contains("Versions : version sans nom, 2.4")
+    );
+    // An entry affecting only the unnamed version of a project that names others says so.
+    let mut unnamed_only = findings_payload("web", "summary");
+    unnamed_only.findings[0].project_names_versions = true;
+    assert!(
+        email::new_findings(&unnamed_only, Language::English)
+            .text
+            .contains("Versions: unnamed version")
     );
 
     let stale = email::stale_projects(&stale_payload(), Language::English);

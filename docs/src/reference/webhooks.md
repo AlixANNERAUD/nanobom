@@ -226,10 +226,16 @@ With **Only known exploited vulnerabilities**, only the known exploited ones amo
 Nothing is sent when nothing remains after filtering. Ignored findings are never sent.
 
 A project with several [versions](../explanation/concepts.md#versions) has one finding per
-version. They are sent as **one entry per project and vulnerability**, with the versions it
-stands for in `versions`: a new advisory against a dependency five versions share is one entry,
-not five. Findings a new version inherits from the latest one when it is created are not new,
-and are never sent.
+version. They are sent as **one entry per project, vulnerability and component** (package
+URL), with the versions it stands for in `versions`: a new advisory against a dependency five
+versions share is one entry, not five. Two components hit by one advisory, such as a direct
+`pkg:npm/lodash@4.17.20` and a nested `pkg:npm/lodash@4.17.15`, stay two entries, each with its
+own `introduced_via`; a project that never names versions gets one entry per finding. Findings
+a new version inherits from the latest one when it is created are not new, and are never sent.
+
+Rarely, a run already in progress when an upload creates a version announces an advisory for
+both versions though the new one inherited the finding, or announces again, for the new
+version, a finding that just became known exploited.
 
 ```json
 {
@@ -270,7 +276,7 @@ and are never sent.
 | --- | --- |
 | `organization` | Slug, display name and page of the organization |
 | `run` | The run that found them: identifier, `trigger` (`upload`, `scheduled` or `manual`) and start time |
-| `count` | Number of entries in `findings`, one per project and vulnerability |
+| `count` | Number of entries in `findings`, one per project, vulnerability and component |
 | `highest_severity` | The highest severity among them |
 | `known_exploited_count` | How many of them are known exploited |
 | `findings[].project` | Project slug |
@@ -285,7 +291,7 @@ and are never sent.
 | `findings[].kev_due_date` | CISA's due date, or `null` |
 | `findings[].epss`, `epss_percentile` | EPSS score and percentile, from 0 to 1, or `null` |
 | `findings[].introduced_via` | The names of the project's direct dependencies that lead to the component, sorted; the component's own name when it is one; empty when the SBOM's dependency graph does not say ([Dependency paths](../explanation/dependency-paths.md)) |
-| `findings[].versions` | The names of the project versions the entry stands for, sorted; `""` is the unnamed version, the only one of a project that never names versions. `component`, `introduced_via` and `url` are those of the latest version's finding when the latest version is among them, of the first one otherwise; `severity`, `cvss_score` and `known_exploited` are the highest among them, and `reason` the first of `new`, `reopened`, `exploited` |
+| `findings[].versions` | The names of the project versions the entry stands for, sorted; `""` is the unnamed version, the only one of a project that never names versions. `introduced_via` and `url` are those of the latest version's finding when the latest version is among them, of the first one otherwise; `severity`, `cvss_score` and `known_exploited` are the highest among them, and `reason` the first of `new`, `reopened`, `exploited` |
 | `findings[].url` | The finding's page |
 
 Every known exploited open finding of a run's scope is marked as notified once that run is over,

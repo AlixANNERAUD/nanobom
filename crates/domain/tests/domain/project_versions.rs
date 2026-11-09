@@ -11,7 +11,7 @@ use nanobom_domain::{
     findings::{self, EventKind, Filter, Justification, Status},
     inventory::{self, UploadOutcome, UploadSource},
     notifications::{self, Format, Payload, Webhook},
-    organizations, testing,
+    organizations, projects, testing,
     testing::FakeSource,
     tokens,
     users::{self, NewUser},
@@ -298,6 +298,53 @@ async fn a_project_created_by_an_upload_starts_with_its_version() {
 }
 
 #[tokio::test]
+async fn a_project_created_in_the_interface_takes_the_first_version_named() {
+    let fixture = Fixture::new().await;
+    let project = projects::create(
+        &fixture.database,
+        &fixture.owner,
+        fixture.organization,
+        "web",
+        "Web",
+    )
+    .await
+    .unwrap();
+    let outcome = fixture.upload(Some("main"), Some(false), &[EXPRESS]).await;
+    assert!(!outcome.project_created);
+    assert!(outcome.version_created);
+    assert_eq!(outcome.project_id, project.id);
+    let versions = fixture.versions().await;
+    assert_eq!(
+        versions.len(),
+        1,
+        "the empty unnamed version is renamed, not kept"
+    );
+    assert_eq!(versions[0].name, "main");
+    assert!(versions[0].latest, "the only version is the latest");
+
+    // An unnamed version that received an upload is kept.
+    let fixture = Fixture::new().await;
+    projects::create(
+        &fixture.database,
+        &fixture.owner,
+        fixture.organization,
+        "web",
+        "Web",
+    )
+    .await
+    .unwrap();
+    fixture.upload(None, None, &[EXPRESS]).await;
+    fixture.upload(Some("main"), None, &[EXPRESS]).await;
+    let names: Vec<String> = fixture
+        .versions()
+        .await
+        .into_iter()
+        .map(|version| version.name)
+        .collect();
+    assert_eq!(names, ["", "main"]);
+}
+
+#[tokio::test]
 async fn active_versions_are_capped() {
     let fixture = Fixture::new().await;
     let outcome = fixture.upload(None, None, &[EXPRESS]).await;
@@ -545,6 +592,119 @@ async fn a_vulnerability_new_in_several_versions_is_announced_once() {
         slack.contains("Versions: `unnamed version`, `1.0`, `2.0`"),
         "{slack}"
     );
+}
+
+/// The `findings.new` deliveries of a run, to the fixture's webhook.
+async fn run_deliveries(
+    fixture: &Fixture,
+    run: &RunOutcome,
+) -> Vec<notifications::Delivery<notifications::NewFindingsPayload>> {
+    notifications::new_findings_deliveries(
+        &fixture.database,
+        run,
+        &"https://nanobom.example.org/".parse().unwrap(),
+        false,
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn each_affected_component_is_its_own_entry() {
+    const NESTED: &str = "pkg:npm/lodash@4.17.15";
+    let fixture = Fixture::new().await;
+    webhook(&fixture).await;
+    fixture.upload(None, None, &[LODASH, NESTED]).await;
+    fixture.run().await;
+
+    // A project that never names versions: one entry per finding, without a versions line.
+    fixture.source.publish(
+        json!({
+            "id": "GHSA-p6mc-m468-83gw",
+            "modified": "2024-03-01T00:00:00Z",
+            "database_specific": {"severity": "HIGH"}
+        }),
+        &[LODASH, NESTED],
+    );
+    let run = fixture.run().await;
+    assert_eq!(run.new_findings.len(), 2);
+    let deliveries = run_deliveries(&fixture, &run).await;
+    let payload = &deliveries[0].payload;
+    assert_eq!(payload.count, 2);
+    let mut components: Vec<&str> = payload
+        .findings
+        .iter()
+        .map(|finding| finding.component.as_str())
+        .collect();
+    components.sort_unstable();
+    assert_eq!(components, [NESTED, LODASH]);
+    assert!(
+        payload
+            .findings
+            .iter()
+            .all(|finding| finding.versions == [""])
+    );
+    assert!(!payload.render(Format::Slack).contains("Versions:"));
+
+    // In two versions: still one entry per component, each listing both versions.
+    fixture.upload(Some("2.0"), None, &[LODASH, NESTED]).await;
+    fixture.run().await;
+    fixture.source.publish(
+        json!({
+            "id": "GHSA-29mw-wpgm-hmr9",
+            "modified": "2024-04-01T00:00:00Z",
+            "database_specific": {"severity": "MODERATE"}
+        }),
+        &[LODASH, NESTED],
+    );
+    let run = fixture.run().await;
+    assert_eq!(run.new_findings.len(), 4);
+    let deliveries = run_deliveries(&fixture, &run).await;
+    let payload = &deliveries[0].payload;
+    assert_eq!(payload.count, 2);
+    let mut components: Vec<&str> = Vec::new();
+    for finding in &payload.findings {
+        let component = finding.component.as_str();
+        components.push(component);
+        assert_eq!(finding.versions, ["", "2.0"]);
+        let latest = run
+            .new_findings
+            .iter()
+            .find(|new| new.version == "2.0" && new.purl == component)
+            .unwrap();
+        assert_eq!(
+            finding.url,
+            format!("https://nanobom.example.org/findings/{}", latest.finding_id)
+        );
+    }
+    components.sort_unstable();
+    assert_eq!(components, [NESTED, LODASH]);
+}
+
+#[tokio::test]
+async fn entries_of_a_project_naming_versions_always_name_theirs() {
+    let fixture = Fixture::new().await;
+    webhook(&fixture).await;
+    fixture.upload(None, None, &[EXPRESS]).await;
+    fixture.upload(Some("2.0"), Some(false), &[LODASH]).await;
+    fixture.run().await;
+    fixture.source.publish(
+        json!({
+            "id": "GHSA-rv95-896h-c2vc",
+            "modified": "2024-03-01T00:00:00Z",
+            "database_specific": {"severity": "MODERATE"}
+        }),
+        &[EXPRESS],
+    );
+    let run = fixture.run().await;
+    let deliveries = run_deliveries(&fixture, &run).await;
+    let finding = &deliveries[0].payload.findings[0];
+    assert_eq!(finding.versions, [""]);
+    let slack = deliveries[0].payload.render(Format::Slack);
+    assert!(slack.contains("Versions: `unnamed version`"), "{slack}");
+    let json: serde_json::Value =
+        serde_json::from_str(&deliveries[0].payload.render(Format::Json)).unwrap();
+    assert!(json["findings"][0].get("project_names_versions").is_none());
 }
 
 #[tokio::test]

@@ -5,8 +5,8 @@
 //!
 //! - `findings.new`: new and reopened findings of one organization, at or above the webhook's
 //!   minimum severity, and open findings that became known exploited since the last run
-//!   (whatever their severity). A vulnerability found in several versions of a project is one
-//!   entry listing the versions. Findings a new version inherits from the latest one
+//!   (whatever their severity). A component affected by a vulnerability in several versions of
+//!   a project is one entry listing the versions. Findings a new version inherits from the latest one
 //!   ([`crate::versions`]) are not new, so they are never announced;
 //! - `projects.stale`: projects of one organization whose SBOM stopped coming;
 //! - `run.failed`: a run that could not complete, sent to the instance's failure webhook.
@@ -266,12 +266,17 @@ pub struct PayloadFinding {
     /// dependency graph of its latest SBOM; empty when the graph does not say.
     pub introduced_via: Vec<String>,
     /// The project versions this entry stands for, by name (empty for the unnamed version): a
-    /// vulnerability found in several versions of a project at once is one entry. `component`,
-    /// `introduced_via` and `url` are those of one of them, the latest version when it is
-    /// among them.
+    /// component affected by a vulnerability in several versions of a project at once is one
+    /// entry. `introduced_via` and `url` are those of one of them, the latest version when it
+    /// is among them.
     #[serde(default)]
     pub versions: Vec<String>,
     pub url: String,
+    /// Whether the project has a named version, so that chat messages and emails name the
+    /// versions of every entry of such a project, even one affecting only its unnamed version.
+    /// Not sent: the JSON document carries `versions` only.
+    #[serde(skip)]
+    pub project_names_versions: bool,
 }
 
 /// `findings.new`: new findings of one organization in one run.
@@ -499,7 +504,10 @@ impl Reason {
     }
 }
 
-/// The entries of one vulnerability in one project, across its versions, delivered as one.
+/// The entries of one vulnerability in one component of one project, across its versions,
+/// delivered as one. The component is part of the key: two components of a version affected by
+/// one advisory (say a direct and a nested copy of a package) are two entries, each with its
+/// own dependency path, as they were before projects had versions.
 struct Group {
     /// The entry whose component, dependency graph and link are sent.
     entry: Entry,
@@ -509,7 +517,7 @@ struct Group {
 }
 
 impl Group {
-    /// Adds an entry of the same vulnerability and project.
+    /// Adds an entry of the same vulnerability, component and project.
     fn add(&mut self, entry: Entry, in_latest: bool) {
         let representative = &mut self.entry;
         representative.severity = representative.severity.max(entry.severity);
@@ -523,30 +531,28 @@ impl Group {
         }
         if in_latest && !self.in_latest {
             self.in_latest = true;
-            let Entry {
-                finding_id,
-                version_id,
-                purl,
-                ..
-            } = entry;
-            representative.finding_id = finding_id;
-            representative.version_id = version_id;
-            representative.purl = purl;
+            representative.finding_id = entry.finding_id;
+            representative.version_id = entry.version_id;
         }
     }
 }
 
-/// Groups entries per project and vulnerability, keeping the order of their first entry.
+/// Groups entries per project, vulnerability and component, keeping the order of their first
+/// entry. A project that never names versions has one entry per finding, as before versions.
 /// `versions` gives the name of each version and whether it is the latest.
 fn group(entries: Vec<Entry>, versions: &HashMap<i64, (String, bool)>) -> Vec<Group> {
     let mut groups: Vec<Group> = Vec::new();
-    let mut index: HashMap<(i64, String), usize> = HashMap::new();
+    let mut index: HashMap<(i64, String, String), usize> = HashMap::new();
     for entry in entries {
         let (name, in_latest) = entry
             .version_id
             .and_then(|id| versions.get(&id).cloned())
             .unwrap_or_default();
-        match index.entry((entry.project_id, entry.vulnerability_id.clone())) {
+        match index.entry((
+            entry.project_id,
+            entry.vulnerability_id.clone(),
+            entry.purl.clone(),
+        )) {
             std::collections::hash_map::Entry::Occupied(position) => {
                 let group = &mut groups[*position.get()];
                 group.versions.insert(name);
@@ -584,6 +590,28 @@ async fn version_names(
         );
     }
     Ok(names)
+}
+
+/// Which of these projects have a named version.
+async fn projects_naming_versions(
+    database: &impl ConnectionTrait,
+    identifiers: impl Iterator<Item = i64>,
+) -> Result<BTreeSet<i64>> {
+    let identifiers: Vec<i64> = identifiers.collect::<BTreeSet<_>>().into_iter().collect();
+    let mut naming = BTreeSet::new();
+    for chunk in identifiers.chunks(QUERY_CHUNK) {
+        naming.extend(
+            project_versions::Entity::find()
+                .filter(project_versions::Column::ProjectId.is_in(chunk.iter().copied()))
+                .filter(project_versions::Column::Name.ne(crate::versions::UNNAMED))
+                .order_by_asc(project_versions::Column::Id)
+                .all(database)
+                .await?
+                .into_iter()
+                .map(|version| version.project_id),
+        );
+    }
+    Ok(naming)
 }
 
 /// What an open finding needs to be notified.
@@ -785,6 +813,8 @@ pub async fn new_findings_deliveries(
         entries.iter().filter_map(|entry| entry.version_id),
     )
     .await?;
+    let naming_versions =
+        projects_naming_versions(database, entries.iter().map(|entry| entry.project_id)).await?;
     let mut by_organization: BTreeMap<i64, Vec<Group>> = BTreeMap::new();
     for group in group(entries, &versions) {
         by_organization
@@ -850,6 +880,7 @@ pub async fn new_findings_deliveries(
                     epss_percentile: entry.exploitation.epss_percentile,
                     introduced_via,
                     versions: group.versions.iter().cloned().collect(),
+                    project_names_versions: naming_versions.contains(&entry.project_id),
                 });
             }
             let payload = NewFindingsPayload {

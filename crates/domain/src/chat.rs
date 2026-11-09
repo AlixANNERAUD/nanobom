@@ -119,10 +119,10 @@ fn via(finding: &PayloadFinding) -> Option<(Vec<&str>, usize)> {
 }
 
 /// The project versions of a finding, at most [`VIA_NAMES`] of them, the unnamed version as
-/// `unnamed`; `None` when the project has no named version among them, which is how a project
-/// that never names versions reads.
+/// `unnamed`; `None` when the project names no version, so that a project that never names
+/// one reads as before versions existed.
 pub(crate) fn versions(finding: &PayloadFinding, unnamed: &str) -> Option<(Vec<String>, usize)> {
-    if finding.versions.iter().all(String::is_empty) {
+    if !finding.project_names_versions && finding.versions.iter().all(String::is_empty) {
         return None;
     }
     let names = finding

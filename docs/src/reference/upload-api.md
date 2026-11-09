@@ -164,7 +164,9 @@ or SPDX `versionInfo`).
 - Without `version`, the upload goes to the **unnamed version**, the only version of a project
   that never names one.
 - The first upload naming a version creates it. A project created by an upload starts with the
-  version the upload names, without an unnamed version next to it.
+  version the upload names, without an unnamed version next to it. A project created in the
+  interface starts with an unnamed version; if it has received nothing when the first upload
+  names a version, it is renamed to that version instead of staying next to it, empty.
 - One version of each project is the **latest**: the one the project page, the
   [read API](read-api.md) and the [VEX export](vex-api.md) show unless they are asked for
   another. A version the upload creates becomes the latest, unless `latest=false`;

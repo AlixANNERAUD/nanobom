@@ -54,7 +54,7 @@ inherited findings like any other: those whose component the new SBOM no longer 
 Inherited findings are **not announced**: they are not news, and announcing every finding of
 the latest version each time a release branch is cut would bury the findings that are. A
 vulnerability that appears in several versions at once (a new advisory against a dependency
-they share) is announced once, with the list of versions it affects
+they share) is announced once per affected component, with the list of versions it affects
 ([payloads](../reference/webhooks.md)). Fixed findings are not inherited: an ignore ends when its
 finding is fixed, so they carry nothing the new version needs, and a vulnerability fixed in the
 latest version but present in the new one is announced as new for it.
