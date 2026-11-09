@@ -38,6 +38,10 @@ An identifier with `+` (`GPL-2.0+`) is refused: name the `-or-later` variant, or
 itself. Exception identifiers (`Classpath-exception-2.0`) and `NOASSERTION` are refused too: a
 rule judges a license whatever exception follows it, and `NOASSERTION` is an unknown license.
 
+The `-only` and `-or-later` variants of a GNU license are two licenses: a rule on
+`GPL-3.0-only` does not cover `GPL-3.0-or-later`, and a typed `GPL-3.0` is stored as
+`GPL-3.0-only`. To judge both, list both.
+
 The same identifier, ignoring case, may appear once; in two lists it is refused. A policy holds
 at most 1000 rules, and an identifier is at most 200 characters. Refused input changes nothing,
 and the settings page says why:
