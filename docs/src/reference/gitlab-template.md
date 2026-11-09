@@ -13,6 +13,8 @@ include:
       organization: acme
 ```
 
+The template is in releases from v0.1.0 on: an older tag answers 404.
+
 How to use it is in [Upload from CI](../how-to/upload-from-ci.md#gitlab-ci).
 
 ## Inputs
@@ -75,9 +77,13 @@ against a SHA-256 digest written in the template; another architecture needs an 
 
 ## Outputs
 
-The dotenv report gives these variables to later jobs that depend on the job (through `needs`
-or `dependencies`). A value nanobom did not return is left out: without `wait`, there is no
-evaluation, and without a [license policy](license-policy.md), no license counts.
+The dotenv report gives these variables to the jobs of later stages, as GitLab does with every
+artifact unless `needs` or `dependencies` limit which jobs a job downloads from. A value nanobom
+did not return is left out: without `wait`, there is no evaluation, and without a
+[license policy](license-policy.md), no license counts. Every copy of the template writes the same
+names, so a job that downloads the reports of two copies gets the values of only one: limit it
+with `needs` or `dependencies` to the job it reads. Values are checked before they are written
+(numbers, a known status, a URL on one line), so a server cannot add other variables.
 
 | Variable | |
 | --- | --- |

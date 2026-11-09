@@ -116,8 +116,8 @@ include:
       fail-on: high
 ```
 
-Replace `vX.Y.Z` with a [release](https://github.com/AlixANNERAUD/nanobom/releases). `main`
-works too, but changes under you. Define `NANOBOM_URL` and `NANOBOM_TOKEN` (masked) under
+Replace `vX.Y.Z` with a [release](https://github.com/AlixANNERAUD/nanobom/releases), v0.1.0 or
+later (older releases do not contain the template). `main` works too, but changes under you. Define `NANOBOM_URL` and `NANOBOM_TOKEN` (masked) under
 **Settings → CI/CD → Variables**. The project defaults to the GitLab project's name, the scanned
 directory to the checkout. Every input is in the [reference](../reference/gitlab-template.md#inputs).
 
@@ -165,7 +165,8 @@ nanobom:
 Later jobs that need the `nanobom` job read the counts from its dotenv report, such as
 `$NANOBOM_HIGH` and `$NANOBOM_PROJECT_URL` ([outputs](../reference/gitlab-template.md#outputs)).
 To upload several SBOMs, include the template once per SBOM with a different `job-name` and
-`project` or `version`.
+`project` or `version`; each copy writes the same variable names, so a job reading them should
+`need` only the copy it reads.
 
 The job runs in `alpine:3.24` and installs `curl` and `jq` at each run. To run it elsewhere,
 such as in a mirror of the image or in an image that already has `curl`, `jq` and `syft`, set

@@ -33,6 +33,8 @@ import yaml
 HERE = Path(__file__).resolve().parent
 TEMPLATE = HERE.parent / "nanobom.yml"
 sys.path.insert(0, str(HERE))
+# No __pycache__ next to the tests.
+sys.dont_write_bytecode = True
 import mock_nanobom  # noqa: E402
 
 INPUT = re.compile(r"\$\[\[\s*inputs\.([A-Za-z0-9_-]+)\s*\]\]")
@@ -244,6 +246,12 @@ def test_runs(mock):
     check("it logs the version", "version 2.4/rc+1" in run.log)
     run = Run(mock, inputs={"latest": "yes"})
     check("an invalid latest fails before uploading", run.code != 0 and run.request is None, run)
+
+    run = Run(mock, {"project": "hostile"})
+    check("server values cannot add dotenv variables", not {"CI_REGISTRY", "CI_JOB_TOKEN"} & set(run.dotenv or {}), run)
+    check("a status with a newline is left out", "NANOBOM_EVALUATION_STATUS" not in (run.dotenv or {}), run)
+    check("a count that is not a number is left out", "NANOBOM_KNOWN_EXPLOITED" not in (run.dotenv or {}), run)
+    check("valid values are still written", (run.dotenv or {}).get("NANOBOM_CRITICAL") == "0", run)
 
     run = Run(mock, {"project": "gated", "fail-on": " High "})
     over = run.after("Over the threshold")

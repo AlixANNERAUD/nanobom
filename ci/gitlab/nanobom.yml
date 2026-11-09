@@ -94,10 +94,25 @@ spec:
       section_end() { printf '\033[0Ksection_end:%s:%s\r\033[0K\n' "$(date +%s)" "$1"; }
 
       # The dotenv report, for later jobs. Created first so that the artifact exists whatever
-      # fails; empty values are left out, so later jobs see them unset.
+      # fails; empty values are left out, so later jobs see them unset. Values that come from the
+      # server are checked before they are written: dotenv variables override predefined ones in
+      # later jobs, so a stray newline must never add a line such as `CI_REGISTRY=...`.
       : > nanobom.env
+      # A command substitution would strip the newline, so it is written as is.
+      newline='
+      '
+      carriage_return="$(printf '\r')"
       output() {
-        if [ -n "$2" ]; then printf 'NANOBOM_%s=%s\n' "$1" "$2" >> nanobom.env; fi
+        [ -n "$2" ] || return 0
+        case "$1" in
+          EVALUATION_STATUS)
+            case "$2" in succeeded | failed | timed_out) ;; *) return 0 ;; esac ;;
+          PROJECT_URL)
+            case "$2" in *"$newline"* | *"$carriage_return"*) return 0 ;; esac ;;
+          *)
+            case "$2" in *[!0-9]*) return 0 ;; esac ;;
+        esac
+        printf 'NANOBOM_%s=%s\n' "$1" "$2" >> nanobom.env
       }
 
       work="$(mktemp -d)"
@@ -173,7 +188,7 @@ spec:
           target="dir:${NANOBOM_INPUT_SCAN_PATH:-.}"
         fi
         sbom="$work/sbom.cdx.json"
-        section_start nanobom_syft "Generating the SBOM of $target with Syft"
+        section_start "nanobom_syft[collapsed=true]" "Generating the SBOM of $target with Syft"
         SYFT_CHECK_FOR_APP_UPDATE=false "$syft" scan "$target" --quiet --output "cyclonedx-json=$sbom" \
           || fail "Syft could not generate the SBOM of $target"
         section_end nanobom_syft

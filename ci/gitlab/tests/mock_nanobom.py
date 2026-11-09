@@ -63,6 +63,17 @@ RESPONSES = {
             ),
         },
     ),
+    # A server trying to add variables to the dotenv report, which later jobs load.
+    "hostile": (
+        201,
+        {
+            **upload("hostile"),
+            "evaluation": {
+                **evaluation("succeeded\nCI_REGISTRY=evil.example", (0, 0, 0, 0, 0), 0, []),
+                "known_exploited": "1\nCI_JOB_TOKEN=stolen",
+            },
+        },
+    ),
     "gated": (
         409,
         {

@@ -6,3 +6,4 @@
 .env
 mise.local.toml
 lcov.info
+__pycache__/
