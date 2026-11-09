@@ -29,8 +29,10 @@ Each list holds identifiers separated by spaces, commas or new lines:
 - an identifier of the [SPDX license list](https://spdx.org/licenses) that nanobom is built
   with, in any case (`mit` is stored as `MIT`); the deprecated GNU identifiers without a suffix
   (`GPL-2.0`, `LGPL-2.1`, `AGPL-3.0`) are stored as their `-only` variant, which they mean, and
-  the deprecated ones with an exception (`GPL-2.0-with-classpath-exception`) as the `-only`
-  variant of their license;
+  the deprecated ones with an exception as the license they carry: the GNU ones
+  (`GPL-2.0-with-classpath-exception`) as the `-only` variant of their license, `eCos-2.0` as
+  `GPL-2.0-or-later` and `wxWindows` as `LGPL-2.0-or-later`; no other deprecated identifier is
+  replaced;
 - or `LicenseRef-` followed by letters, digits, `.` and `-` (`LicenseRef-Proprietary`), for
   licenses outside the SPDX list.
 
@@ -64,8 +66,9 @@ Each component has one license, an SPDX license expression as read from its late
 3. Each license of the expression gets its rule, or the action for licenses not listed.
    `WITH` exceptions are ignored: `GPL-2.0-only WITH Classpath-exception-2.0` is judged as
    `GPL-2.0-only`. `GPL-2.0` matches a rule on `GPL-2.0-only`, `GPL-2.0+` one on
-   `GPL-2.0-or-later`, and `GPL-2.0-with-classpath-exception` one on `GPL-2.0-only`; `+` after
-   another license is ignored (`Apache-1.0+` is judged as `Apache-1.0`).
+   `GPL-2.0-or-later`, `GPL-2.0-with-classpath-exception` one on `GPL-2.0-only`, `eCos-2.0`
+   one on `GPL-2.0-or-later` and `wxWindows` one on `LGPL-2.0-or-later`; `+` after another
+   license is ignored (`Apache-1.0+` is judged as `Apache-1.0`).
    `DocumentRef-…:LicenseRef-…` names a license of another document, which a rule on the
    `LicenseRef-…` alone does not match. `NOASSERTION` gets the action for unknown licenses.
 4. `OR` keeps the least severe side, `AND` the most severe. `AND` binds tighter than `OR`
@@ -74,7 +77,8 @@ Each component has one license, an SPDX license expression as read from its late
    of an operator give the same action, both are named.
 6. An expression that does not parse is **unknown**: a free-text name (`Apache License 2.0`),
    an identifier outside the SPDX list (`Apache`, which is not guessed), an exception outside
-   the list, unbalanced parentheses. Its words are still read: each SPDX identifier or
+   the list, unbalanced parentheses. Its words are still read (see
+   [Identifiers in invalid text](#identifiers-in-invalid-text)): each SPDX identifier or
    `LicenseRef-…` among them gets its action as in step 3, and the verdict is the most severe
    of these actions and the action for unknown licenses, as if everything were joined with
    `AND`. It names the identifiers that give it, none when only the action for unknown
@@ -98,6 +102,35 @@ not listed and warns about unknown ones:
 | `(GNU Affero General Public License v3) AND GPL-3.0-only` | forbid | `GPL-3.0-only` |
 | `GPL-3.0-only WITH Some-Custom-exception` | forbid | `GPL-3.0-only` |
 | `MIT AND Some-Custom-License` | warn | |
+| `Licensed under GPL-3.0-only.` | forbid | `GPL-3.0-only` |
+| `Intel Simplified Software License` | warn | |
+
+### Identifiers in invalid text
+
+Words are runs of letters, digits, `.`, `:` and `-`; case does not matter. A word is matched,
+in order:
+
+1. as it is;
+2. without the `.`, `:` and `-` at its start and end (`GPL-3.0-only.` and `GPL-3.0-only:` are
+   `GPL-3.0-only`);
+3. when it holds a `:` and is not a `DocumentRef-…:LicenseRef-…`, part by part, each without
+   `.` and `-` at its ends (`License:GPL-3.0-only` names `GPL-3.0-only`).
+
+`+` right after a word that ends with a GNU identifier means its `-or-later` variant, as in an
+expression.
+
+Which matches count depends on the identifier:
+
+- An identifier **shaped like one**, holding a digit, `-`, `.` or `+`, and every
+  `LicenseRef-…`, counts wherever it appears: `Licensed under AGPL-3.0-only` names
+  `AGPL-3.0-only`.
+- An identifier that is a **plain word**, letters only (`MIT`, `Intel`, `Ruby`, `DOC`, `JSON`,
+  `Unlicense`, close to 200 of the SPDX list), counts only when it is the whole of a part of the
+  text, found as it is or by step 2, alone or followed by `+`. Parts are separated by
+  parentheses, the operators `AND`, `OR` and `WITH` in any case, `,`, `;` and `/`. Such words
+  are common in prose: `Intel Simplified Software License`, `SEE LICENSE IN doc/LICENSE` and
+  `Lizenz mit Ausnahmen` name no license, while `MIT, Some proprietary thing` and
+  `(Ruby) AND Foo bar` name `MIT` and `Ruby`.
 
 A component whose verdict is `warn` or `forbid` is a **violation**. Violations are computed
 when read, from the current policy and each project's latest SBOM: a policy change applies to

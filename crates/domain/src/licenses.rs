@@ -20,7 +20,10 @@
 //! SPDX list, CycloneDX entries of both kinds joined with `AND`) is unknown too, but its words
 //! are still read: it gets the most severe of the default for unknown licenses and the actions
 //! of the SPDX identifiers and `LicenseRef-…` it names, as if they were joined with `AND`. A
-//! forbidden identifier can then not pass because something else in the text is not SPDX.
+//! forbidden identifier can then not pass because something else in the text is not SPDX. An
+//! identifier that is an ordinary word (`Intel`, `MIT`) only counts when it stands alone
+//! between separators (parentheses, operators, `,`, `;`, `/`), so that prose does not name
+//! licenses by accident.
 //!
 //! Evaluation is pure, and nothing is stored: violations are computed when read, so changing
 //! the policy applies to every project at once, without a run.
@@ -307,36 +310,120 @@ fn canonical_case(text: &str) -> String {
 /// The identifiers a rule matches among the words of a text that is not a valid expression,
 /// read as [`license_name`] reads those of an expression: an SPDX license identifier, `+`
 /// right after a GNU one meaning its `-or-later` variant, or a license reference.
+///
+/// Free text is not an expression, so a word is matched in steps: as it is; then without the
+/// `.`, `:` and `-` around it, which the lexer keeps in words (`AGPL-3.0-only.`); then, for a
+/// word with `:` that is not a `DocumentRef-…:LicenseRef-…`, each of its parts
+/// (`License:AGPL-3.0-only`). An identifier shaped like one (with a digit, `-`, `.` or `+`, or
+/// a license reference) is taken wherever it appears. Close to 200 SPDX identifiers are letters
+/// only, many of them ordinary words (`Intel`, `Ruby`, `DOC`, `MIT`, the German "mit"): one of
+/// those is taken only when it is the only word of a part of the text, as it is or without what
+/// surrounds it, parts being separated by parentheses, `AND`, `OR`, `WITH`, `,`, `;` and `/`.
+/// `Intel Simplified Software License` names no license, and `MIT, Some proprietary thing`
+/// names `MIT`.
 fn named_licenses(text: &str) -> impl Iterator<Item = String> {
     let tokens: Vec<(bool, &str)> = tokens(text).collect();
-    (0..tokens.len()).filter_map(move |index| {
-        let (true, word) = tokens[index] else {
-            return None;
-        };
-        let word = canonical_word(word);
-        if let Some(id) = spdx::license_id(&word) {
-            let mut id = current_id(id);
-            if tokens.get(index + 1) == Some(&(false, "+")) && id.is_gnu() {
-                id = or_later(id).unwrap_or(id);
-            }
-            return license_name(&LicenseItem::Spdx {
-                id,
-                or_later: false,
-            });
+    let separates = |(word, token): (bool, &str)| {
+        if word {
+            ["AND", "OR", "WITH"]
+                .iter()
+                .any(|operator| token.eq_ignore_ascii_case(operator))
+        } else {
+            "(),;/".contains(token)
         }
-        // `canonical_word` spelled the prefixes as an expression does.
-        let reference = |part: &str, prefix: &str| {
-            part.strip_prefix(prefix)
-                .is_some_and(|rest| !rest.is_empty() && !rest.contains(':'))
+    };
+    // Whether each token is the only word of its part, ignoring white space and a `+`.
+    let mut alone = vec![false; tokens.len()];
+    let mut start = 0;
+    for end in 0..=tokens.len() {
+        if end < tokens.len() && !separates(tokens[end]) {
+            continue;
+        }
+        let part = &tokens[start..end];
+        let words: Vec<usize> = (start..end).filter(|&index| tokens[index].0).collect();
+        let only_space = part
+            .iter()
+            .all(|&(word, token)| word || token == "+" || token.trim().is_empty());
+        if let [index] = words[..]
+            && only_space
+        {
+            alone[index] = true;
+        }
+        start = end + 1;
+    }
+    (0..tokens.len()).flat_map(move |index| {
+        let (true, word) = tokens[index] else {
+            return Vec::new();
         };
-        let is_reference = match word.split_once(':') {
-            Some((document, license)) => {
-                reference(document, "DocumentRef-") && reference(license, "LicenseRef-")
-            }
-            None => reference(&word, "LicenseRef-"),
+        let plus = tokens.get(index + 1) == Some(&(false, "+"));
+        let trimmed = word.trim_matches(['.', ':', '-']);
+        // Each candidate with whether it is the whole word, without what surrounds it.
+        let candidates: Vec<(&str, bool)> = match [word, trimmed]
+            .into_iter()
+            .find(|candidate| identify(candidate).is_some())
+        {
+            Some(candidate) => vec![(candidate, true)],
+            None if trimmed.contains(':') => trimmed
+                .split(':')
+                .map(|part| (part.trim_matches(['.', '-']), false))
+                .collect(),
+            None => Vec::new(),
         };
-        is_reference.then_some(word)
+        let last = candidates.len().saturating_sub(1);
+        candidates
+            .into_iter()
+            .enumerate()
+            .filter_map(|(position, (candidate, whole))| {
+                match identify(candidate)? {
+                    Named::Reference(reference) => Some(reference),
+                    Named::Spdx(id) => {
+                        let plain = id
+                            .name
+                            .chars()
+                            .all(|character| character.is_ascii_alphabetic());
+                        if plain && !(whole && alone[index]) {
+                            return None;
+                        }
+                        let mut id = current_id(id);
+                        // `+` follows the end of the word only.
+                        if plus && position == last && id.is_gnu() {
+                            id = or_later(id).unwrap_or(id);
+                        }
+                        license_name(&LicenseItem::Spdx {
+                            id,
+                            or_later: false,
+                        })
+                    }
+                }
+            })
+            .collect()
     })
+}
+
+/// What a word of free text names.
+enum Named {
+    Spdx(LicenseId),
+    /// A `LicenseRef-…` or `DocumentRef-…:LicenseRef-…`, spelled as in an expression.
+    Reference(String),
+}
+
+fn identify(word: &str) -> Option<Named> {
+    let word = canonical_word(word);
+    if let Some(id) = spdx::license_id(&word) {
+        return Some(Named::Spdx(id));
+    }
+    // `canonical_word` spelled the prefixes as an expression does.
+    let reference = |part: &str, prefix: &str| {
+        part.strip_prefix(prefix)
+            .is_some_and(|rest| !rest.is_empty() && !rest.contains(':'))
+    };
+    let is_reference = match word.split_once(':') {
+        Some((document, license)) => {
+            reference(document, "DocumentRef-") && reference(license, "LicenseRef-")
+        }
+        None => reference(&word, "LicenseRef-"),
+    };
+    is_reference.then_some(Named::Reference(word))
 }
 
 fn canonical_word(word: &str) -> String {
@@ -400,18 +487,23 @@ fn license_name(license: &LicenseItem) -> Option<String> {
     }
 }
 
-/// The identifier that replaces a deprecated GNU one, so that a rule on the current identifier
-/// covers both. A bare identifier (`GPL-2.0`) means the `-only` variant, and an identifier
-/// with an exception (`GPL-2.0-with-classpath-exception`) means its license, since exceptions
-/// are ignored (the current form, `GPL-2.0-only WITH Classpath-exception-2.0`, is judged by
-/// `GPL-2.0-only`).
+/// The identifier that replaces a deprecated one carrying a GNU license, so that a rule on the
+/// current identifier covers both. A bare identifier (`GPL-2.0`) means the `-only` variant, and
+/// an identifier with an exception means its license, since exceptions are ignored (the current
+/// form of `GPL-2.0-with-classpath-exception`, `GPL-2.0-only WITH Classpath-exception-2.0`, is
+/// judged by `GPL-2.0-only`). The deprecated identifiers with an exception are the GNU
+/// `…-with-…-exception` ones, `eCos-2.0` (now `GPL-2.0-or-later WITH eCos-exception-2.0`) and
+/// `wxWindows` (now `LGPL-2.0-or-later WITH WxWindows-exception-3.1`).
 fn current_id(id: LicenseId) -> LicenseId {
-    let id = id
-        .name
-        .split_once("-with-")
-        .filter(|(_, exception)| exception.ends_with("-exception"))
-        .and_then(|(license, _)| spdx::license_id(license))
-        .unwrap_or(id);
+    let license = match id.name {
+        "eCos-2.0" => Some("GPL-2.0-or-later"),
+        "wxWindows" => Some("LGPL-2.0-or-later"),
+        name => name
+            .split_once("-with-")
+            .filter(|(_, exception)| exception.ends_with("-exception"))
+            .map(|(license, _)| license),
+    };
+    let id = license.and_then(spdx::license_id).unwrap_or(id);
     if id.is_gnu() && !id.name.ends_with("-only") && !id.name.ends_with("-or-later") {
         spdx::gnu_license_id(id.name, false).unwrap_or(id)
     } else {
@@ -435,11 +527,11 @@ pub const MAXIMUM_IDENTIFIER_LENGTH: usize = 200;
 pub const MAXIMUM_RULES: usize = 1000;
 
 /// The canonical spelling of a rule's identifier: an SPDX license identifier, in any case, or
-/// `LicenseRef-` followed by letters, digits, `.` and `-`. Deprecated GNU identifiers are
-/// replaced by the current ones they mean: `GPL-3.0` and `GPL-3.0-with-GCC-exception` are
-/// stored as `GPL-3.0-only`. Anything else, an
-/// exception identifier, `NOASSERTION` or `GPL-2.0+` included, is
-/// [`Problem::UnknownLicenseId`].
+/// `LicenseRef-` followed by letters, digits, `.` and `-`. Deprecated identifiers carrying a
+/// GNU license are replaced by the current ones they mean: `GPL-3.0` and
+/// `GPL-3.0-with-GCC-exception` are stored as `GPL-3.0-only`, `wxWindows` as
+/// `LGPL-2.0-or-later`. Anything else, an exception identifier, `NOASSERTION` or `GPL-2.0+`
+/// included, is [`Problem::UnknownLicenseId`].
 pub fn canonical_identifier(text: &str) -> Result<String> {
     let text = text.trim();
     let unknown = || {
@@ -1160,6 +1252,97 @@ mod tests {
         assert_eq!(
             verdict(&policy, "Classpath-exception-2.0 Custom"),
             (Warn, "")
+        );
+    }
+
+    #[test]
+    fn identifiers_glued_to_punctuation_are_read() {
+        let policy = policy(
+            Allow,
+            Warn,
+            &[
+                ("AGPL-3.0-only", Forbid),
+                ("GPL-3.0-only", Forbid),
+                ("GPL-2.0-or-later", Forbid),
+                ("LicenseRef-Proprietary", Forbid),
+            ],
+        );
+        for (license, expected) in [
+            ("Licensed under AGPL-3.0-only", "AGPL-3.0-only"),
+            ("Licensed under AGPL-3.0-only.", "AGPL-3.0-only"),
+            ("License:AGPL-3.0-only", "AGPL-3.0-only"),
+            ("GPL-3.0-only: see COPYING", "GPL-3.0-only"),
+            ("-GPL-3.0-only- and more", "GPL-3.0-only"),
+            ("License:GPL-2.0+", "GPL-2.0-or-later"),
+            ("Terms:LicenseRef-Proprietary.", "LicenseRef-Proprietary"),
+        ] {
+            assert_eq!(verdict(&policy, license), (Forbid, expected), "{license}");
+        }
+        // A reference to another document stays whole, and stays another license.
+        assert_eq!(
+            verdict(&policy, "See DocumentRef-x:LicenseRef-Proprietary."),
+            (Warn, "")
+        );
+    }
+
+    #[test]
+    fn identifiers_that_are_ordinary_words_count_only_alone() {
+        // An allowlist: every SPDX identifier read in prose would be forbidden.
+        let policy = policy(Forbid, Warn, &[("Apache-2.0", Allow)]);
+        for license in [
+            "Intel Simplified Software License",
+            "SEE LICENSE IN doc/LICENSE",
+            "Lizenz mit Ausnahmen",
+            "Fair use of the JSON data, see curl and Vim docs",
+            "Licensed under MIT.",
+            "License: MIT",
+            "License:MIT",
+            "Apache-2.0, Some proprietary thing",
+        ] {
+            assert_eq!(verdict(&policy, license), (Warn, ""), "{license}");
+        }
+        for (license, expected) in [
+            ("(Ruby) AND Foo bar", "Ruby"),
+            ("MIT, Some proprietary thing", "MIT"),
+            ("mit; Custom", "MIT"),
+            ("Custom / Intel", "Intel"),
+            ("Custom OR MIT+", "MIT"),
+            ("Some text WITH Unlicense", "Unlicense"),
+            // Identifiers shaped like one count anywhere.
+            ("Licensed under BSD-3-Clause", "BSD-3-Clause"),
+            (
+                "(GNU Affero General Public License v3) AND AGPL-3.0-only",
+                "AGPL-3.0-only",
+            ),
+        ] {
+            assert_eq!(verdict(&policy, license), (Forbid, expected), "{license}");
+        }
+    }
+
+    #[test]
+    fn deprecated_identifiers_with_an_exception_on_a_gnu_license_mean_it() {
+        let policy = policy(
+            Allow,
+            Allow,
+            &[("GPL-2.0-or-later", Forbid), ("LGPL-2.0-or-later", Warn)],
+        );
+        assert_eq!(verdict(&policy, "eCos-2.0"), (Forbid, "GPL-2.0-or-later"));
+        assert_eq!(verdict(&policy, "wxWindows"), (Warn, "LGPL-2.0-or-later"));
+        assert_eq!(
+            verdict(&policy, "ecos-2.0 OR wxwindows"),
+            (Warn, "LGPL-2.0-or-later")
+        );
+        assert_eq!(
+            verdict(&policy, "wxWindows AND Custom"),
+            (Warn, "LGPL-2.0-or-later")
+        );
+        assert_eq!(
+            canonical_identifier("eCos-2.0").unwrap(),
+            "GPL-2.0-or-later"
+        );
+        assert_eq!(
+            canonical_identifier("wxwindows").unwrap(),
+            "LGPL-2.0-or-later"
         );
     }
 
