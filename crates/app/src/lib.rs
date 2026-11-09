@@ -133,3 +133,34 @@ fn NotFound() -> impl IntoView {
         </Page>
     }
 }
+
+#[cfg(test)]
+mod tests {
+    /// Unlayered rules always win over layered ones, whatever their specificity. The light tokens
+    /// are unlayered, so tokens declared in an `@layer` (as the dark ones once were) never apply
+    /// and the theme switch does nothing.
+    #[test]
+    fn theme_tokens_are_outside_layers() {
+        let stylesheet = include_str!("../../../style/main.css");
+        let mut depth = 0_usize;
+        let mut layer_depth = None;
+        let mut definitions = 0;
+        for line in stylesheet.lines() {
+            let line = line.trim();
+            if line.starts_with("@layer") && line.ends_with('{') {
+                layer_depth.get_or_insert(depth);
+            }
+            if line.starts_with("--background:") {
+                definitions += 1;
+                assert!(layer_depth.is_none(), "a theme is declared inside a layer");
+            }
+            depth += line.matches('{').count();
+            depth -= line.matches('}').count();
+            if layer_depth == Some(depth) {
+                layer_depth = None;
+            }
+        }
+        // Light, dark by class, dark by system preference.
+        assert_eq!(definitions, 3);
+    }
+}
