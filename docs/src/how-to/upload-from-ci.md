@@ -103,32 +103,78 @@ is that workflow in full. Without the action, upload with `curl` as in
 
 ## GitLab CI
 
-[`examples/gitlab-ci.yml`](https://github.com/AlixANNERAUD/nanobom/blob/main/examples/gitlab-ci.yml)
-generates the SBOM of a container image with Syft on each tag and uploads it. The Syft image has
-`wget` but not `curl`:
+The [GitLab CI template](../reference/gitlab-template.md) adds a `nanobom` job that does what
+the GitHub action does: it generates the SBOM with Syft unless you give one, uploads it, writes
+the evaluation to the job log, and fails the job on your threshold. Include it in
+`.gitlab-ci.yml`, pinned to a release tag:
 
 ```yaml
-sbom:
-  stage: deploy
-  image:
-    name: anchore/syft:latest
-    entrypoint: [""]
-  rules:
-    - if: $CI_COMMIT_TAG
-  script:
-    - syft "$CI_REGISTRY_IMAGE:$CI_COMMIT_TAG" --output cyclonedx-json=sbom.json
-    - >
-      wget --quiet --output-document=- --content-on-error --method=PUT
-      --header="Authorization: Bearer $NANOBOM_TOKEN"
-      --header="Content-Type: application/json"
-      --body-file=sbom.json
-      "$NANOBOM_URL/api/organizations/acme/projects/$CI_PROJECT_NAME/sbom?source_commit=$CI_COMMIT_SHA&image_tag=$CI_COMMIT_TAG&fail_on=high"
+include:
+  - remote: https://raw.githubusercontent.com/AlixANNERAUD/nanobom/vX.Y.Z/ci/gitlab/nanobom.yml
+    inputs:
+      organization: acme
+      fail-on: high
 ```
 
-Define `NANOBOM_URL` and `NANOBOM_TOKEN` (masked) under **Settings → CI/CD → Variables**.
-`--content-on-error` prints the response body on a `409`, so the job log shows which findings
-failed the gate. A registry that needs credentials needs them in the job too (Syft reads
-`~/.docker/config.json`, or `SYFT_REGISTRY_AUTH_*` variables).
+Replace `vX.Y.Z` with a [release](https://github.com/AlixANNERAUD/nanobom/releases). `main`
+works too, but changes under you. Define `NANOBOM_URL` and `NANOBOM_TOKEN` (masked) under
+**Settings → CI/CD → Variables**. The project defaults to the GitLab project's name, the scanned
+directory to the checkout. Every input is in the [reference](../reference/gitlab-template.md#inputs).
+
+The template sets no `rules`: the job runs in every pipeline. Add them, and anything else, in a
+job of the same name:
+
+```yaml
+nanobom:
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+```
+
+To scan the image a tag pipeline built, in the project's registry (the job logs in with the
+job's credentials):
+
+```yaml
+include:
+  - remote: https://raw.githubusercontent.com/AlixANNERAUD/nanobom/vX.Y.Z/ci/gitlab/nanobom.yml
+    inputs:
+      organization: acme
+      scan-image: $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG
+      stage: deploy
+      fail-on: high,exploited
+
+nanobom:
+  needs: [build-image]
+  rules:
+    - if: $CI_COMMIT_TAG
+```
+
+To upload an SBOM from your own generator, give its path in `sbom` and take it from the job that
+writes it:
+
+```yaml
+include:
+  - remote: https://raw.githubusercontent.com/AlixANNERAUD/nanobom/vX.Y.Z/ci/gitlab/nanobom.yml
+    inputs:
+      organization: acme
+      sbom: sbom.json
+
+nanobom:
+  needs: [cargo-sbom]
+```
+
+Later jobs that need the `nanobom` job read the counts from its dotenv report, such as
+`$NANOBOM_HIGH` and `$NANOBOM_PROJECT_URL` ([outputs](../reference/gitlab-template.md#outputs)).
+To upload several SBOMs, include the template once per SBOM with a different `job-name` and
+`project` or `version`.
+
+The job runs in `alpine:3.24` and installs `curl` and `jq` at each run. To run it elsewhere,
+such as in a mirror of the image or in an image that already has `curl`, `jq` and `syft`, set
+the `image` input ([requirements](../reference/gitlab-template.md#the-job)).
+
+The template is not in the GitLab CI/CD Catalog: `include: component` does not work, and the
+remote include is fetched from GitHub when the pipeline is created.
+[`examples/gitlab-ci.yml`](https://github.com/AlixANNERAUD/nanobom/blob/main/examples/gitlab-ci.yml)
+is a complete pipeline. Without the template, upload with `curl` as below.
 
 ## Any CI, with curl
 
