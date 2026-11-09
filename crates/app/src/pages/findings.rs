@@ -17,7 +17,7 @@ use crate::{
     },
     model::{
         ComponentMatch, DependencyComponent, DependencyPaths, FindingData, FindingFilter,
-        FindingRow, ProjectData, Severity, Status,
+        FindingRow, LicenseAction, LicenseViolations, ProjectData, Severity, Status,
     },
     t, tf, tp,
 };
@@ -400,6 +400,7 @@ pub fn ProjectPage() -> impl IntoView {
                         {without_purl}
                         <Filters page=page.clone() filter />
                         {table}
+                        {page.licenses.clone().map(|licenses| view! { <Licenses licenses /> })}
                         <Card>
                             <CardHeader>
                                 <CardTitle>{t!("project.uploads_title")}</CardTitle>
@@ -413,6 +414,101 @@ pub fn ProjectPage() -> impl IntoView {
                 }}
             />
         </Page>
+    }
+}
+
+/// The components whose license the organization's policy forbids or warns about, shown when
+/// the organization has a policy.
+#[component]
+fn Licenses(licenses: LicenseViolations) -> impl IntoView {
+    let counts = licenses.counts;
+    let total = counts.forbidden + counts.warned;
+    let listed = licenses.items.len() as u64;
+    let description = format!(
+        "{} · {}",
+        tp!("project.licenses_forbidden", counts.forbidden),
+        tp!("project.licenses_warned", counts.warned),
+    );
+    let more = (total > listed).then(|| {
+        view! {
+            <p class="text-muted-foreground text-sm">
+                {tp!("project.licenses_more", total - listed)}
+            </p>
+        }
+    });
+    let content = if licenses.items.is_empty() {
+        view! { <p class="text-muted-foreground text-sm">{t!("project.licenses_none")}</p> }
+            .into_any()
+    } else {
+        let rows = licenses
+            .items
+            .into_iter()
+            .map(|violation| {
+                let variant = match violation.verdict {
+                    LicenseAction::Forbid => BadgeVariant::Destructive,
+                    LicenseAction::Warn | LicenseAction::Allow => BadgeVariant::Outline,
+                };
+                // The identifiers behind the verdict, when the expression has others too.
+                let because = (!violation.licenses.is_empty()
+                    && violation.license.as_deref() != Some(&violation.licenses.join(" ")))
+                .then(|| {
+                    view! {
+                        <span class="text-muted-foreground block text-xs">
+                            {tf!("project.licenses_because", licenses = violation.licenses.join(", "))}
+                        </span>
+                    }
+                });
+                let license = match violation.license {
+                    Some(license) => view! { <span class="font-mono text-xs">{license}</span> }.into_any(),
+                    None => view! {
+                        <span class="text-muted-foreground">{t!("project.license_unknown")}</span>
+                    }
+                        .into_any(),
+                };
+                view! {
+                    <tr class=TABLE_ROW>
+                        <th scope="row" class=format!("{TABLE_CELL} text-left font-medium")>
+                            {violation.name}
+                            <span class="text-muted-foreground block font-mono text-xs font-normal">
+                                {violation.purl}
+                            </span>
+                        </th>
+                        <td class=format!("{TABLE_CELL} text-muted-foreground")>
+                            {violation.version.unwrap_or_default()}
+                        </td>
+                        <td class=TABLE_CELL>{license} {because}</td>
+                        <td class=TABLE_CELL>
+                            <Badge variant=variant>{violation.verdict.verdict()}</Badge>
+                        </td>
+                    </tr>
+                }
+            })
+            .collect_view();
+        view! {
+            <Table caption=t!("project.licenses_caption")>
+                <thead>
+                    <tr class=TABLE_HEAD_ROW>
+                        <th scope="col" class=TABLE_HEAD>{t!("project.component")}</th>
+                        <th scope="col" class=TABLE_HEAD>{t!("project.version")}</th>
+                        <th scope="col" class=TABLE_HEAD>{t!("project.license")}</th>
+                        <th scope="col" class=TABLE_HEAD>{t!("project.verdict")}</th>
+                    </tr>
+                </thead>
+                <tbody>{rows}</tbody>
+            </Table>
+        }
+        .into_any()
+    };
+    view! {
+        <Card>
+            <CardHeader>
+                <CardTitle>{t!("project.licenses_title")}</CardTitle>
+                <CardDescription>{description}</CardDescription>
+            </CardHeader>
+            <CardContent>
+                <div class="grid gap-2">{content} {more}</div>
+            </CardContent>
+        </Card>
     }
 }
 

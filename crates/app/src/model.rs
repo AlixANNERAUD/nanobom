@@ -2,8 +2,8 @@
 //! defined here, independent of the server-only domain crate.
 //!
 //! They also compile for the browser bundle, which cannot link the domain crate (it pulls in
-//! the database driver). [`Severity`], [`Status`], [`Role`] and [`DeliveryState`] therefore
-//! mirror domain enumerations: keep them in sync, along with the conversions in
+//! the database driver). [`Severity`], [`Status`], [`Role`], [`DeliveryState`] and
+//! [`LicenseAction`] therefore mirror domain enumerations: keep them in sync, along with the conversions in
 //! `crate::server`.
 //!
 //! Nothing here grants anything: methods such as [`Role::can_manage`] only decide which
@@ -207,6 +207,95 @@ pub struct ProjectRow {
     pub known_exploited: i64,
     /// No SBOM for longer than the configured threshold.
     pub stale: bool,
+    /// Components breaking the organization's license policy; zero without a policy.
+    pub licenses: LicenseCounts,
+}
+
+/// Mirror of `nanobom_domain::licenses::Action`, from the least to the most severe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LicenseAction {
+    Allow,
+    Warn,
+    Forbid,
+}
+
+impl LicenseAction {
+    pub const ALL: [LicenseAction; 3] = [
+        LicenseAction::Allow,
+        LicenseAction::Warn,
+        LicenseAction::Forbid,
+    ];
+
+    /// The name sent by forms, as the domain parses it.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LicenseAction::Allow => "allow",
+            LicenseAction::Warn => "warn",
+            LicenseAction::Forbid => "forbid",
+        }
+    }
+
+    /// The name shown in the interface, in the request's language.
+    pub fn label(self) -> &'static str {
+        match self {
+            LicenseAction::Allow => t!("licenses.allow"),
+            LicenseAction::Warn => t!("licenses.warn"),
+            LicenseAction::Forbid => t!("licenses.forbid"),
+        }
+    }
+    /// The verdict on a component, in the request's language.
+    pub fn verdict(self) -> &'static str {
+        match self {
+            LicenseAction::Allow => t!("licenses.allowed"),
+            LicenseAction::Warn => t!("licenses.warned"),
+            LicenseAction::Forbid => t!("licenses.forbidden"),
+        }
+    }
+}
+
+/// Components breaking a license policy, by verdict.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LicenseCounts {
+    pub forbidden: u64,
+    pub warned: u64,
+}
+
+/// An organization's license policy, with its rules split by action as the settings form
+/// edits them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LicensePolicy {
+    pub unlisted: LicenseAction,
+    pub unknown: LicenseAction,
+    pub allowed: Vec<String>,
+    pub warned: Vec<String>,
+    pub forbidden: Vec<String>,
+}
+
+/// A component whose license the policy forbids or warns about.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LicenseViolation {
+    pub purl: String,
+    pub name: String,
+    pub version: Option<String>,
+    /// As read from the SBOM.
+    pub license: Option<String>,
+    pub verdict: LicenseAction,
+    /// The identifiers that lead to the verdict; empty when the license is unknown.
+    pub licenses: Vec<String>,
+}
+
+/// The license violations of a project, when its organization has a policy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LicenseViolations {
+    pub counts: LicenseCounts,
+    /// Forbidden first, then warned, at most [`LicenseViolations::LISTED`].
+    pub items: Vec<LicenseViolation>,
+}
+
+impl LicenseViolations {
+    /// Violations listed on the project page; the read API pages through all of them.
+    pub const LISTED: usize = 200;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -327,6 +416,8 @@ pub struct ProjectData {
     pub last_upload_at: Option<DateTime<FixedOffset>>,
     pub created_at: DateTime<FixedOffset>,
     pub stale: bool,
+    /// `None` when the organization has no active license policy.
+    pub licenses: Option<LicenseViolations>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -477,6 +568,7 @@ pub struct SettingsData {
     pub webhook: Option<Webhook>,
     /// The latest deliveries to the webhook, the newest first.
     pub deliveries: Vec<WebhookDelivery>,
+    pub license_policy: LicensePolicy,
     /// A token created just before, shown once.
     pub new_token: Option<String>,
 }
