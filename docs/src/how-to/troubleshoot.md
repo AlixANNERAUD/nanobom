@@ -16,6 +16,8 @@ the [logs reference](../reference/metrics.md#log-messages).
 - Check the token in **Settings → API tokens**: its first characters, whether it is revoked,
   and when it was last used. A token that was never used never reached nanobom.
 - Tokens are shown once. If in doubt, create a new one and revoke the old one.
+- A token revoked while its upload waited for the evaluation also gets this answer; the SBOM
+  was stored anyway (see [waiting for the evaluation](../reference/upload-api.md#waiting-for-the-evaluation)).
 
 ### Upload answers 403
 

@@ -158,8 +158,9 @@ still completes in the background. Waiting runs the project even when `NANOBOM_R
 is `false`.
 
 At most `NANOBOM_MAX_WAITING_UPLOADS` uploads (32 by default) wait at once. Another upload with
-`wait` or `fail_on` is refused with a `503` and a `Retry-After` header, before its body is read,
-so nothing is stored and it can be sent again unchanged. Uploads without `wait` or `fail_on` are
+`wait` or `fail_on` is refused with a `503` and a `Retry-After` header before its body is parsed,
+so nothing is stored and it can be sent again unchanged. The body is still received first, up to
+`NANOBOM_MAXIMUM_SBOM_SIZE`. Uploads without `wait` or `fail_on` are
 not limited.
 
 The token is checked again when the wait ends. If it was revoked meanwhile, or deleted with its
