@@ -435,7 +435,7 @@
       "get": {
         "operationId": "searchComponents",
         "summary": "Search components",
-        "description": "Components whose name contains `q`, across the projects the caller sees, by name then version, at most 200. `truncated` says when more matched.",
+        "description": "Components whose name contains `q`, whose license contains `license`, or both, across the projects the caller sees, by name then version, at most 200. At least one of `q` and `license` is required. `truncated` says when more matched.",
         "tags": [
           "read"
         ],
@@ -446,12 +446,22 @@
           {
             "name": "q",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "string"
             },
             "example": "lodash@4.17",
             "description": "A name (`openssl`), optionally followed by a space or `@` and a version prefix (`openssl 3.`)."
+          },
+          {
+            "name": "license",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "example": "GPL",
+            "description": "Text the component's license expression contains, case-insensitively (`GPL` matches `GPL-3.0-only` and `MIT OR GPL-2.0-or-later`). Components without a license never match."
           }
         ],
         "responses": {
@@ -759,13 +769,21 @@
           "ecosystem": {
             "type": "string",
             "description": "The package URL type (`npm`, `cargo`, `pypi`...)."
+          },
+          "license": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The license from the latest SBOM, as an SPDX license expression that may contain free-text license names (`MIT`, `Apache-2.0 OR MIT`, `LicenseRef-Proprietary`). `null` when the SBOM gives none, when the component is no longer in the project, or, for components stored before nanobom read licenses, until the project's next upload."
           }
         },
         "required": [
           "purl",
           "name",
           "version",
-          "ecosystem"
+          "ecosystem",
+          "license"
         ]
       },
       "ComponentRef": {
@@ -816,6 +834,13 @@
           "ecosystem": {
             "type": "string",
             "description": "The package URL type (`npm`, `cargo`, `pypi`...)."
+          },
+          "license": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The license from the latest SBOM, as an SPDX license expression that may contain free-text license names (`MIT`, `Apache-2.0 OR MIT`, `LicenseRef-Proprietary`). `null` when the SBOM gives none, when the component is no longer in the project, or, for components stored before nanobom read licenses, until the project's next upload."
           }
         },
         "required": [
@@ -824,7 +849,8 @@
           "purl",
           "name",
           "version",
-          "ecosystem"
+          "ecosystem",
+          "license"
         ]
       },
       "Exploitation": {

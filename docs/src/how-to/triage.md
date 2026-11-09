@@ -83,6 +83,10 @@ Names include the namespace of the package URL (`@scope/name` for npm, `group/na
 At most 200 results are shown. Search is the quickest answer to "are we affected?" when an
 advisory is in the news, before the nightly run has even picked it up.
 
+Results show each component's license. To find components by license, fill the license field
+of the search page (`GPL` finds `GPL-3.0-only` and `MIT OR LGPL-2.1-or-later`), with or without
+a name; components whose SBOM gives no license show **Unknown** and never match.
+
 From a finding's page, **Also affected** lists the other components affected by the same
 vulnerability in the organizations you can see.
 

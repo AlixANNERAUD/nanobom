@@ -419,6 +419,10 @@ async fn findings_are_shown_and_ignored_from_the_interface() {
     let html = alice.page(&page).await;
     assert!(html.contains("CVE-2021-23337"));
     assert!(html.contains("4.17.21"), "the fixed version");
+    assert!(
+        html.contains("License") && html.contains("MIT"),
+        "the license"
+    );
     assert!(html.contains("Ignore finding"));
     assert!(
         html.contains("name=\"justification\""),
@@ -454,6 +458,12 @@ async fn findings_are_shown_and_ignored_from_the_interface() {
 
     let html = alice.page("/search?query=lodash+4.17").await;
     assert!(html.contains("pkg:npm/lodash@4.17.20"));
+    assert!(html.contains("MIT"), "the license column");
+    let html = alice.page("/search?query=&license=mit").await;
+    assert!(html.contains("pkg:npm/lodash@4.17.20"));
+    assert!(html.contains("pkg:npm/minimist@1.2.5"));
+    let html = alice.page("/search?query=lodash&license=GPL").await;
+    assert!(html.contains("No component found"));
 }
 
 #[tokio::test]

@@ -447,6 +447,7 @@ async fn every_endpoint_answers_as_described() {
     assert_eq!(first["component"]["name"], "lodash");
     assert_eq!(first["component"]["version"], "4.17.20");
     assert_eq!(first["component"]["ecosystem"], "npm");
+    assert_eq!(first["component"]["license"], "MIT");
     assert_eq!(first["severity"], "high");
     assert_eq!(first["status"], "open");
     assert_eq!(first["exploitation"]["known_exploited"], true);
@@ -464,6 +465,7 @@ async fn every_endpoint_answers_as_described() {
     let detail = read(server, &format!("/api/findings/{lodash}"), token).await;
     assert_documented("/api/findings/{finding}", &detail);
     assert_eq!(detail["organization"], "acme");
+    assert_eq!(detail["component"]["license"], "MIT");
     assert_eq!(detail["fixed_versions"], json!(["4.17.21"]));
     assert_eq!(
         detail["references"][0]["url"],
@@ -503,7 +505,7 @@ async fn every_endpoint_answers_as_described() {
             .as_array()
             .unwrap()
             .iter()
-            .any(|component| component["purl"] == LODASH)
+            .any(|component| component["purl"] == LODASH && component["license"] == "MIT")
     );
 
     let matches = read(server, "/api/components?q=lodash", token).await;
@@ -526,6 +528,15 @@ async fn every_endpoint_answers_as_described() {
             .all(|(organization, _)| *organization == "acme")
     );
     assert_eq!(matches["truncated"], false);
+    assert_eq!(matches["items"][0]["license"], "MIT");
+    // By license alone, or with a name; components of the fixture are all MIT.
+    let by_license = read(server, "/api/components?license=mit", token).await;
+    assert_documented("/api/components", &by_license);
+    assert_eq!(by_license["items"].as_array().unwrap().len(), 6);
+    let both = read(server, "/api/components?q=lodash&license=MIT", token).await;
+    assert_eq!(both["items"].as_array().unwrap().len(), 2);
+    let none = read(server, "/api/components?q=lodash&license=GPL", token).await;
+    assert_eq!(none["items"], json!([]));
 
     let runs = read(server, "/api/organizations/acme/runs", token).await;
     assert_documented("/api/organizations/{organization}/runs", &runs);
@@ -735,7 +746,8 @@ async fn organizations_are_isolated_on_every_endpoint() {
             "purl": LODASH,
             "name": "lodash",
             "version": "4.17.20",
-            "ecosystem": "npm"
+            "ecosystem": "npm",
+            "license": "MIT"
         }])
     );
     let detail = read(
@@ -1074,6 +1086,11 @@ async fn responses_are_private_to_the_caller() {
             StatusCode::NOT_FOUND,
         ),
         ("/api/components", token, StatusCode::UNPROCESSABLE_ENTITY),
+        (
+            "/api/components?q=+&license=+",
+            token,
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
         ("/api/openapi.json", Caller::Anonymous, StatusCode::OK),
         (vex, token, StatusCode::OK),
         (vex, session, StatusCode::OK),

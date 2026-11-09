@@ -794,6 +794,16 @@ pub fn FindingPage() -> impl IntoView {
                                             <dd class="font-medium break-all">{finding.component_name.clone()}</dd>
                                             <dt class="text-muted-foreground">{t!("finding.version")}</dt>
                                             <dd>{finding.component_version.clone().unwrap_or_default()}</dd>
+                                            <dt class="text-muted-foreground">{t!("finding.license")}</dt>
+                                            <dd class="break-words">
+                                                {match finding.license.clone() {
+                                                    Some(license) => license.into_any(),
+                                                    None => view! {
+                                                        <span class="text-muted-foreground">{t!("finding.unknown_license")}</span>
+                                                    }
+                                                        .into_any(),
+                                                }}
+                                            </dd>
                                             <dt class="text-muted-foreground">{t!("finding.fixed_in")}</dt>
                                             <dd>
                                                 {if page.fixed_versions.is_empty() {
@@ -914,7 +924,11 @@ pub fn FindingPage() -> impl IntoView {
 pub fn SearchPage() -> impl IntoView {
     let query = use_query_map();
     let text = move || query.read().get("query").unwrap_or_default();
-    let results = Resource::new(text, search_components);
+    let license = move || query.read().get("license").unwrap_or_default();
+    let results = Resource::new(
+        move || (text(), license()),
+        |(text, license)| search_components(text, license),
+    );
     view! {
         <Page title=t!("search.title")>
             <Heading title=t!("search.heading") subtitle=t!("search.subtitle") />
@@ -928,12 +942,21 @@ pub fn SearchPage() -> impl IntoView {
                     value=text
                     placeholder="openssl 3."
                 />
+                <label for="search-license" class="sr-only">{t!("search.license_label")}</label>
+                <input
+                    id="search-license"
+                    name="license"
+                    type="search"
+                    class=format!("{INPUT} max-w-48")
+                    value=license
+                    placeholder="GPL"
+                />
                 <Button>{t!("search.submit")}</Button>
             </form>
             <Loaded
                 resource=results
                 render={move |results: Vec<ComponentMatch>| {
-                    if text().trim().is_empty() {
+                    if text().trim().is_empty() && license().trim().is_empty() {
                         return ().into_any();
                     }
                     if results.is_empty() {
@@ -946,6 +969,7 @@ pub fn SearchPage() -> impl IntoView {
                                 <tr class=TABLE_HEAD_ROW>
                                     <th scope="col" class=TABLE_HEAD>{t!("search.component")}</th>
                                     <th scope="col" class=TABLE_HEAD>{t!("search.version")}</th>
+                                    <th scope="col" class=TABLE_HEAD>{t!("search.license")}</th>
                                     <th scope="col" class=TABLE_HEAD>{t!("search.project")}</th>
                                 </tr>
                             </thead>
@@ -962,6 +986,15 @@ pub fn SearchPage() -> impl IntoView {
                                                     </span>
                                                 </th>
                                                 <td class=TABLE_CELL>{component.version.unwrap_or_default()}</td>
+                                                <td class=format!("{TABLE_CELL} break-words")>
+                                                    {match component.license {
+                                                        Some(license) => license.into_any(),
+                                                        None => view! {
+                                                            <span class="text-muted-foreground">{t!("search.unknown_license")}</span>
+                                                        }
+                                                            .into_any(),
+                                                    }}
+                                                </td>
                                                 <td class=TABLE_CELL>
                                                     <a
                                                         class="underline-offset-4 hover:underline"

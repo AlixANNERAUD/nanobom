@@ -80,6 +80,7 @@ upload to nanobom with a new address and key: see [Dependency-Track clients](htt
 - The direct dependency that pulls in each vulnerable component, from the SBOM's dependency
   graph: what to upgrade.
 - Search across every project: "which of our services ship `openssl 3.0`?"
+  Each component's license is kept from the SBOM, and searchable too.
 
 **Stop it before it ships**
 - `fail_on` on uploads: fail the build on critical, high, … or known-exploited findings.

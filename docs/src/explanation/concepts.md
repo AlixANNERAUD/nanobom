@@ -38,7 +38,9 @@ one SBOM per project and build, describing everything the project ships.
 Components are identified by their package URL. Components without one are counted and listed
 in the upload's response but cannot be checked. The SBOM's dependency graph, when it has one, is
 kept with the components and tells which direct dependency of the project pulls in each one
-([Dependency paths](dependency-paths.md)).
+([Dependency paths](dependency-paths.md)). So is each component's license, as the SBOM states
+it: one SPDX license expression, shown on findings and in search results
+([how licenses are read](../reference/upload-api.md#the-document)).
 
 ## Runs
 

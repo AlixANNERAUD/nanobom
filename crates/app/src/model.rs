@@ -252,6 +252,8 @@ pub struct FindingRow {
     pub id: i64,
     pub component_name: String,
     pub component_version: Option<String>,
+    /// `None` when the latest SBOM gives no license, or no longer has the component.
+    pub license: Option<String>,
     pub ecosystem: String,
     pub purl: String,
     pub vulnerability_id: String,
@@ -388,6 +390,7 @@ pub struct ComponentMatch {
     pub ecosystem: String,
     pub name: String,
     pub version: Option<String>,
+    pub license: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
