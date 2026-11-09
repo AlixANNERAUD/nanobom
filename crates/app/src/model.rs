@@ -412,12 +412,17 @@ pub struct FindingFilter {
     pub version: Option<String>,
 }
 
-/// A version of a project, for the version selector.
+/// A version of a project, for the version selector and the versions table.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct VersionOption {
     /// Empty for the unnamed version.
     pub name: String,
     pub latest: bool,
+    /// Whether runs evaluate the version; inactive ones stay readable.
+    pub active: bool,
+    pub last_upload_at: Option<DateTime<FixedOffset>>,
+    /// Open findings of the version.
+    pub open: SeverityCounts,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -454,8 +459,24 @@ pub struct AffectedComponent {
     pub finding_id: i64,
     pub organization_slug: String,
     pub project_slug: String,
+    /// The project version; empty for the unnamed version.
+    pub version: String,
     pub purl: String,
     pub status: Status,
+}
+
+/// A version of a finding's project and its status for the finding's vulnerability.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct VersionFinding {
+    /// Empty for the unnamed version.
+    pub name: String,
+    pub latest: bool,
+    pub active: bool,
+    /// The finding's own version.
+    pub current: bool,
+    /// `None` when the version never had a finding for the vulnerability.
+    pub status: Option<Status>,
+    pub finding_id: Option<i64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -490,6 +511,8 @@ pub struct FindingData {
     pub ignored_by_token: Option<String>,
     /// Other findings filed under the same identifier, in organizations the viewer can see.
     pub affected_components: Vec<AffectedComponent>,
+    /// Every version of the project, newest first.
+    pub versions: Vec<VersionFinding>,
     pub events: Vec<FindingEvent>,
     /// `None` when the latest SBOM did not say which components the project depends on
     /// directly.
@@ -500,6 +523,9 @@ pub struct FindingData {
 pub struct ComponentMatch {
     pub organization_slug: String,
     pub project_slug: String,
+    /// The project version; empty for the unnamed version.
+    pub project_version: String,
+    pub project_version_active: bool,
     pub purl: String,
     pub ecosystem: String,
     pub name: String,

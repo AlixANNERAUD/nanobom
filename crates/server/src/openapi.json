@@ -441,7 +441,7 @@
       "get": {
         "operationId": "searchComponents",
         "summary": "Search components",
-        "description": "Components whose name contains `q`, whose license contains `license`, or both, across the projects the caller sees, by name then version, at most 200. At least one of `q` and `license` is required. `truncated` says when more matched.",
+        "description": "Components whose name contains `q`, whose license contains `license`, or both, in the active versions of the projects the caller sees (inactive versions too with `inactive=true`), by name then version, at most 200. A package in several versions of a project is one match per version. At least one of `q` and `license` is required. `truncated` says when more matched.",
         "tags": [
           "read"
         ],
@@ -468,6 +468,16 @@
             },
             "example": "GPL",
             "description": "Text the component's license expression contains, case-insensitively (`GPL` matches `GPL-3.0-only` and `MIT OR GPL-2.0-or-later`). Components without a license never match."
+          },
+          {
+            "name": "inactive",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Also search inactive project versions."
           }
         ],
         "responses": {
@@ -1003,6 +1013,14 @@
             "type": "string",
             "description": "Project slug."
           },
+          "project_version": {
+            "type": "string",
+            "description": "The project version holding the component; empty for the unnamed version."
+          },
+          "project_version_active": {
+            "type": "boolean",
+            "description": "Whether that version is active. Always `true` unless `inactive=true`."
+          },
           "purl": {
             "type": "string"
           },
@@ -1030,6 +1048,8 @@
         "required": [
           "organization",
           "project",
+          "project_version",
+          "project_version_active",
           "purl",
           "name",
           "version",
@@ -1392,6 +1412,10 @@
           "project": {
             "type": "string"
           },
+          "version": {
+            "type": "string",
+            "description": "The project version holding the component; empty for the unnamed version."
+          },
           "purl": {
             "type": "string"
           },
@@ -1408,8 +1432,54 @@
           "finding_id",
           "organization",
           "project",
+          "version",
           "purl",
           "status"
+        ]
+      },
+      "VersionFinding": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "The version name; empty for the unnamed version."
+          },
+          "latest": {
+            "type": "boolean"
+          },
+          "active": {
+            "type": "boolean",
+            "description": "Whether runs evaluate the version."
+          },
+          "current": {
+            "type": "boolean",
+            "description": "Whether this is the finding's own version."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "ignored",
+              "fixed",
+              "not_affected"
+            ],
+            "description": "`open` when one of the version's findings for the vulnerability is open, else `ignored` when one is ignored, else `fixed`; `not_affected` when the version never had one."
+          },
+          "finding_id": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "The finding that decides the status, preferably of the same component; null when `not_affected`."
+          }
+        },
+        "required": [
+          "name",
+          "latest",
+          "active",
+          "current",
+          "status",
+          "finding_id"
         ]
       },
       "Run": {
@@ -1671,7 +1741,14 @@
             "items": {
               "$ref": "#/components/schemas/AffectedComponent"
             },
-            "description": "Other findings of the same vulnerability, in projects the caller sees."
+            "description": "Other findings of the same vulnerability, in the active versions of projects the caller sees."
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/VersionFinding"
+            },
+            "description": "Every version of the finding's project, newest first, with its status for the vulnerability or any of its aliases."
           }
         },
         "required": [
@@ -1704,7 +1781,8 @@
           "ignored_by_token",
           "events",
           "dependency_paths",
-          "affected_components"
+          "affected_components",
+          "versions"
         ]
       },
       "OrganizationList": {

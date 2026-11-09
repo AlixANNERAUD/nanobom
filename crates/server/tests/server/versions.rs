@@ -8,7 +8,7 @@ use axum::{
     http::{Request, StatusCode, header},
 };
 use nanobom_domain::{organizations, tokens};
-use sea_orm::{EntityTrait, PaginatorTrait};
+use sea_orm::{ColumnTrait, EntityTrait, PaginatorTrait, QueryFilter};
 use serde_json::{Value, json};
 
 const LODASH: &str = "pkg:npm/lodash@4.17.20";
@@ -329,4 +329,115 @@ async fn vex_documents_are_per_version() {
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn reads_compare_versions_and_leave_inactive_ones_out_of_search() {
+    let (server, token) = setup().await;
+    let owner = nanobom_entity::users::Entity::find()
+        .filter(nanobom_entity::users::Column::Username.eq("owner"))
+        .one(&server.database)
+        .await
+        .unwrap()
+        .unwrap();
+    let owner = nanobom_domain::access::Actor::from_user(&owner);
+    upload(&server, &token, "cyclonedx-npm.json", "?version=1.0").await;
+    server.runner.wait_until_idle().await;
+    upload(&server, &token, "cyclonedx-npm.json", "?version=2.0").await;
+    server.runner.wait_until_idle().await;
+    let names = |body: &Value| -> Vec<(String, bool)> {
+        body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| {
+                (
+                    item["project_version"].as_str().unwrap().to_owned(),
+                    item["project_version_active"].as_bool().unwrap(),
+                )
+            })
+            .collect()
+    };
+    let found = read(&server, "/api/components?q=lodash", &token).await;
+    assert_documented("/api/components", &found);
+    assert_eq!(
+        names(&found),
+        [("1.0".to_owned(), true), ("2.0".to_owned(), true)]
+    );
+
+    let project = nanobom_entity::projects::Entity::find()
+        .one(&server.database)
+        .await
+        .unwrap()
+        .unwrap();
+    nanobom_domain::versions::set_active(&server.database, &owner, project.id, "1.0", false)
+        .await
+        .unwrap();
+    let found = read(&server, "/api/components?q=lodash", &token).await;
+    assert_eq!(names(&found), [("2.0".to_owned(), true)]);
+    let found = read(&server, "/api/components?q=lodash&inactive=true", &token).await;
+    assert_documented("/api/components", &found);
+    assert_eq!(
+        names(&found),
+        [("1.0".to_owned(), false), ("2.0".to_owned(), true)]
+    );
+    let (status, body) = send(
+        &server,
+        "GET",
+        "/api/components?q=lodash&inactive=yes",
+        &token,
+        Body::empty(),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+    assert_eq!(body, json!({"error": "inactive must be true or false"}));
+
+    // Inactive versions stay listed, flagged, and readable.
+    let versions = read(
+        &server,
+        "/api/organizations/acme/projects/web/versions",
+        &token,
+    )
+    .await;
+    let flags: Vec<(&str, bool, bool)> = versions["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|version| {
+            (
+                version["name"].as_str().unwrap(),
+                version["latest"].as_bool().unwrap(),
+                version["active"].as_bool().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(flags, [("2.0", true, true), ("1.0", false, false)]);
+    let old = read(
+        &server,
+        "/api/organizations/acme/projects/web/findings?version=1.0",
+        &token,
+    )
+    .await;
+    assert_eq!(old["items"].as_array().unwrap().len(), 1);
+
+    // A finding lists every version of its project.
+    let current = read(
+        &server,
+        "/api/organizations/acme/projects/web/findings",
+        &token,
+    )
+    .await;
+    let id = current["items"][0]["id"].as_i64().unwrap();
+    let detail = read(&server, &format!("/api/findings/{id}"), &token).await;
+    assert_documented("/api/findings/{finding}", &detail);
+    assert_eq!(
+        detail["versions"],
+        json!([
+            {"name": "2.0", "latest": true, "active": true, "current": true, "status": "open", "finding_id": id},
+            {"name": "1.0", "latest": false, "active": false, "current": false, "status": "open",
+             "finding_id": old["items"][0]["id"]}
+        ])
+    );
+    // Its copy in 1.0, an inactive version, is left out of the affected components.
+    assert_eq!(detail["affected_components"], json!([]));
 }

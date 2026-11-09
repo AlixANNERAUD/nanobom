@@ -12,13 +12,15 @@ use crate::{
         ui::*,
     },
     functions::{
-        DeleteProject, IgnoreFinding, RestoreFinding, TriggerRun, load_finding, load_project,
-        search_components,
+        DeleteProject, DeleteVersion, IgnoreFinding, RestoreFinding, SetLatestVersion,
+        SetVersionActive, TriggerRun, load_finding, load_project, search_components,
     },
     model::{
         ComponentMatch, DependencyComponent, DependencyPaths, FindingData, FindingFilter,
         FindingRow, LicenseAction, LicenseViolations, ProjectData, Severity, Status,
+        VersionFinding, VersionOption,
     },
+    pages::organizations::severity_cells,
     t, tf, tp,
 };
 
@@ -251,6 +253,11 @@ fn VersionSelector(page: ProjectData) -> impl IntoView {
                     "project.version_latest",
                     version = version_label(&version.name)
                 )
+            } else if !version.active {
+                tf!(
+                    "project.version_inactive_option",
+                    version = version_label(&version.name)
+                )
             } else {
                 version_label(&version.name)
             };
@@ -271,6 +278,147 @@ fn VersionSelector(page: ProjectData) -> impl IntoView {
             </div>
             <Button variant=ButtonVariant::Secondary>{t!("project.version_show")}</Button>
         </form>
+    }
+}
+
+/// The hidden fields naming a version in its action forms.
+fn version_fields(organization: &str, project: &str, version: &str) -> impl IntoView + use<> {
+    view! {
+        <input type="hidden" name="organization" value=organization.to_owned() />
+        <input type="hidden" name="project" value=project.to_owned() />
+        <input type="hidden" name="version" value=version.to_owned() />
+    }
+}
+
+/// The actions on one version, for users who manage projects: plain forms, deletion behind a
+/// disclosure and a confirmation box. The latest version can be neither made inactive nor
+/// deleted, so it has no action.
+fn version_actions(
+    organization: &str,
+    project: &str,
+    version: &VersionOption,
+) -> impl IntoView + use<> {
+    let VersionOption {
+        name,
+        latest,
+        active,
+        ..
+    } = version.clone();
+    if latest {
+        return view! { <span class="text-muted-foreground">"-"</span> }.into_any();
+    }
+    let label = version_label(&name);
+    let make_latest = active.then(|| {
+        view! {
+            <form method="post" action={action::<SetLatestVersion>()}>
+                {version_fields(organization, project, &name)}
+                <Button variant=ButtonVariant::Outline size=ButtonSize::Small>{t!("project.make_latest")}</Button>
+            </form>
+        }
+    });
+    view! {
+        <div class="flex flex-wrap items-start gap-2">
+            {make_latest}
+            <form method="post" action={action::<SetVersionActive>()}>
+                {version_fields(organization, project, &name)}
+                <input type="hidden" name="active" value=(!active).to_string() />
+                <Button variant=ButtonVariant::Outline size=ButtonSize::Small>
+                    {if active { t!("project.make_inactive") } else { t!("project.make_active") }}
+                </Button>
+            </form>
+            <details>
+                <summary class=button_class(ButtonVariant::Outline, ButtonSize::Small)>
+                    {t!("project.delete_version")}
+                </summary>
+                <form method="post" action={action::<DeleteVersion>()} class="mt-2 grid max-w-xs gap-2">
+                    {version_fields(organization, project, &name)}
+                    <label class="flex items-start gap-2 text-sm">
+                        <input type="checkbox" name="confirm" value="1" required />
+                        <span>{tf!("project.delete_version_confirm", version = label)}</span>
+                    </label>
+                    <Button variant=ButtonVariant::Destructive size=ButtonSize::Small>
+                        {t!("project.delete_version_submit")}
+                    </Button>
+                </form>
+            </details>
+        </div>
+    }
+        .into_any()
+}
+
+/// The project's versions with their open findings and, for users who manage projects, what can
+/// be done with them.
+#[component]
+fn Versions(page: ProjectData) -> impl IntoView {
+    let manage = page.organization.role.can_manage();
+    let organization = page.organization.slug.clone();
+    let project = page.slug.clone();
+    let headers = Severity::DESCENDING
+        .into_iter()
+        .map(|severity| {
+            view! {
+                <th scope="col" class=format!("{TABLE_HEAD} text-right")>
+                    <SeverityBadge severity />
+                </th>
+            }
+        })
+        .collect_view();
+    let rows = page
+        .versions
+        .iter()
+        .map(|version| {
+            let link = format!(
+                "/organizations/{organization}/projects/{project}?{}",
+                version_query(&version.name)
+            );
+            let state = match (version.latest, version.active) {
+                (true, _) => view! { <Badge>{t!("project.version_is_latest")}</Badge> }.into_any(),
+                (false, true) => view! { <Badge variant=BadgeVariant::Outline>{t!("project.version_active")}</Badge> }.into_any(),
+                (false, false) => view! { <Badge variant=BadgeVariant::Muted>{t!("project.version_inactive")}</Badge> }.into_any(),
+            };
+            let actions = manage.then(|| {
+                view! { <td class=TABLE_CELL>{version_actions(&organization, &project, version)}</td> }
+            });
+            view! {
+                <tr class=TABLE_ROW>
+                    <th scope="row" class=format!("{TABLE_CELL} text-left font-medium")>
+                        <a class="underline-offset-4 hover:underline" href=link>
+                            {version_label(&version.name)}
+                        </a>
+                    </th>
+                    <td class=TABLE_CELL>{state}</td>
+                    <td class=TABLE_CELL>
+                        {version
+                            .last_upload_at
+                            .map_or_else(|| t!("common.never").to_owned(), format_time)}
+                    </td>
+                    {severity_cells(version.open)}
+                    {actions}
+                </tr>
+            }
+        })
+        .collect_view();
+    view! {
+        <Card>
+            <CardHeader>
+                <CardTitle>{t!("project.versions_title")}</CardTitle>
+                <CardDescription>{t!("project.versions_description")}</CardDescription>
+            </CardHeader>
+            <CardContent>
+                <Table caption=t!("project.versions_caption")>
+                    <thead>
+                        <tr class=TABLE_HEAD_ROW>
+                            <th scope="col" class=TABLE_HEAD>{t!("project.version")}</th>
+                            <th scope="col" class=TABLE_HEAD>{t!("project.version_state")}</th>
+                            <th scope="col" class=TABLE_HEAD>{t!("project.version_last_upload")}</th>
+                            {headers}
+                            {manage.then(|| view! { <th scope="col" class=TABLE_HEAD>{t!("common.actions")}</th> })}
+                        </tr>
+                    </thead>
+                    <tbody>{rows}</tbody>
+                </Table>
+            </CardContent>
+        </Card>
     }
 }
 
@@ -310,6 +458,14 @@ pub fn ProjectPage() -> impl IntoView {
                     let latest = page.version_upload.clone();
                     let versioned = page.versions.iter().any(|version| !version.name.is_empty());
                     let selector = versioned.then(|| view! { <VersionSelector page=page.clone() /> });
+                    let versions = versioned.then(|| view! { <Versions page=page.clone() /> });
+                    let inactive = (!page.version.active).then(|| {
+                        view! {
+                            <Alert variant=AlertVariant::Warning title=t!("project.inactive_title")>
+                                {t!("project.inactive_text")}
+                            </Alert>
+                        }
+                    });
                     // Links to the version shown, unless it is the latest, which they show anyway.
                     let version_suffix = if page.version.latest {
                         String::new()
@@ -474,6 +630,7 @@ pub fn ProjectPage() -> impl IntoView {
                         </Heading>
                         {stale}
                         {selector}
+                        {inactive}
                         {without_purl}
                         <Filters page=page.clone() filter />
                         {table}
@@ -486,6 +643,7 @@ pub fn ProjectPage() -> impl IntoView {
                                 <ul class="grid gap-2 text-sm">{uploads}</ul>
                             </CardContent>
                         </Card>
+                        {versions}
                         {delete}
                     }
                 }}
@@ -1050,6 +1208,16 @@ pub fn FindingPage() -> impl IntoView {
                                         </ul>
                                     </CardContent>
                                 </Card>
+                                {(page.versions.len() > 1)
+                                    .then(|| {
+                                        view! {
+                                            <FindingVersions
+                                                organization=page.organization_slug.clone()
+                                                project=page.project_slug.clone()
+                                                versions=page.versions.clone()
+                                            />
+                                        }
+                                    })}
                                 <Card>
                                     <CardHeader>
                                         <CardTitle>{t!("finding.also_affected")}</CardTitle>
@@ -1070,6 +1238,8 @@ pub fn FindingPage() -> impl IntoView {
                                                                 <li>
                                                                     <a class="underline-offset-4 hover:underline" href=format!("/findings/{}", component.finding_id)>
                                                                         {component.organization_slug.clone()} "/" {component.project_slug.clone()}
+                                                                        {(!component.version.is_empty())
+                                                                            .then(|| format!(" · {}", tf!("finding.project_version", version = component.version.clone())))}
                                                                     </a>
                                                                     <span class="text-muted-foreground block font-mono text-xs break-all">
                                                                         {component.purl.clone()}
@@ -1118,14 +1288,83 @@ pub fn FindingPage() -> impl IntoView {
     }
 }
 
+/// Every version of a finding's project with its status for the vulnerability, each linking to
+/// its finding, or to the version when it is not affected.
+#[component]
+fn FindingVersions(
+    organization: String,
+    project: String,
+    versions: Vec<VersionFinding>,
+) -> impl IntoView {
+    let items = versions
+        .into_iter()
+        .map(|version| {
+            let href = match version.finding_id {
+                Some(id) => format!("/findings/{id}"),
+                None => format!(
+                    "/organizations/{organization}/projects/{project}?{}",
+                    version_query(&version.name)
+                ),
+            };
+            let mut notes = Vec::new();
+            if version.latest {
+                notes.push(t!("finding.version_latest"));
+            }
+            if !version.active {
+                notes.push(t!("finding.version_inactive"));
+            }
+            if version.current {
+                notes.push(t!("finding.version_current"));
+            }
+            let status = match version.status {
+                Some(status) => view! { <StatusBadge status /> }.into_any(),
+                None => view! { <Badge variant=BadgeVariant::Muted>{t!("finding.not_affected")}</Badge> }.into_any(),
+            };
+            view! {
+                <li class="flex flex-wrap items-center gap-2">
+                    {if version.current {
+                        view! { <span class="font-medium" aria-current="page">{version_label(&version.name)}</span> }.into_any()
+                    } else {
+                        view! {
+                            <a class="underline-offset-4 hover:underline" href=href>
+                                {version_label(&version.name)}
+                            </a>
+                        }
+                            .into_any()
+                    }}
+                    {status}
+                    {(!notes.is_empty()).then(|| view! { <span class="text-muted-foreground text-xs">{notes.join(", ")}</span> })}
+                </li>
+            }
+        })
+        .collect_view();
+    view! {
+        <Card>
+            <CardHeader>
+                <CardTitle>{t!("finding.versions_title")}</CardTitle>
+                <CardDescription>{t!("finding.versions_description")}</CardDescription>
+            </CardHeader>
+            <CardContent>
+                <ul class="grid gap-2 text-sm">{items}</ul>
+            </CardContent>
+        </Card>
+    }
+}
+
 #[component]
 pub fn SearchPage() -> impl IntoView {
     let query = use_query_map();
     let text = move || query.read().get("query").unwrap_or_default();
     let license = move || query.read().get("license").unwrap_or_default();
+    let inactive = move || {
+        query
+            .read()
+            .get("inactive")
+            .is_some_and(|value| value == "1")
+    };
     let results = Resource::new(
-        move || (text(), license()),
-        |(text, license)| search_components(text, license),
+        move || (text(), license(), inactive()),
+        |(text, license, inactive)| search_components(text, license, inactive),
     );
     view! {
         <Page title=t!("search.title")>
@@ -1149,6 +1388,10 @@ pub fn SearchPage() -> impl IntoView {
                     value=license
                     placeholder="GPL"
                 />
+                <label class="flex items-center gap-2 text-sm">
+                    <input type="checkbox" name="inactive" value="1" checked=inactive />
+                    {t!("search.include_inactive")}
+                </label>
                 <Button>{t!("search.submit")}</Button>
             </form>
             <Loaded
@@ -1197,13 +1440,23 @@ pub fn SearchPage() -> impl IntoView {
                                                     <a
                                                         class="underline-offset-4 hover:underline"
                                                         href=format!(
-                                                            "/organizations/{}/projects/{}",
+                                                            "/organizations/{}/projects/{}?{}",
                                                             component.organization_slug,
                                                             component.project_slug,
+                                                            version_query(&component.project_version),
                                                         )
                                                     >
                                                         {component.organization_slug.clone()} "/" {component.project_slug.clone()}
                                                     </a>
+                                                    {(!component.project_version.is_empty())
+                                                        .then(|| {
+                                                            view! {
+                                                                <span class="text-muted-foreground block text-xs">
+                                                                    {tf!("finding.project_version", version = component.project_version.clone())}
+                                                                    {(!component.project_version_active).then(|| format!(" · {}", t!("search.inactive")))}
+                                                                </span>
+                                                            }
+                                                        })}
                                                 </td>
                                             </tr>
                                         }

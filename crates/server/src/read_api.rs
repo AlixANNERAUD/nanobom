@@ -48,7 +48,9 @@ use nanobom_domain::{
     dependencies::{ComponentRef, DependencyPaths},
     evaluation::{self, RunSummary},
     exploitation::Exploitation,
-    findings::{self, EventKind, Filter, Finding, FindingDetail, Justification, Status},
+    findings::{
+        self, EventKind, Filter, Finding, FindingDetail, Justification, Status, VersionStatus,
+    },
     inventory,
     licenses::{self, Action},
     notifications, organizations, projects, tokens, versions,
@@ -715,8 +717,21 @@ struct AffectedComponentBody {
     finding_id: i64,
     organization: String,
     project: String,
+    /// Empty for the unnamed version.
+    version: String,
     purl: String,
     status: Status,
+}
+
+#[derive(Serialize)]
+struct VersionFindingBody {
+    /// Empty for the unnamed version.
+    name: String,
+    latest: bool,
+    active: bool,
+    current: bool,
+    status: VersionStatus,
+    finding_id: Option<i64>,
 }
 
 #[derive(Serialize)]
@@ -737,6 +752,7 @@ struct FindingDetailBody {
     events: Vec<EventBody>,
     dependency_paths: Option<DependencyPathsBody>,
     affected_components: Vec<AffectedComponentBody>,
+    versions: Vec<VersionFindingBody>,
 }
 
 fn finding_detail_body(state: &AppState, detail: FindingDetail) -> FindingDetailBody {
@@ -781,8 +797,21 @@ fn finding_detail_body(state: &AppState, detail: FindingDetail) -> FindingDetail
                 finding_id: component.finding_id,
                 organization: component.organization_slug,
                 project: component.project_slug,
+                version: component.version,
                 purl: component.purl,
                 status: component.status,
+            })
+            .collect(),
+        versions: detail
+            .versions
+            .into_iter()
+            .map(|version| VersionFindingBody {
+                name: version.version,
+                latest: version.latest,
+                active: version.active,
+                current: version.current,
+                status: version.status,
+                finding_id: version.finding_id,
             })
             .collect(),
     }
@@ -839,6 +868,9 @@ async fn list_components(
 struct ComponentMatchBody {
     organization: String,
     project: String,
+    /// Empty for the unnamed version.
+    project_version: String,
+    project_version_active: bool,
     purl: String,
     name: String,
     version: Option<String>,
@@ -846,8 +878,9 @@ struct ComponentMatchBody {
     license: Option<String>,
 }
 
-/// `GET /api/components?q=…&license=…`: components by name (and version prefix), license or
-/// both across the projects the caller sees, at most [`inventory::MAXIMUM_SEARCH_RESULTS`].
+/// `GET /api/components?q=…&license=…&inactive=…`: components by name (and version prefix),
+/// license or both across the active versions of the projects the caller sees (inactive ones
+/// too with `inactive=true`), at most [`inventory::MAXIMUM_SEARCH_RESULTS`].
 async fn search_components(
     State(state): State<AppState>,
     parameters: Result<Query<HashMap<String, String>>, QueryRejection>,
@@ -862,14 +895,23 @@ async fn search_components(
             "q, the name to search for, or license, the license to search for, is required",
         ));
     }
+    let include_inactive = match parameters.get("inactive").map(|value| value.trim()) {
+        None | Some("false") => false,
+        Some("true") => true,
+        Some(_) => return Err(invalid("inactive must be true or false")),
+    };
     let reader = reader(&state, &headers, &session).await?;
-    let found = inventory::search_by_license(&state.database, reader, query, license).await?;
+    let found =
+        inventory::search_versions(&state.database, reader, query, license, include_inactive)
+            .await?;
     let items = found
         .matches
         .into_iter()
         .map(|component| ComponentMatchBody {
             organization: component.organization_slug,
             project: component.project_slug,
+            project_version: component.project_version,
+            project_version_active: component.project_version_active,
             purl: component.purl,
             name: component.name,
             version: component.version,

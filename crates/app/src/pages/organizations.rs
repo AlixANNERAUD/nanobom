@@ -182,7 +182,7 @@ pub fn OrganizationsPage() -> impl IntoView {
     }
 }
 
-fn severity_cells(open: SeverityCounts) -> impl IntoView {
+pub(crate) fn severity_cells(open: SeverityCounts) -> impl IntoView {
     Severity::DESCENDING
         .into_iter()
         .map(move |severity| {
