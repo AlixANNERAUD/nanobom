@@ -62,6 +62,16 @@
 //! migrates the database; the `testing` module (behind the `testing` feature) gives tests a
 //! fresh database and a fake vulnerability source.
 
+// Every embedded locale must translate every message (strict): a missing key fails the build
+// instead of showing English to French readers, so no fallback chain is ever consulted.
+// `Problem` and emails translate per call (`locale = ...`), the global locale stays unset.
+embedded_i18n::i18n!(
+    "locales",
+    default_locale = "en",
+    available_locales = ["en", "fr"],
+    strict = true
+);
+
 pub mod access;
 pub mod chat;
 pub mod database;

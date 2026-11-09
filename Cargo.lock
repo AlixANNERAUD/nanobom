@@ -1573,21 +1573,24 @@ checksum = "e079f19b08ca6239f47f8ba8509c11cf3ea30095831f7fed61441475edd8c449"
 
 [[package]]
 name = "embedded-i18n"
-version = "0.1.3"
-source = "git+https://github.com/AlixANNERAUD/embedded_i18n?rev=1d12572fbd1e56dc507b85d7ee66e80108b67b5b#1d12572fbd1e56dc507b85d7ee66e80108b67b5b"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30c90c5b8a460af9d8a68cfff15b3484168b8388a554cee70149a6b8c0129a2a"
 dependencies = [
  "embedded-i18n-macros",
 ]
 
 [[package]]
 name = "embedded-i18n-macros"
-version = "0.1.3"
-source = "git+https://github.com/AlixANNERAUD/embedded_i18n?rev=1d12572fbd1e56dc507b85d7ee66e80108b67b5b#1d12572fbd1e56dc507b85d7ee66e80108b67b5b"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ae212aec7f06c29974cfbe11a6785bd684fac19f08519dfca7ad38c9eb8c996d"
 dependencies = [
  "proc-macro2",
  "quote",
  "serde_json",
- "syn 2.0.119",
+ "syn 3.0.9",
+ "toml",
 ]
 
 [[package]]

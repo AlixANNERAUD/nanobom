@@ -569,13 +569,13 @@ pub async fn load_administration() -> Result<AdministrationData, ServerFnError> 
 #[server(endpoint = "set_language")]
 pub async fn set_language(locale: String) -> Result<(), ServerFnError> {
     use axum::http::{HeaderValue, header};
-    if let Some(index) = embedded_i18n::match_locale(&locale)
+    if let Some(locale) = crate::i18n::find(&locale)
         && let Some(response) = use_context::<leptos_axum::ResponseOptions>()
     {
         let cookie = format!(
             "{}={}; Path=/; Max-Age=31536000; SameSite=Lax",
             crate::i18n::COOKIE,
-            crate::i18n::tag(index)
+            crate::i18n::tag(locale)
         );
         if let Ok(value) = HeaderValue::from_str(&cookie) {
             response.append_header(header::SET_COOKIE, value);

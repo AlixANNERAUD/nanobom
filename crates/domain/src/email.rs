@@ -38,7 +38,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use embedded_i18n::{translate, translate_plural};
+use embedded_i18n::{Locale, t};
 use lettre::{
     Address, AsyncSmtpTransport, AsyncTransport, Tokio1Executor,
     address::Envelope,
@@ -90,10 +90,7 @@ const SUBJECT_LIMIT: usize = 200;
 /// Direct dependencies named in an "introduced via" line; the others are counted.
 const VIA_NAMES: usize = 5;
 
-const FRENCH: usize = match embedded_i18n::find_locale("fr") {
-    Some(index) => index,
-    None => ENGLISH,
-};
+const FRENCH: Locale = Locale::new("fr");
 
 /// The language of an organization's emails.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -120,8 +117,8 @@ impl Language {
             .find(|language| language.as_str() == value)
     }
 
-    /// The index of this language among the embedded locales.
-    fn locale(self) -> usize {
+    /// The locale this language translates into.
+    fn locale(self) -> Locale {
         match self {
             Language::English => ENGLISH,
             Language::French => FRENCH,
@@ -378,31 +375,27 @@ impl Line {
     }
 }
 
-fn plural(template: &str, count: usize) -> String {
-    template.replace("{count}", &count.to_string())
-}
-
-fn severity(severity: Severity, locale: usize) -> &'static str {
+fn severity(severity: Severity, locale: Locale) -> &'static str {
     match severity {
-        Severity::Critical => translate!(locale = locale, "email.severity.critical"),
-        Severity::High => translate!(locale = locale, "email.severity.high"),
-        Severity::Medium => translate!(locale = locale, "email.severity.medium"),
-        Severity::Low => translate!(locale = locale, "email.severity.low"),
-        Severity::Unknown => translate!(locale = locale, "email.severity.unknown"),
+        Severity::Critical => t!("email.severity.critical", locale = locale),
+        Severity::High => t!("email.severity.high", locale = locale),
+        Severity::Medium => t!("email.severity.medium", locale = locale),
+        Severity::Low => t!("email.severity.low", locale = locale),
+        Severity::Unknown => t!("email.severity.unknown", locale = locale),
     }
 }
 
 /// The words that follow a finding's identifier.
-fn tags(finding: &PayloadFinding, locale: usize) -> String {
+fn tags(finding: &PayloadFinding, locale: Locale) -> String {
     let mut tags = vec![severity(finding.severity, locale)];
     if finding.reopened {
-        tags.push(translate!(locale = locale, "email.tags.reopened"));
+        tags.push(t!("email.tags.reopened", locale = locale));
     }
     if finding.known_exploited {
         tags.push(if finding.reason == "exploited" {
-            translate!(locale = locale, "email.tags.newly_known_exploited")
+            t!("email.tags.newly_known_exploited", locale = locale)
         } else {
-            translate!(locale = locale, "email.tags.known_exploited")
+            t!("email.tags.known_exploited", locale = locale)
         });
     }
     tags.join(", ")
@@ -411,7 +404,7 @@ fn tags(finding: &PayloadFinding, locale: usize) -> String {
 /// The parts of an email that do not depend on the event.
 struct Frame<'a> {
     organization: &'a PayloadOrganization,
-    locale: usize,
+    locale: Locale,
     language: Language,
 }
 
@@ -433,12 +426,12 @@ impl Frame<'_> {
         let locale = self.locale;
         let organization = self.organization_name();
         let open = Line::new(
-            translate!(locale = locale, "email.open_organization"),
+            t!("email.open_organization", locale = locale),
             &[("organization", &organization)],
         );
         let settings = link_in(&self.organization.url, "settings");
         let footer = Line::new(
-            translate!(locale = locale, "email.footer"),
+            t!("email.footer", locale = locale),
             &[("organization", &organization)],
         );
 
@@ -541,38 +534,35 @@ pub fn new_findings(payload: &NewFindingsPayload, language: Language) -> Message
         ),
         _ => organization.clone(),
     };
-    let subject = fill(
-        &plural(
-            translate_plural!(locale = locale, "email.new_findings_subject", payload.count),
-            payload.count,
-        ),
-        &[("place", &place)],
-    );
-    let headline = fill(
-        &plural(
-            translate_plural!(
-                locale = locale,
-                "email.new_findings_headline",
-                payload.count
-            ),
-            payload.count,
-        ),
-        &[("organization", &organization)],
-    );
+    let subject = t!(
+        "email.new_findings_subject",
+        count = payload.count,
+        place = place,
+        locale = locale
+    )
+    .to_string();
+    let headline = t!(
+        "email.new_findings_headline",
+        count = payload.count,
+        organization = organization,
+        locale = locale
+    )
+    .to_string();
     let mut summary = fill(
-        translate!(locale = locale, "email.highest_severity"),
+        t!("email.highest_severity", locale = locale),
         &[("severity", severity(payload.highest_severity, locale))],
     );
     if payload.known_exploited_count > 0 {
         summary.push_str(", ");
-        summary.push_str(&plural(
-            translate_plural!(
-                locale = locale,
+        let _ = write!(
+            summary,
+            "{}",
+            t!(
                 "email.known_exploited_count",
-                payload.known_exploited_count
-            ),
-            payload.known_exploited_count,
-        ));
+                count = payload.known_exploited_count,
+                locale = locale
+            )
+        );
     }
     let items: Vec<(Vec<Line>, String)> = payload
         .findings
@@ -587,26 +577,22 @@ pub fn new_findings(payload: &NewFindingsPayload, language: Language) -> Message
                 ],
             )];
             lines.push(Line::new(
-                translate!(locale = locale, "email.component_in_project"),
+                t!("email.component_in_project", locale = locale),
                 &[
                     ("component", &value(&finding.component, COMPONENT_LIMIT)),
                     ("project", &value(&finding.project, NAME_LIMIT)),
                 ],
             ));
-            if let Some((names, more)) = chat::versions(
-                finding,
-                translate!(locale = locale, "email.unnamed_version"),
-            ) {
+            if let Some((names, more)) =
+                chat::versions(finding, t!("email.unnamed_version", locale = locale))
+            {
                 let mut names: Vec<String> =
                     names.iter().map(|name| value(name, NAME_LIMIT)).collect();
                 if more > 0 {
-                    names.push(plural(
-                        translate_plural!(locale = locale, "email.more_names", more),
-                        more,
-                    ));
+                    names.push(t!("email.more_names", count = more, locale = locale).to_string());
                 }
                 lines.push(Line::new(
-                    translate!(locale = locale, "email.versions"),
+                    t!("email.versions", locale = locale),
                     &[("names", &names.join(", "))],
                 ));
             }
@@ -625,13 +611,10 @@ pub fn new_findings(payload: &NewFindingsPayload, language: Language) -> Message
                     .collect();
                 let more = finding.introduced_via.len().saturating_sub(VIA_NAMES);
                 if more > 0 {
-                    names.push(plural(
-                        translate_plural!(locale = locale, "email.more_names", more),
-                        more,
-                    ));
+                    names.push(t!("email.more_names", count = more, locale = locale).to_string());
                 }
                 lines.push(Line::new(
-                    translate!(locale = locale, "email.introduced_via"),
+                    t!("email.introduced_via", locale = locale),
                     &[("names", &names.join(", "))],
                 ));
             }
@@ -639,12 +622,8 @@ pub fn new_findings(payload: &NewFindingsPayload, language: Language) -> Message
         })
         .collect();
     let hidden = payload.findings.len().saturating_sub(MAX_ITEMS);
-    let hidden = (hidden > 0).then(|| {
-        plural(
-            translate_plural!(locale = locale, "email.hidden_findings", hidden),
-            hidden,
-        )
-    });
+    let hidden = (hidden > 0)
+        .then(|| t!("email.hidden_findings", count = hidden, locale = locale).to_string());
     frame.message(
         subject,
         &headline,
@@ -664,30 +643,30 @@ pub fn stale_projects(payload: &StaleProjectsPayload, language: Language) -> Mes
     };
     let organization = frame.organization_name();
     let count = payload.projects.len();
-    let subject = fill(
-        &plural(
-            translate_plural!(locale = locale, "email.stale_subject", count),
-            count,
-        ),
-        &[("organization", &organization)],
-    );
-    let headline = fill(
-        &plural(
-            translate_plural!(locale = locale, "email.stale_headline", count),
-            count,
-        ),
-        &[("organization", &organization)],
-    );
+    let subject = t!(
+        "email.stale_subject",
+        count = count,
+        organization = organization,
+        locale = locale
+    )
+    .to_string();
+    let headline = t!(
+        "email.stale_headline",
+        count = count,
+        organization = organization,
+        locale = locale
+    )
+    .to_string();
     let items: Vec<(Vec<Line>, String)> = payload
         .projects
         .iter()
         .take(MAX_ITEMS)
         .map(|project| {
             let upload = project.last_upload_at.map_or_else(
-                || translate!(locale = locale, "email.never_uploaded").to_owned(),
+                || t!("email.never_uploaded", locale = locale).to_owned(),
                 |time| {
                     fill(
-                        translate!(locale = locale, "email.last_upload"),
+                        t!("email.last_upload", locale = locale),
                         &[("time", &utc(time))],
                     )
                 },
@@ -705,12 +684,8 @@ pub fn stale_projects(payload: &StaleProjectsPayload, language: Language) -> Mes
         })
         .collect();
     let hidden = count.saturating_sub(MAX_ITEMS);
-    let hidden = (hidden > 0).then(|| {
-        plural(
-            translate_plural!(locale = locale, "email.hidden_projects", hidden),
-            hidden,
-        )
-    });
+    let hidden = (hidden > 0)
+        .then(|| t!("email.hidden_projects", count = hidden, locale = locale).to_string());
     frame.message(subject, &headline, None, &items, hidden)
 }
 
@@ -730,15 +705,15 @@ pub fn test_message(
     };
     let name = frame.organization_name();
     let headline = fill(
-        translate!(locale = locale, "email.test_headline"),
+        t!("email.test_headline", locale = locale),
         &[("organization", &name)],
     );
     let body = Line::new(
-        translate!(locale = locale, "email.test_body"),
+        t!("email.test_body", locale = locale),
         &[("recipients", &recipients.join(", "))],
     );
     let mut message = frame.message(
-        translate!(locale = locale, "email.test_subject").to_owned(),
+        t!("email.test_subject", locale = locale).to_owned(),
         &headline,
         Some(body),
         &[],

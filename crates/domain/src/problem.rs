@@ -3,21 +3,16 @@
 //! English through `Display`.
 //!
 //! Messages live in `crates/domain/locales/*.json` and are embedded at compile time; a key
-//! missing from a locale fails the build (`EMBEDDED_I18N_STRICT` in `.cargo/config.toml`). They
-//! are written as lower-case clauses (`the project name must be 1 to 200 characters`), which the
-//! interface turns into sentences.
+//! missing from a locale fails the build (`strict` in the crate's `i18n!`). They are written as
+//! lower-case clauses (`the project name must be 1 to 200 characters`), which the interface turns
+//! into sentences.
 
 use std::fmt;
 
-use embedded_i18n::{translate, translate_write};
+use embedded_i18n::{Locale, t};
 
-embedded_i18n::track_locales!();
-
-/// Index of English among the embedded locales.
-pub const ENGLISH: usize = match embedded_i18n::find_locale("en") {
-    Some(index) => index,
-    None => embedded_i18n::DEFAULT_LOCALE_INDEX,
-};
+/// English, the language of the API and the logs.
+pub const ENGLISH: Locale = Locale::new("en");
 
 /// A value the user entered, named in [`Problem`] messages that concern it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,17 +30,17 @@ pub enum Field {
 
 impl Field {
     /// The field's name, as it appears inside a sentence.
-    pub fn name(self, locale: usize) -> &'static str {
+    pub fn name(self, locale: Locale) -> &'static str {
         match self {
-            Field::Username => translate!(locale = locale, "fields.username"),
-            Field::DisplayName => translate!(locale = locale, "fields.display_name"),
-            Field::OrganizationSlug => translate!(locale = locale, "fields.organization_slug"),
-            Field::OrganizationName => translate!(locale = locale, "fields.organization_name"),
-            Field::ProjectSlug => translate!(locale = locale, "fields.project_slug"),
-            Field::ProjectName => translate!(locale = locale, "fields.project_name"),
-            Field::TokenName => translate!(locale = locale, "fields.token_name"),
-            Field::SourceCommit => translate!(locale = locale, "fields.source_commit"),
-            Field::ImageTag => translate!(locale = locale, "fields.image_tag"),
+            Field::Username => t!("fields.username", locale = locale),
+            Field::DisplayName => t!("fields.display_name", locale = locale),
+            Field::OrganizationSlug => t!("fields.organization_slug", locale = locale),
+            Field::OrganizationName => t!("fields.organization_name", locale = locale),
+            Field::ProjectSlug => t!("fields.project_slug", locale = locale),
+            Field::ProjectName => t!("fields.project_name", locale = locale),
+            Field::TokenName => t!("fields.token_name", locale = locale),
+            Field::SourceCommit => t!("fields.source_commit", locale = locale),
+            Field::ImageTag => t!("fields.image_tag", locale = locale),
         }
     }
 }
@@ -115,300 +110,346 @@ pub enum Problem {
 }
 
 impl Problem {
-    /// Writes the problem in the locale with this index (see `embedded_i18n::LOCALES`; [`ENGLISH`]
-    /// is one of them).
-    pub fn write(&self, output: &mut impl fmt::Write, locale: usize) -> fmt::Result {
+    /// Writes the problem in a locale: the embedded locale matching it (same tag, else same
+    /// language), English otherwise.
+    pub fn write(&self, output: &mut impl fmt::Write, locale: Locale) -> fmt::Result {
         use Problem as P;
         match self {
-            P::InvalidSlug(field) => translate_write!(
+            P::InvalidSlug(field) => write!(
                 output,
-                locale = locale,
-                "problems.invalid_slug",
-                field = field.name(locale),
-                maximum = crate::names::MAXIMUM_LENGTH
+                "{}",
+                t!(
+                    "problems.invalid_slug",
+                    field = field.name(locale),
+                    maximum = crate::names::MAXIMUM_LENGTH,
+                    locale = locale
+                )
             ),
-            P::InvalidName(field) => translate_write!(
+            P::InvalidName(field) => write!(
                 output,
-                locale = locale,
-                "problems.invalid_name",
-                field = field.name(locale)
+                "{}",
+                t!(
+                    "problems.invalid_name",
+                    field = field.name(locale),
+                    locale = locale
+                )
             ),
-            P::InvalidLabel(field) => translate_write!(
+            P::InvalidLabel(field) => write!(
                 output,
-                locale = locale,
-                "problems.invalid_label",
-                field = field.name(locale)
+                "{}",
+                t!(
+                    "problems.invalid_label",
+                    field = field.name(locale),
+                    locale = locale
+                )
             ),
-            P::InvalidEmail => {
-                output.write_str(translate!(locale = locale, "problems.invalid_email"))
-            }
-            P::PasswordTooShort { minimum } => translate_write!(
+            P::InvalidEmail => output.write_str(t!("problems.invalid_email", locale = locale)),
+            P::PasswordTooShort { minimum } => write!(
                 output,
-                locale = locale,
-                "problems.password_too_short",
-                minimum = minimum
+                "{}",
+                t!(
+                    "problems.password_too_short",
+                    minimum = minimum,
+                    locale = locale
+                )
             ),
-            P::PasswordTooLong { maximum } => translate_write!(
+            P::PasswordTooLong { maximum } => write!(
                 output,
-                locale = locale,
-                "problems.password_too_long",
-                maximum = maximum
+                "{}",
+                t!(
+                    "problems.password_too_long",
+                    maximum = maximum,
+                    locale = locale
+                )
             ),
-            P::SbomNotJson { detail } => translate_write!(
+            P::SbomNotJson { detail } => write!(
                 output,
-                locale = locale,
-                "problems.sbom_not_json",
-                detail = detail
+                "{}",
+                t!("problems.sbom_not_json", detail = detail, locale = locale)
             ),
-            P::SbomXml => output.write_str(translate!(locale = locale, "problems.sbom_xml")),
-            P::SpdxTagValue => {
-                output.write_str(translate!(locale = locale, "problems.spdx_tag_value"))
-            }
-            P::SpdxRdf => output.write_str(translate!(locale = locale, "problems.spdx_rdf")),
+            P::SbomXml => output.write_str(t!("problems.sbom_xml", locale = locale)),
+            P::SpdxTagValue => output.write_str(t!("problems.spdx_tag_value", locale = locale)),
+            P::SpdxRdf => output.write_str(t!("problems.spdx_rdf", locale = locale)),
             P::UnknownSbomFormat => {
-                output.write_str(translate!(locale = locale, "problems.unknown_sbom_format"))
+                output.write_str(t!("problems.unknown_sbom_format", locale = locale))
             }
-            P::UnsupportedSpecificationVersion { version } => translate_write!(
+            P::UnsupportedSpecificationVersion { version } => write!(
                 output,
-                locale = locale,
-                "problems.unsupported_specification_version",
-                version = version,
-                supported = crate::inventory::SUPPORTED_SPECIFICATION_VERSIONS.join(", ")
+                "{}",
+                t!(
+                    "problems.unsupported_specification_version",
+                    version = version,
+                    supported = crate::inventory::SUPPORTED_SPECIFICATION_VERSIONS.join(", "),
+                    locale = locale
+                )
             ),
-            P::UnsupportedSpdxVersion { version } => translate_write!(
+            P::UnsupportedSpdxVersion { version } => write!(
                 output,
-                locale = locale,
-                "problems.unsupported_spdx_version",
-                version = version,
-                supported = crate::inventory::SUPPORTED_SPDX_VERSIONS.join(", ")
+                "{}",
+                t!(
+                    "problems.unsupported_spdx_version",
+                    version = version,
+                    supported = crate::inventory::SUPPORTED_SPDX_VERSIONS.join(", "),
+                    locale = locale
+                )
             ),
-            P::InvalidCycloneDx { detail } => translate_write!(
+            P::InvalidCycloneDx { detail } => write!(
                 output,
-                locale = locale,
-                "problems.invalid_cyclonedx",
-                detail = detail
+                "{}",
+                t!(
+                    "problems.invalid_cyclonedx",
+                    detail = detail,
+                    locale = locale
+                )
             ),
-            P::InvalidSpdx { detail } => translate_write!(
+            P::InvalidSpdx { detail } => write!(
                 output,
-                locale = locale,
-                "problems.invalid_spdx",
-                detail = detail
+                "{}",
+                t!("problems.invalid_spdx", detail = detail, locale = locale)
             ),
-            P::VexNotJson { detail } => translate_write!(
+            P::VexNotJson { detail } => write!(
                 output,
-                locale = locale,
-                "problems.vex_not_json",
-                detail = detail
+                "{}",
+                t!("problems.vex_not_json", detail = detail, locale = locale)
             ),
             P::VexNotCycloneDx => {
-                output.write_str(translate!(locale = locale, "problems.vex_not_cyclonedx"))
+                output.write_str(t!("problems.vex_not_cyclonedx", locale = locale))
             }
-            P::UnsupportedVexVersion { version } => translate_write!(
+            P::UnsupportedVexVersion { version } => write!(
                 output,
-                locale = locale,
-                "problems.unsupported_vex_version",
-                version = version,
-                supported = crate::inventory::SUPPORTED_VEX_VERSIONS.join(", ")
+                "{}",
+                t!(
+                    "problems.unsupported_vex_version",
+                    version = version,
+                    supported = crate::inventory::SUPPORTED_VEX_VERSIONS.join(", "),
+                    locale = locale
+                )
             ),
-            P::InvalidVex { detail } => translate_write!(
+            P::InvalidVex { detail } => write!(
                 output,
-                locale = locale,
-                "problems.invalid_vex",
-                detail = detail
+                "{}",
+                t!("problems.invalid_vex", detail = detail, locale = locale)
             ),
-            P::UsernameTaken { username } => translate_write!(
+            P::UsernameTaken { username } => write!(
                 output,
-                locale = locale,
-                "problems.username_taken",
-                username = username
+                "{}",
+                t!(
+                    "problems.username_taken",
+                    username = username,
+                    locale = locale
+                )
             ),
-            P::EmailTaken { email } => translate_write!(
+            P::EmailTaken { email } => write!(
                 output,
-                locale = locale,
-                "problems.email_taken",
-                email = email
+                "{}",
+                t!("problems.email_taken", email = email, locale = locale)
             ),
             P::OwnAccountStatus => {
-                output.write_str(translate!(locale = locale, "problems.own_account_status"))
+                output.write_str(t!("problems.own_account_status", locale = locale))
             }
-            P::OrganizationExists { slug } => translate_write!(
+            P::OrganizationExists { slug } => write!(
                 output,
-                locale = locale,
-                "problems.organization_exists",
-                slug = slug
+                "{}",
+                t!("problems.organization_exists", slug = slug, locale = locale)
             ),
-            P::LastOwner => output.write_str(translate!(locale = locale, "problems.last_owner")),
-            P::UnknownUser { login } => translate_write!(
+            P::LastOwner => output.write_str(t!("problems.last_owner", locale = locale)),
+            P::UnknownUser { login } => write!(
                 output,
-                locale = locale,
-                "problems.unknown_user",
-                login = login
+                "{}",
+                t!("problems.unknown_user", login = login, locale = locale)
             ),
-            P::AlreadyMember { username } => translate_write!(
+            P::AlreadyMember { username } => write!(
                 output,
-                locale = locale,
-                "problems.already_member",
-                username = username
+                "{}",
+                t!(
+                    "problems.already_member",
+                    username = username,
+                    locale = locale
+                )
             ),
-            P::ProjectExists { slug } => translate_write!(
+            P::ProjectExists { slug } => write!(
                 output,
-                locale = locale,
-                "problems.project_exists",
-                slug = slug
+                "{}",
+                t!("problems.project_exists", slug = slug, locale = locale)
             ),
-            P::UnknownProject { slug } => translate_write!(
+            P::UnknownProject { slug } => write!(
                 output,
-                locale = locale,
-                "problems.unknown_project",
-                slug = slug
+                "{}",
+                t!("problems.unknown_project", slug = slug, locale = locale)
             ),
-            P::UnknownOrganization { slug } => translate_write!(
+            P::UnknownOrganization { slug } => write!(
                 output,
-                locale = locale,
-                "problems.unknown_organization",
-                slug = slug
+                "{}",
+                t!(
+                    "problems.unknown_organization",
+                    slug = slug,
+                    locale = locale
+                )
             ),
-            P::UnknownRole { role } => translate_write!(
+            P::UnknownRole { role } => write!(
                 output,
-                locale = locale,
-                "problems.unknown_role",
-                role = role
+                "{}",
+                t!("problems.unknown_role", role = role, locale = locale)
             ),
             P::UnknownSeverity => {
-                output.write_str(translate!(locale = locale, "problems.unknown_severity"))
+                output.write_str(t!("problems.unknown_severity", locale = locale))
             }
-            P::UnknownJustification { justification } => translate_write!(
+            P::UnknownJustification { justification } => write!(
                 output,
-                locale = locale,
-                "problems.unknown_justification",
-                justification = justification
+                "{}",
+                t!(
+                    "problems.unknown_justification",
+                    justification = justification,
+                    locale = locale
+                )
             ),
-            P::UnknownTokenScope { scope } => translate_write!(
+            P::UnknownTokenScope { scope } => write!(
                 output,
-                locale = locale,
-                "problems.unknown_token_scope",
-                scope = scope
+                "{}",
+                t!(
+                    "problems.unknown_token_scope",
+                    scope = scope,
+                    locale = locale
+                )
             ),
-            P::ReasonRequired => {
-                output.write_str(translate!(locale = locale, "problems.reason_required"))
-            }
-            P::ReasonTooLong { maximum } => translate_write!(
+            P::ReasonRequired => output.write_str(t!("problems.reason_required", locale = locale)),
+            P::ReasonTooLong { maximum } => write!(
                 output,
-                locale = locale,
-                "problems.reason_too_long",
-                maximum = maximum
+                "{}",
+                t!(
+                    "problems.reason_too_long",
+                    maximum = maximum,
+                    locale = locale
+                )
             ),
             P::ExpiryNotInFuture => {
-                output.write_str(translate!(locale = locale, "problems.expiry_not_in_future"))
+                output.write_str(t!("problems.expiry_not_in_future", locale = locale))
             }
-            P::OnlyOpenCanBeIgnored => output.write_str(translate!(
-                locale = locale,
-                "problems.only_open_can_be_ignored"
-            )),
-            P::OnlyIgnoredCanBeRestored => output.write_str(translate!(
-                locale = locale,
-                "problems.only_ignored_can_be_restored"
-            )),
+            P::OnlyOpenCanBeIgnored => {
+                output.write_str(t!("problems.only_open_can_be_ignored", locale = locale))
+            }
+            P::OnlyIgnoredCanBeRestored => {
+                output.write_str(t!("problems.only_ignored_can_be_restored", locale = locale))
+            }
             P::InvalidWebhookUrl => {
-                output.write_str(translate!(locale = locale, "problems.invalid_webhook_url"))
+                output.write_str(t!("problems.invalid_webhook_url", locale = locale))
             }
-            P::WebhookScheme => {
-                output.write_str(translate!(locale = locale, "problems.webhook_scheme"))
+            P::WebhookScheme => output.write_str(t!("problems.webhook_scheme", locale = locale)),
+            P::UnknownWebhookFormat => {
+                output.write_str(t!("problems.unknown_webhook_format", locale = locale))
             }
-            P::UnknownWebhookFormat => output.write_str(translate!(
-                locale = locale,
-                "problems.unknown_webhook_format"
-            )),
-            P::InvalidRecipient { address } => translate_write!(
+            P::InvalidRecipient { address } => write!(
                 output,
-                locale = locale,
-                "problems.invalid_recipient",
-                address = address
+                "{}",
+                t!(
+                    "problems.invalid_recipient",
+                    address = address,
+                    locale = locale
+                )
             ),
-            P::NoRecipients => {
-                output.write_str(translate!(locale = locale, "problems.no_recipients"))
-            }
-            P::TooManyRecipients { maximum } => translate_write!(
+            P::NoRecipients => output.write_str(t!("problems.no_recipients", locale = locale)),
+            P::TooManyRecipients { maximum } => write!(
                 output,
-                locale = locale,
-                "problems.too_many_recipients",
-                maximum = maximum
+                "{}",
+                t!(
+                    "problems.too_many_recipients",
+                    maximum = maximum,
+                    locale = locale
+                )
             ),
-            P::UnknownEmailLanguage => output.write_str(translate!(
-                locale = locale,
-                "problems.unknown_email_language"
-            )),
+            P::UnknownEmailLanguage => {
+                output.write_str(t!("problems.unknown_email_language", locale = locale))
+            }
             P::EmailNotConfigured => {
-                output.write_str(translate!(locale = locale, "problems.email_not_configured"))
+                output.write_str(t!("problems.email_not_configured", locale = locale))
             }
-            P::TestEmailTooSoon { seconds } => translate_write!(
+            P::TestEmailTooSoon { seconds } => write!(
                 output,
-                locale = locale,
-                "problems.test_email_too_soon",
-                seconds = seconds
+                "{}",
+                t!(
+                    "problems.test_email_too_soon",
+                    seconds = seconds,
+                    locale = locale
+                )
             ),
-            P::TestEmailFailed { detail } => translate_write!(
+            P::TestEmailFailed { detail } => write!(
                 output,
-                locale = locale,
-                "problems.test_email_failed",
-                detail = detail
+                "{}",
+                t!(
+                    "problems.test_email_failed",
+                    detail = detail,
+                    locale = locale
+                )
             ),
-            P::UnknownLicenseId { license } => translate_write!(
+            P::UnknownLicenseId { license } => write!(
                 output,
-                locale = locale,
-                "problems.unknown_license_id",
-                license = license
+                "{}",
+                t!(
+                    "problems.unknown_license_id",
+                    license = license,
+                    locale = locale
+                )
             ),
-            P::UnknownLicenseAction { action } => translate_write!(
+            P::UnknownLicenseAction { action } => write!(
                 output,
-                locale = locale,
-                "problems.unknown_license_action",
-                action = action
+                "{}",
+                t!(
+                    "problems.unknown_license_action",
+                    action = action,
+                    locale = locale
+                )
             ),
-            P::ConflictingLicenseRule { license } => translate_write!(
+            P::ConflictingLicenseRule { license } => write!(
                 output,
-                locale = locale,
-                "problems.conflicting_license_rule",
-                license = license
+                "{}",
+                t!(
+                    "problems.conflicting_license_rule",
+                    license = license,
+                    locale = locale
+                )
             ),
-            P::TooManyLicenseRules { maximum } => translate_write!(
+            P::TooManyLicenseRules { maximum } => write!(
                 output,
-                locale = locale,
-                "problems.too_many_license_rules",
-                maximum = maximum
+                "{}",
+                t!(
+                    "problems.too_many_license_rules",
+                    maximum = maximum,
+                    locale = locale
+                )
             ),
-            P::InvalidVersionName { maximum } => translate_write!(
+            P::InvalidVersionName { maximum } => write!(
                 output,
-                locale = locale,
-                "problems.invalid_version_name",
-                maximum = maximum
+                "{}",
+                t!(
+                    "problems.invalid_version_name",
+                    maximum = maximum,
+                    locale = locale
+                )
             ),
-            P::TooManyVersions { maximum } => translate_write!(
+            P::TooManyVersions { maximum } => write!(
                 output,
-                locale = locale,
-                "problems.too_many_versions",
-                maximum = maximum
+                "{}",
+                t!(
+                    "problems.too_many_versions",
+                    maximum = maximum,
+                    locale = locale
+                )
             ),
-            P::LatestVersionInactive => output.write_str(translate!(
-                locale = locale,
-                "problems.latest_version_inactive"
-            )),
-            P::InactiveVersionLatest => output.write_str(translate!(
-                locale = locale,
-                "problems.inactive_version_latest"
-            )),
-            P::LatestVersionDeleted => output.write_str(translate!(
-                locale = locale,
-                "problems.latest_version_deleted"
-            )),
-            P::LastVersion => {
-                output.write_str(translate!(locale = locale, "problems.last_version"))
+            P::LatestVersionInactive => {
+                output.write_str(t!("problems.latest_version_inactive", locale = locale))
             }
+            P::InactiveVersionLatest => {
+                output.write_str(t!("problems.inactive_version_latest", locale = locale))
+            }
+            P::LatestVersionDeleted => {
+                output.write_str(t!("problems.latest_version_deleted", locale = locale))
+            }
+            P::LastVersion => output.write_str(t!("problems.last_version", locale = locale)),
         }
     }
 
-    /// The problem in the locale with this index.
-    pub fn message(&self, locale: usize) -> String {
+    /// The problem in a locale, as [`Problem::write`] writes it.
+    pub fn message(&self, locale: Locale) -> String {
         let mut message = String::new();
         // Writing into a `String` cannot fail.
         let _ = self.write(&mut message, locale);
