@@ -36,6 +36,8 @@ tower_governor = { version = "0.8.0", default-features = false, features = ["axu
 sea-orm = { version = "2.0.4", default-features = false, features = ["sqlx-sqlite", "sqlx-postgres", "runtime-tokio-rustls", "macros", "with-chrono", "with-json"] }
 sea-orm-migration = { version = "2.0.4", default-features = false, features = ["sqlx-sqlite", "sqlx-postgres", "runtime-tokio-rustls"] }
 cyclonedx-bom = "0.9.0"
+# The version cyclonedx-bom already depends on: license expressions are parsed with the same crate.
+spdx = "0.13.6"
 packageurl = "0.7.1"
 cvss = "3.0.0"
 reqwest = { version = "0.12.28", default-features = false, features = ["json", "rustls-tls"] }

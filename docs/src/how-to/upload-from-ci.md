@@ -72,7 +72,7 @@ The project defaults to the repository's name. Useful inputs:
 | `sbom` | | An existing CycloneDX or SPDX JSON file; without it, Syft generates one |
 | `scan-path` | `.` | Directory Syft scans |
 | `scan-image` | | Container image Syft scans instead |
-| `fail-on` | | `critical`, `high`, `medium`, `low` or `exploited` |
+| `fail-on` | | `critical`, `high`, `medium`, `low`, `exploited` or `license`, or several separated by commas (`high,license`); see [Fail CI](fail-ci.md) |
 | `wait` | `true` | Wait for the evaluation and report it |
 | `source-commit`, `image-tag` | the commit; the Git tag, if any | Shown in the upload history |
 | `summary` | `true` | Write the evaluation to the job summary |

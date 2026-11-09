@@ -372,6 +372,22 @@ pub fn counts(value: nanobom_domain::findings::SeverityCounts) -> model::Severit
     }
 }
 
+pub fn license_action(value: nanobom_domain::licenses::Action) -> model::LicenseAction {
+    use nanobom_domain::licenses::Action;
+    match value {
+        Action::Allow => model::LicenseAction::Allow,
+        Action::Warn => model::LicenseAction::Warn,
+        Action::Forbid => model::LicenseAction::Forbid,
+    }
+}
+
+pub fn license_counts(value: nanobom_domain::licenses::ViolationCounts) -> model::LicenseCounts {
+    model::LicenseCounts {
+        forbidden: value.forbidden,
+        warned: value.warned,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::local_referer_path;

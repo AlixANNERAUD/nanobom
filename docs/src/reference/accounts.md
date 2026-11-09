@@ -12,13 +12,14 @@ Each member of an organization has one of four roles, each including the ones be
 
 | Permission | Viewer | Member | Admin | Owner |
 | --- | :---: | :---: | :---: | :---: |
-| See the organization, its projects, components, findings and runs; export VEX documents | ✓ | ✓ | ✓ | ✓ |
+| See the organization, its projects, components, findings, license violations and runs; export VEX documents | ✓ | ✓ | ✓ | ✓ |
 | Ignore and restore findings | | ✓ | ✓ | ✓ |
 | Start a run (**Check now**) | | ✓ | ✓ | ✓ |
 | Add, change and remove members other than owners | | | ✓ | ✓ |
 | Delete projects | | | ✓ | ✓ |
 | Create and revoke API tokens, upload or read | | | ✓ | ✓ |
 | Configure the webhook | | | ✓ | ✓ |
+| Change the [license policy](license-policy.md) | | | ✓ | ✓ |
 | Rename the organization | | | ✓ | ✓ |
 | Grant and remove the owner role | | | | ✓ |
 | Delete the organization | | | | ✓ |

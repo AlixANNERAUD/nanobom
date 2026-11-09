@@ -1,4 +1,5 @@
-//! Organization settings (members, API tokens, webhook) and instance administration.
+//! Organization settings (members, API tokens, webhook, license policy) and instance
+//! administration.
 
 use leptos::prelude::*;
 use leptos_meta::Title;
@@ -8,10 +9,13 @@ use crate::{
     components::{Empty, Heading, Loaded, Page, action, format_time, ui::*},
     functions::{
         AddMember, CreateToken, CreateUser, DeleteOrganization, DeleteWebhook, RemoveMember,
-        RenameOrganization, ResetPassword, RevokeToken, SaveWebhook, SetMemberRole,
-        SetUserAdministrator, SetUserDisabled, load_administration, load_settings,
+        RenameOrganization, ResetPassword, RevokeToken, SaveLicensePolicy, SaveWebhook,
+        SetMemberRole, SetUserAdministrator, SetUserDisabled, load_administration, load_settings,
     },
-    model::{AdministrationData, DeliveryState, Role, SettingsData, Severity, WebhookDelivery},
+    model::{
+        AdministrationData, DeliveryState, LicenseAction, Role, SettingsData, Severity,
+        WebhookDelivery,
+    },
     t, tf,
 };
 
@@ -431,6 +435,96 @@ fn Deliveries(deliveries: Vec<WebhookDelivery>) -> impl IntoView {
     }
 }
 
+/// The license policy: three lists of identifiers, replaced as a whole on save, and the two
+/// defaults.
+#[component]
+fn LicensePolicySettings(page: SettingsData) -> impl IntoView {
+    let organization = page.organization.slug.clone();
+    let policy = page.license_policy;
+    let select = |id: &'static str, name: &'static str, selected: LicenseAction| {
+        view! {
+            <select id=id name=name class=format!("{SELECT} w-40")>
+                {LicenseAction::ALL
+                    .into_iter()
+                    .map(|action| {
+                        view! {
+                            <option value=action.as_str() selected=action == selected>
+                                {action.label()}
+                            </option>
+                        }
+                    })
+                    .collect_view()}
+            </select>
+        }
+    };
+    let lists = [
+        (
+            "license-allowed",
+            "allowed",
+            t!("settings.licenses_allowed"),
+            "MIT\nApache-2.0",
+            policy.allowed,
+        ),
+        (
+            "license-warned",
+            "warned",
+            t!("settings.licenses_warned"),
+            "MPL-2.0",
+            policy.warned,
+        ),
+        (
+            "license-forbidden",
+            "forbidden",
+            t!("settings.licenses_forbidden"),
+            "AGPL-3.0-only",
+            policy.forbidden,
+        ),
+    ]
+    .into_iter()
+    .map(|(id, name, label, placeholder, licenses)| {
+        view! {
+            <Field label input_id=id>
+                <textarea
+                    id=id
+                    name=name
+                    class=format!("{TEXTAREA} font-mono")
+                    rows="5"
+                    spellcheck="false"
+                    autocomplete="off"
+                    placeholder=placeholder
+                >
+                    {licenses.join("\n")}
+                </textarea>
+            </Field>
+        }
+    })
+    .collect_view();
+    view! {
+        <Card>
+            <CardHeader>
+                <CardTitle>{t!("settings.licenses_title")}</CardTitle>
+                <CardDescription>{t!("settings.licenses_description")}</CardDescription>
+            </CardHeader>
+            <CardContent>
+                <form method="post" action={action::<SaveLicensePolicy>()} class="grid gap-4">
+                    <input type="hidden" name="organization" value=organization />
+                    <div class="grid gap-4 md:grid-cols-3">{lists}</div>
+                    <p class="text-muted-foreground text-sm">{t!("settings.licenses_hint")}</p>
+                    <div class="flex flex-wrap items-end gap-4">
+                        <Field label=t!("settings.licenses_unlisted") input_id="license-unlisted">
+                            {select("license-unlisted", "unlisted", policy.unlisted)}
+                        </Field>
+                        <Field label=t!("settings.licenses_unknown") input_id="license-unknown">
+                            {select("license-unknown", "unknown", policy.unknown)}
+                        </Field>
+                        <Button>{t!("settings.save_license_policy")}</Button>
+                    </div>
+                </form>
+            </CardContent>
+        </Card>
+    }
+}
+
 #[component]
 fn OrganizationSettings(page: SettingsData) -> impl IntoView {
     let organization = page.organization.clone();
@@ -508,6 +602,7 @@ pub fn SettingsPage() -> impl IntoView {
                         <Members page=page.clone() />
                         <Tokens page=page.clone() />
                         <WebhookSettings page=page.clone() />
+                        <LicensePolicySettings page=page.clone() />
                         <OrganizationSettings page />
                     }
                 }}

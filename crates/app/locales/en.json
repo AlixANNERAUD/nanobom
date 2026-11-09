@@ -73,6 +73,14 @@
     "error_provider": "The identity provider could not sign you in; please try again.",
     "error_unavailable": "Signing in is not available right now; please try again later."
   },
+  "licenses": {
+    "allow": "Allow",
+    "warn": "Warn",
+    "forbid": "Forbid",
+    "allowed": "Allowed",
+    "warned": "Warning",
+    "forbidden": "Forbidden"
+  },
   "organizations": {
     "title": "Organizations",
     "subtitle": "The organizations you belong to.",
@@ -118,7 +126,15 @@
     "scope_all": "all organizations",
     "scope_organization": "organization",
     "scope_project": "project",
-    "known_exploited": "Known exploited"
+    "known_exploited": "Known exploited",
+    "licenses_forbidden": {
+      "one": "{count} forbidden license",
+      "other": "{count} forbidden licenses"
+    },
+    "licenses_warned": {
+      "one": "{count} license warning",
+      "other": "{count} license warnings"
+    }
   },
   "project": {
     "title": "Project",
@@ -166,7 +182,27 @@
     "known_exploited": "Known exploited",
     "known_exploited_due": "CISA due date: {date}",
     "epss": "EPSS",
-    "filter_exploited": "Only known exploited vulnerabilities"
+    "filter_exploited": "Only known exploited vulnerabilities",
+    "licenses_title": "Licenses",
+    "licenses_caption": "Components breaking the license policy, forbidden first",
+    "licenses_forbidden": {
+      "one": "{count} forbidden",
+      "other": "{count} forbidden"
+    },
+    "licenses_warned": {
+      "one": "{count} warning",
+      "other": "{count} warnings"
+    },
+    "licenses_more": {
+      "one": "{count} more component is not listed here; the read API lists every one.",
+      "other": "{count} more components are not listed here; the read API lists every one."
+    },
+    "licenses_none": "Every component's license is allowed by the organization's policy.",
+    "licenses_because": "because of {licenses}",
+    "license_unknown": "Unknown",
+    "version": "Version",
+    "license": "License",
+    "verdict": "Verdict"
   },
   "finding": {
     "title": "Finding",
@@ -267,7 +303,7 @@
     "title": "Settings",
     "page_title": "{name} settings",
     "members_title": "Members",
-    "members_description": "Viewers read; members also ignore findings and start checks; admins also manage members, projects, tokens and the webhook; owners also manage owners. Roles from the identity provider's groups are shown apart and follow each sign-in.",
+    "members_description": "Viewers read; members also ignore findings and start checks; admins also manage members, projects, tokens, the webhook and the license policy; owners also manage owners. Roles from the identity provider's groups are shown apart and follow each sign-in.",
     "members_caption": "Members and their roles",
     "user": "User",
     "role": "Role",
@@ -325,7 +361,16 @@
     "delete_title": "Delete this organization",
     "delete_description": "Its projects, findings, tokens and memberships are deleted for good.",
     "delete": "Delete organization",
-    "exploited_only": "Only known exploited vulnerabilities"
+    "exploited_only": "Only known exploited vulnerabilities",
+    "licenses_title": "License policy",
+    "licenses_description": "Which component licenses this organization allows, warns about or forbids. Each license of an SPDX expression gets its rule: OR takes the most permissive choice, AND the strictest. Violations show on project pages, and uploads with fail_on=license fail on forbidden licenses (see https://alixanneraud.github.io/nanobom/how-to/license-policy.html).",
+    "licenses_allowed": "Allowed licenses",
+    "licenses_warned": "Licenses to warn about",
+    "licenses_forbidden": "Forbidden licenses",
+    "licenses_hint": "SPDX license identifiers (https://spdx.org/licenses), in any case, or LicenseRef-… names, separated by spaces, commas or new lines. Saving replaces every list.",
+    "licenses_unlisted": "Licenses not listed",
+    "licenses_unknown": "Unknown licenses",
+    "save_license_policy": "Save license policy"
   },
   "administration": {
     "title": "Administration",
@@ -377,6 +422,7 @@
     "user_disabled": "User disabled.",
     "user_enabled": "User enabled.",
     "administrator_updated": "Administration rights updated.",
-    "password_changed": "Password changed."
+    "password_changed": "Password changed.",
+    "license_policy_saved": "License policy saved."
   }
 }

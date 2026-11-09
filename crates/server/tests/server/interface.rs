@@ -952,3 +952,105 @@ async fn stale_projects_are_flagged() {
     assert!(html.contains("No SBOM received yet"));
     assert!(!html.contains("Last upload: never"));
 }
+
+#[tokio::test]
+async fn license_policies_are_edited_and_violations_shown() {
+    let server = server(&[]).await;
+    let owner = local_user(&server.database, "alice", PASSWORD).await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let secret = tokens::create(&server.database, &owner, organization.id, None, "CI")
+        .await
+        .unwrap()
+        .secret;
+    // Every component of the npm fixture is MIT.
+    server
+        .send(
+            Request::put("/api/organizations/acme/projects/web/sbom")
+                .header(header::AUTHORIZATION, format!("Bearer {secret}"))
+                .body(Body::from(sbom_document("cyclonedx-npm.json")))
+                .unwrap(),
+        )
+        .await;
+    server.runner.wait_until_idle().await;
+    let alice = Browser::sign_in(&server, "alice").await;
+
+    // Without a policy, licenses are not mentioned.
+    let html = alice.page("/organizations/acme/projects/web").await;
+    assert!(!html.contains("Components breaking the license policy"));
+    assert!(!alice.page("/organizations/acme").await.contains("license"));
+
+    let page = "/organizations/acme/settings";
+    let html = alice.page(page).await;
+    assert!(html.contains("License policy"));
+    assert!(html.contains("name=\"forbidden\""));
+    assert!(html.contains("action=\"/api/save_license_policy\""));
+
+    let save = |form: &'static str| {
+        let alice = &alice;
+        async move {
+            let response = alice.submit(page, "save_license_policy", form).await;
+            assert_eq!(response.status(), StatusCode::FOUND);
+            location(&response)
+        }
+    };
+    let location = save(
+        "organization=acme&unlisted=allow&unknown=warn&allowed=Apache-2.0&warned=MPL-2.0%2C+BSD-3-Clause&forbidden=mit%0D%0AGPL-3.0-only",
+    )
+    .await;
+    assert!(
+        location.contains("notice=License%20policy%20saved."),
+        "{location}"
+    );
+    let policy = nanobom_domain::licenses::policy(&server.database, &owner, organization.id)
+        .await
+        .unwrap();
+    assert_eq!(policy.unknown, nanobom_domain::licenses::Action::Warn);
+    assert_eq!(policy.rules.len(), 5);
+
+    let html = alice.page(page).await;
+    assert!(html.contains("GPL-3.0-only\nMIT</textarea>"), "{html}");
+    assert!(html.contains("BSD-3-Clause\nMPL-2.0</textarea>"));
+    assert!(html.contains("<option value=\"warn\" selected"));
+
+    let html = alice.page("/organizations/acme/projects/web").await;
+    assert!(html.contains("Components breaking the license policy"));
+    let row = table_row(&html, "@babel/helper-string-parser");
+    assert!(row.contains("Forbidden"), "{row}");
+    assert!(row.contains(">MIT<"), "{row}");
+    assert!(html.contains("3 forbidden"));
+    let html = alice.page("/organizations/acme").await;
+    assert!(table_row(&html, "/organizations/acme/projects/web").contains("3 forbidden licenses"));
+
+    // Pages follow the language.
+    let french = Browser {
+        server: &server,
+        cookie: format!("{}; nanobom_locale=fr", alice.cookie),
+    };
+    let html = french.page("/organizations/acme/projects/web").await;
+    assert!(html.contains("Interdite"));
+    assert!(french.page(page).await.contains("Politique de licences"));
+
+    // An invalid identifier is refused, and the policy is left as it was.
+    let location = save(
+        "organization=acme&unlisted=forbid&unknown=allow&allowed=&warned=&forbidden=Apache+License",
+    )
+    .await;
+    assert!(location.contains("error="), "{location}");
+    assert!(
+        location.contains("is%20not%20an%20SPDX%20license%20identifier"),
+        "{location}"
+    );
+    assert_eq!(
+        nanobom_domain::licenses::policy(&server.database, &owner, organization.id)
+            .await
+            .unwrap(),
+        policy
+    );
+
+    // Emptying every list and allowing everything turns the policy off.
+    save("organization=acme&unlisted=allow&unknown=allow&allowed=&warned=&forbidden=").await;
+    let html = alice.page("/organizations/acme/projects/web").await;
+    assert!(!html.contains("Components breaking the license policy"));
+}

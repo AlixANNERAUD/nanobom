@@ -101,6 +101,10 @@ pub async fn load_organization(organization: String) -> Result<OrganizationData,
     let runs = evaluation::recent_runs(database, &actor, found.id, 5)
         .await
         .map_err(failure)?;
+    let licenses = nanobom_domain::licenses::counts_by_project(database, &actor, found.id)
+        .await
+        .map_err(failure)?
+        .unwrap_or_default();
     Ok(OrganizationData {
         organization: crate::server::organization(found),
         projects: projects
@@ -113,6 +117,11 @@ pub async fn load_organization(organization: String) -> Result<OrganizationData,
                 ignored: project.ignored,
                 known_exploited: project.known_exploited,
                 stale: project.stale,
+                licenses: licenses
+                    .get(&project.id)
+                    .copied()
+                    .map(crate::server::license_counts)
+                    .unwrap_or_default(),
             })
             .collect(),
         runs: runs.into_iter().map(run).collect(),
@@ -183,6 +192,30 @@ pub async fn load_project(
         chrono::Utc::now().fixed_offset(),
         context()?.settings.stale_after_days,
     );
+    let violations = nanobom_domain::licenses::violations(
+        database,
+        &actor,
+        model.id,
+        0,
+        LicenseViolations::LISTED,
+    )
+    .await
+    .map_err(failure)?;
+    let licenses = violations.active.then(|| LicenseViolations {
+        counts: crate::server::license_counts(violations.counts),
+        items: violations
+            .items
+            .into_iter()
+            .map(|violation| LicenseViolation {
+                purl: violation.purl,
+                name: violation.name,
+                version: violation.version,
+                license: violation.license,
+                verdict: crate::server::license_action(violation.verdict),
+                licenses: violation.licenses,
+            })
+            .collect(),
+    });
     Ok(ProjectData {
         last_upload_at: model.last_upload_at,
         created_at: model.created_at,
@@ -205,6 +238,7 @@ pub async fn load_project(
             })
             .collect(),
         component_count,
+        licenses,
     })
 }
 
@@ -339,6 +373,24 @@ pub async fn load_settings(organization: String) -> Result<SettingsData, ServerF
     let deliveries = nanobom_domain::deliveries::recent(database, &actor, found.id, 10)
         .await
         .map_err(failure)?;
+    let policy = nanobom_domain::licenses::policy(database, &actor, found.id)
+        .await
+        .map_err(failure)?;
+    let rules = |action: nanobom_domain::licenses::Action| -> Vec<String> {
+        policy
+            .rules
+            .iter()
+            .filter(|rule| rule.action == action)
+            .map(|rule| rule.license.clone())
+            .collect()
+    };
+    let license_policy = LicensePolicy {
+        unlisted: crate::server::license_action(policy.unlisted),
+        unknown: crate::server::license_action(policy.unknown),
+        allowed: rules(nanobom_domain::licenses::Action::Allow),
+        warned: rules(nanobom_domain::licenses::Action::Warn),
+        forbidden: rules(nanobom_domain::licenses::Action::Forbid),
+    };
     let session = crate::server::session().await?.session;
     let new_token: Option<String> = session.remove(NEW_TOKEN).await.ok().flatten();
     Ok(SettingsData {
@@ -390,6 +442,7 @@ pub async fn load_settings(organization: String) -> Result<SettingsData, ServerF
                 next_attempt_at: delivery.next_attempt_at,
             })
             .collect(),
+        license_policy,
         new_token,
     })
 }
@@ -740,6 +793,51 @@ pub async fn delete_webhook(organization: String) -> Result<(), ServerFnError> {
         let id = organization_id(database, &actor, &organization).await?;
         nanobom_domain::notifications::delete(database, &actor, id).await?;
         Ok(crate::t!("notices.webhook_removed").to_owned())
+    }
+    .await;
+    finish(result, &format!("/organizations/{organization}/settings"));
+    Ok(())
+}
+
+/// Replaces the license policy: the two defaults, and the rules typed in three lists (allowed,
+/// warned, forbidden identifiers, separated by whitespace or commas).
+#[server(endpoint = "save_license_policy")]
+pub async fn save_license_policy(
+    organization: String,
+    unlisted: String,
+    unknown: String,
+    allowed: String,
+    warned: String,
+    forbidden: String,
+) -> Result<(), ServerFnError> {
+    use nanobom_domain::licenses::{self, Action, Policy, Rule};
+    let actor = actor().await?;
+    let database = &context()?.database;
+    let result = async {
+        let id = organization_id(database, &actor, &organization).await?;
+        let mut rules = Vec::new();
+        for (list, action) in [
+            (&allowed, Action::Allow),
+            (&warned, Action::Warn),
+            (&forbidden, Action::Forbid),
+        ] {
+            rules.extend(licenses::split_identifiers(list).map(|license| Rule {
+                license: license.to_owned(),
+                action,
+            }));
+        }
+        licenses::set_policy(
+            database,
+            &actor,
+            id,
+            &Policy {
+                unlisted: Action::parse(&unlisted)?,
+                unknown: Action::parse(&unknown)?,
+                rules,
+            },
+        )
+        .await?;
+        Ok(crate::t!("notices.license_policy_saved").to_owned())
     }
     .await;
     finish(result, &format!("/organizations/{organization}/settings"));

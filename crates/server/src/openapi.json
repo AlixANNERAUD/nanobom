@@ -497,6 +497,118 @@
           }
         }
       }
+    },
+    "/api/organizations/{organization}/license-policy": {
+      "get": {
+        "operationId": "getLicensePolicy",
+        "summary": "License policy",
+        "description": "The organization's license policy: the action for each listed license identifier, for licenses no rule lists, and for components whose license is unknown. An organization that never set one gets `allow` everywhere and `active: false`. The policy is changed in the interface only.",
+        "tags": [
+          "read"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IfNoneMatch"
+          },
+          {
+            "$ref": "#/components/parameters/Organization"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The policy.",
+            "headers": {
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LicensePolicy"
+                }
+              }
+            }
+          },
+          "304": {
+            "$ref": "#/components/responses/NotModified"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
+    },
+    "/api/organizations/{organization}/projects/{project}/license-violations": {
+      "get": {
+        "operationId": "listLicenseViolations",
+        "summary": "License violations of a project",
+        "description": "The project's components whose license the organization's policy forbids or warns about, computed from the current policy and the latest SBOM: forbidden components first, then warned ones, each by name then package URL. Empty, with `active: false`, when the organization has no active policy.",
+        "tags": [
+          "read"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/IfNoneMatch"
+          },
+          {
+            "$ref": "#/components/parameters/Organization"
+          },
+          {
+            "$ref": "#/components/parameters/Project"
+          },
+          {
+            "$ref": "#/components/parameters/Limit"
+          },
+          {
+            "$ref": "#/components/parameters/Offset"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "A page of violations.",
+            "headers": {
+              "ETag": {
+                "$ref": "#/components/headers/ETag"
+              },
+              "Cache-Control": {
+                "$ref": "#/components/headers/CacheControl"
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LicenseViolationPage"
+                }
+              }
+            }
+          },
+          "304": {
+            "$ref": "#/components/responses/NotModified"
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "422": {
+            "$ref": "#/components/responses/Invalid"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1630,6 +1742,135 @@
         },
         "required": [
           "items"
+        ]
+      },
+      "LicenseAction": {
+        "type": "string",
+        "enum": [
+          "allow",
+          "warn",
+          "forbid"
+        ],
+        "description": "What the policy does with a license, from the least to the most severe. Only `forbid` fails the upload gate (`fail_on=license`)."
+      },
+      "LicenseRule": {
+        "type": "object",
+        "properties": {
+          "license": {
+            "type": "string",
+            "description": "An SPDX license identifier in its canonical spelling (`GPL-3.0-only`), or `LicenseRef-...`. Matched case-insensitively."
+          },
+          "action": {
+            "$ref": "#/components/schemas/LicenseAction"
+          }
+        },
+        "required": [
+          "license",
+          "action"
+        ]
+      },
+      "LicensePolicy": {
+        "type": "object",
+        "properties": {
+          "active": {
+            "type": "boolean",
+            "description": "Whether the policy can report anything: a rule or a default other than `allow`."
+          },
+          "unlisted": {
+            "$ref": "#/components/schemas/LicenseAction",
+            "description": "The action for licenses no rule lists; `forbid` makes the rules an allowlist."
+          },
+          "unknown": {
+            "$ref": "#/components/schemas/LicenseAction",
+            "description": "The action for components whose license is missing or is not a valid SPDX expression."
+          },
+          "rules": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LicenseRule"
+            },
+            "description": "Sorted by license identifier."
+          }
+        },
+        "required": [
+          "active",
+          "unlisted",
+          "unknown",
+          "rules"
+        ]
+      },
+      "LicenseViolation": {
+        "type": "object",
+        "properties": {
+          "component": {
+            "$ref": "#/components/schemas/Component"
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "warn",
+              "forbid"
+            ]
+          },
+          "licenses": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "The license identifiers that lead to the verdict (`OR` keeps the least severe side, `AND` the most severe). Empty when the action for unknown licenses alone gives the verdict."
+          }
+        },
+        "required": [
+          "component",
+          "verdict",
+          "licenses"
+        ]
+      },
+      "LicenseViolationPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LicenseViolation"
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Items in the whole list, across pages: `forbidden` plus `warned`."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "active": {
+            "type": "boolean",
+            "description": "Whether the organization's policy is active."
+          },
+          "forbidden": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Components with a forbidden license."
+          },
+          "warned": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Components with a license the policy warns about."
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "limit",
+          "offset",
+          "active",
+          "forbidden",
+          "warned"
         ]
       }
     }

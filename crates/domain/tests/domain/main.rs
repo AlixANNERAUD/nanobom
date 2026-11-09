@@ -7,6 +7,7 @@ mod dependencies;
 mod exploitation;
 mod findings;
 mod inventory;
+mod licenses;
 mod lifecycle;
 mod notifications;
 mod staleness;

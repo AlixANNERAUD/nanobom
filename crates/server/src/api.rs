@@ -16,9 +16,16 @@
 //! `--upload-wait-seconds`, and returns the project's open findings. `fail_on` then turns the
 //! result into a status CI can act on:
 //!
-//! - `409 Conflict` when open findings reach the threshold (a severity, or `exploited`);
+//! - `409 Conflict` when open findings reach a threshold (a severity, or `exploited`), or, with
+//!   `license`, when a component has a license the organization's policy forbids
+//!   ([`nanobom_domain::licenses`]);
 //! - `503 Service Unavailable` when the run did not complete in time or failed, since the
 //!   findings would be out of date: an incomplete evaluation never passes the gate.
+//!
+//! `fail_on` takes one threshold or several, separated by commas (`high,license`); the upload
+//! fails when any of them is reached. Licenses do not depend on the run, so `fail_on=license`
+//! alone still waits, to return the evaluation, but does not fail when the run does not
+//! complete.
 //!
 //! At most `--max-waiting-uploads` uploads wait at once; another one is refused with `503` and
 //! `Retry-After` before its body is parsed, so nothing is stored. The token is checked again
@@ -46,6 +53,7 @@ use nanobom_domain::{
     evaluation::{Scope, Trigger},
     findings::{self, Finding},
     inventory::{self, ParsedSbom, UploadOutcome, UploadSource},
+    licenses::{self, Action, Violations},
     notifications, tokens, vex,
 };
 use nanobom_entity::upload_tokens;
@@ -228,7 +236,8 @@ pub struct UploadParameters {
     image_tag: Option<String>,
     /// `true` to wait for the project's evaluation and return it.
     wait: Option<String>,
-    /// Answer with an error status when open findings reach this threshold; implies `wait`.
+    /// Answer with an error status when one of these thresholds is reached (comma-separated);
+    /// implies `wait`.
     fail_on: Option<String>,
 }
 
@@ -250,6 +259,8 @@ enum Threshold {
     Severity(Severity),
     /// An open known exploited finding.
     Exploited,
+    /// A component whose license the organization's policy forbids.
+    License,
 }
 
 impl Threshold {
@@ -260,21 +271,42 @@ impl Threshold {
             "medium" => Ok(Self::Severity(Severity::Medium)),
             "low" => Ok(Self::Severity(Severity::Low)),
             "exploited" => Ok(Self::Exploited),
+            "license" => Ok(Self::License),
             _ => Err(ApiError::new(
                 StatusCode::UNPROCESSABLE_ENTITY,
-                "fail_on must be critical, high, medium, low or exploited",
+                "fail_on must be critical, high, medium, low, exploited or license, or several \
+                 of them separated by commas",
             )),
         }
+    }
+
+    /// Parses `fail_on`: one threshold or several, separated by commas, each kept once.
+    fn parse_list(value: &str) -> Result<Vec<Self>, ApiError> {
+        let mut thresholds = Vec::new();
+        for value in value.split(',') {
+            let threshold = Self::parse(value)?;
+            if !thresholds.contains(&threshold) {
+                thresholds.push(threshold);
+            }
+        }
+        Ok(thresholds)
+    }
+
+    /// Whether the threshold judges findings, which only a completed run brings up to date.
+    fn needs_run(self) -> bool {
+        !matches!(self, Self::License)
     }
 
     fn reached_by(self, finding: &Finding) -> bool {
         match self {
             Self::Severity(minimum) => finding.severity >= minimum,
             Self::Exploited => finding.exploitation.known_exploited,
+            Self::License => false,
         }
     }
 
-    /// Why an upload fails when `reached` (at least one) open findings reach the threshold.
+    /// Why an upload fails when `reached` (at least one) open findings, or components for
+    /// [`Threshold::License`], reach the threshold.
     fn failure(self, reached: usize) -> String {
         let findings = if reached == 1 {
             "open finding"
@@ -288,6 +320,13 @@ impl Threshold {
             Self::Exploited => {
                 let verb = if reached == 1 { "is" } else { "are" };
                 format!("{reached} {findings} {verb} known exploited")
+            }
+            Self::License => {
+                if reached == 1 {
+                    "1 component has a forbidden license".to_owned()
+                } else {
+                    format!("{reached} components have forbidden licenses")
+                }
             }
         }
     }
@@ -321,6 +360,9 @@ fn waiting_slot(state: &AppState) -> Result<OwnedSemaphorePermit, ApiError> {
 /// At most this many findings are listed in an upload's evaluation; all are counted.
 const MAXIMUM_LISTED_FINDINGS: usize = 100;
 
+/// At most this many license violations are listed in an upload's evaluation; all are counted.
+const MAXIMUM_LISTED_VIOLATIONS: usize = 20;
+
 /// The response to an upload: its outcome, with the evaluation when the upload waited for it.
 #[derive(Debug, Serialize)]
 pub struct UploadResponse {
@@ -353,6 +395,53 @@ struct Evaluation {
     known_exploited: usize,
     /// The open findings, most severe first, at most `MAXIMUM_LISTED_FINDINGS`.
     findings: Vec<EvaluationFinding>,
+    /// The components breaking the organization's license policy, when it has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    licenses: Option<LicenseEvaluation>,
+}
+
+/// License violations after an upload: every one counted, the first ones listed.
+#[derive(Debug, Serialize)]
+struct LicenseEvaluation {
+    forbidden: u64,
+    warned: u64,
+    /// Forbidden first, then warned, each by name; at most `MAXIMUM_LISTED_VIOLATIONS`.
+    violations: Vec<LicenseViolation>,
+}
+
+#[derive(Debug, Serialize)]
+struct LicenseViolation {
+    component: String,
+    name: String,
+    version: Option<String>,
+    /// The license as read from the SBOM.
+    license: Option<String>,
+    verdict: Action,
+    /// The identifiers that lead to the verdict; empty when the action for unknown licenses
+    /// alone gives it.
+    licenses: Vec<String>,
+}
+
+impl LicenseEvaluation {
+    /// `None` when the organization has no active policy.
+    fn new(violations: Violations) -> Option<Self> {
+        violations.active.then(|| Self {
+            forbidden: violations.counts.forbidden,
+            warned: violations.counts.warned,
+            violations: violations
+                .items
+                .into_iter()
+                .map(|violation| LicenseViolation {
+                    component: violation.purl,
+                    name: violation.name,
+                    version: violation.version,
+                    license: violation.license,
+                    verdict: violation.verdict,
+                    licenses: violation.licenses,
+                })
+                .collect(),
+        })
+    }
 }
 
 #[derive(Debug, Default, Serialize)]
@@ -377,7 +466,12 @@ struct EvaluationFinding {
 }
 
 /// The evaluation of a run and the project's open findings, most severe first.
-fn evaluation(run: &Waited, findings: &[Finding], public_url: &Url) -> Evaluation {
+fn evaluation(
+    run: &Waited,
+    findings: &[Finding],
+    licenses: Option<LicenseEvaluation>,
+    public_url: &Url,
+) -> Evaluation {
     let mut open = OpenCounts::default();
     for finding in findings {
         *match finding.severity {
@@ -423,6 +517,7 @@ fn evaluation(run: &Waited, findings: &[Finding], public_url: &Url) -> Evaluatio
                 url: notifications::link(public_url, &format!("findings/{}", finding.id)),
             })
             .collect(),
+        licenses,
     }
 }
 
@@ -437,19 +532,20 @@ async fn upload_sbom(
     body: Bytes,
 ) -> Result<(StatusCode, Json<UploadResponse>), ApiError> {
     let token = upload_token(&state, &headers).await?;
-    let threshold = parameters
+    let thresholds = parameters
         .fail_on
         .as_deref()
-        .map(Threshold::parse)
-        .transpose()?;
+        .map(Threshold::parse_list)
+        .transpose()?
+        .unwrap_or_default();
     // Without exploitation data no finding is known exploited: the gate would always pass.
-    if threshold == Some(Threshold::Exploited) && !state.options.exploitation_data {
+    if thresholds.contains(&Threshold::Exploited) && !state.options.exploitation_data {
         return Err(ApiError::new(
             StatusCode::UNPROCESSABLE_ENTITY,
             "fail_on=exploited needs exploitation data (NANOBOM_EXPLOITATION_DATA)",
         ));
     }
-    let wait = parse_wait(parameters.wait.as_deref())? || threshold.is_some();
+    let wait = parse_wait(parameters.wait.as_deref())? || !thresholds.is_empty();
     // Held through the wait, until the handler returns.
     let _waiting_slot = wait.then(|| waiting_slot(&state)).transpose()?;
 
@@ -501,23 +597,50 @@ async fn upload_sbom(
         let findings =
             findings::open_for_upload_token(&state.database, &token, response.outcome.project_id)
                 .await?;
-        if let Some(threshold) = threshold {
-            // Without a finished run the findings are not up to date: that fails first.
-            if !matches!(&run, Waited::Finished(outcome) if outcome.succeeded()) {
-                status = StatusCode::SERVICE_UNAVAILABLE;
-                response.error = Some("the evaluation did not complete".to_owned());
-            } else {
-                let reached = findings
+        // Counted by the database and listed from the first components: cheap enough to
+        // return whether the gate checks licenses or not.
+        let violations = licenses::violations(
+            &state.database,
+            &token,
+            project_id,
+            0,
+            MAXIMUM_LISTED_VIOLATIONS,
+        )
+        .await?;
+        let completed = matches!(&run, Waited::Finished(outcome) if outcome.succeeded());
+        let mut failures = Vec::new();
+        for threshold in &thresholds {
+            let reached = match threshold {
+                Threshold::License => {
+                    usize::try_from(violations.counts.forbidden).unwrap_or(usize::MAX)
+                }
+                // Judged below, once, if the findings are up to date.
+                _ if !completed => 0,
+                _ => findings
                     .iter()
                     .filter(|finding| threshold.reached_by(finding))
-                    .count();
-                if reached > 0 {
-                    status = StatusCode::CONFLICT;
-                    response.error = Some(threshold.failure(reached));
-                }
+                    .count(),
+            };
+            if reached > 0 {
+                failures.push(threshold.failure(reached));
             }
         }
-        response.evaluation = Some(evaluation(&run, &findings, &state.options.public_url));
+        // Without a finished run the findings are not up to date: that fails first.
+        if !completed && thresholds.iter().any(|threshold| threshold.needs_run()) {
+            status = StatusCode::SERVICE_UNAVAILABLE;
+            failures.insert(0, "the evaluation did not complete".to_owned());
+        } else if !failures.is_empty() {
+            status = StatusCode::CONFLICT;
+        }
+        if !failures.is_empty() {
+            response.error = Some(failures.join("; "));
+        }
+        response.evaluation = Some(evaluation(
+            &run,
+            &findings,
+            LicenseEvaluation::new(violations),
+            &state.options.public_url,
+        ));
     } else {
         // Without waiting, only the findings of earlier runs can be matched: the run that
         // follows may open findings the statements cover, which the next upload then ignores.
@@ -538,7 +661,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn fail_on_takes_a_list() {
+        assert_eq!(
+            Threshold::parse_list("high").unwrap(),
+            vec![Threshold::Severity(Severity::High)]
+        );
+        assert_eq!(
+            Threshold::parse_list(" High , license,high").unwrap(),
+            vec![Threshold::Severity(Severity::High), Threshold::License]
+        );
+        for invalid in ["", "high,", "licence", "high;license"] {
+            assert!(Threshold::parse_list(invalid).is_err(), "{invalid}");
+        }
+    }
+
+    #[test]
     fn gate_failures_are_counted_in_words() {
+        assert_eq!(
+            Threshold::License.failure(1),
+            "1 component has a forbidden license"
+        );
+        assert_eq!(
+            Threshold::License.failure(2),
+            "2 components have forbidden licenses"
+        );
         let high = Threshold::Severity(Severity::High);
         assert_eq!(high.failure(1), "1 open finding at or above high");
         assert_eq!(high.failure(2), "2 open findings at or above high");

@@ -42,7 +42,7 @@ pub enum Role {
     Viewer,
     /// Also ignores and restores findings and triggers runs.
     Member,
-    /// Also manages members, projects, upload tokens and the webhook.
+    /// Also manages members, projects, upload tokens, the webhook and the license policy.
     Admin,
     /// Also manages owners and deletes the organization.
     Owner,
@@ -106,7 +106,7 @@ pub enum Permission {
     ManageUploadTokens,
     /// Configure the organization's webhook.
     ManageWebhook,
-    /// Rename the organization.
+    /// Rename the organization and change its license policy.
     ManageOrganization,
     /// Grant and remove the owner role.
     ManageOwners,

@@ -95,6 +95,10 @@ pub enum Problem {
     InvalidWebhookUrl,
     WebhookScheme,
     UnknownWebhookFormat,
+    UnknownLicenseId { license: String },
+    UnknownLicenseAction { action: String },
+    ConflictingLicenseRule { license: String },
+    TooManyLicenseRules { maximum: usize },
 }
 
 impl Problem {
@@ -302,6 +306,30 @@ impl Problem {
                 locale = locale,
                 "problems.unknown_webhook_format"
             )),
+            P::UnknownLicenseId { license } => translate_write!(
+                output,
+                locale = locale,
+                "problems.unknown_license_id",
+                license = license
+            ),
+            P::UnknownLicenseAction { action } => translate_write!(
+                output,
+                locale = locale,
+                "problems.unknown_license_action",
+                action = action
+            ),
+            P::ConflictingLicenseRule { license } => translate_write!(
+                output,
+                locale = locale,
+                "problems.conflicting_license_rule",
+                license = license
+            ),
+            P::TooManyLicenseRules { maximum } => translate_write!(
+                output,
+                locale = locale,
+                "problems.too_many_license_rules",
+                maximum = maximum
+            ),
         }
     }
 

@@ -28,6 +28,8 @@
 //!
 //! Server functions of the interface are served as `/api/{name}` too: none may be named like a
 //! path of this API (`organizations`, `findings`, `components`, `openapi.json`).
+//!
+//! The license policy is read here; it is changed only in the interface.
 
 use std::collections::HashMap;
 
@@ -47,7 +49,9 @@ use nanobom_domain::{
     evaluation::{self, RunSummary},
     exploitation::Exploitation,
     findings::{self, EventKind, Filter, Finding, FindingDetail, Justification, Status},
-    inventory, notifications, organizations, projects, tokens,
+    inventory,
+    licenses::{self, Action},
+    notifications, organizations, projects, tokens,
 };
 use nanobom_osv::Severity;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -68,7 +72,7 @@ const DEFAULT_RUNS: u64 = 20;
 const MAXIMUM_RUNS: u64 = 100;
 
 /// Every path of the read API, as routed and as described in [`OPENAPI`].
-pub const PATHS: [&str; 8] = [
+pub const PATHS: [&str; 10] = [
     "/api/openapi.json",
     "/api/organizations",
     "/api/organizations/{organization}/projects",
@@ -77,6 +81,8 @@ pub const PATHS: [&str; 8] = [
     "/api/organizations/{organization}/runs",
     "/api/findings/{finding}",
     "/api/components",
+    "/api/organizations/{organization}/license-policy",
+    "/api/organizations/{organization}/projects/{project}/license-violations",
 ];
 
 pub fn router() -> Router<AppState> {
@@ -89,6 +95,8 @@ pub fn router() -> Router<AppState> {
         .route(PATHS[5], get(list_runs))
         .route(PATHS[6], get(finding))
         .route(PATHS[7], get(search_components))
+        .route(PATHS[8], get(license_policy))
+        .route(PATHS[9], get(list_license_violations))
         .layer(middleware::map_response(private_response))
 }
 
@@ -266,6 +274,19 @@ struct Pagination {
 
 impl Pagination {
     fn page<T>(&self, items: Vec<T>) -> Result<Page<T>, ApiError> {
+        let (limit, offset) = self.bounds()?;
+        let total = items.len();
+        let items = items.into_iter().skip(offset).take(limit).collect();
+        Ok(Page {
+            items,
+            total,
+            limit,
+            offset,
+        })
+    }
+
+    /// `limit` and `offset`, checked, with their defaults.
+    fn bounds(&self) -> Result<(usize, usize), ApiError> {
         let limit = match self.limit.as_deref().map(str::trim) {
             None => DEFAULT_LIMIT,
             Some(value) => value
@@ -282,14 +303,7 @@ impl Pagination {
                 .parse::<usize>()
                 .map_err(|_| invalid("offset must be a number from 0"))?,
         };
-        let total = items.len();
-        let items = items.into_iter().skip(offset).take(limit).collect();
-        Ok(Page {
-            items,
-            total,
-            limit,
-            offset,
-        })
+        Ok((limit, offset))
     }
 }
 
@@ -895,4 +909,110 @@ async fn list_runs(
         .map(RunBody::from)
         .collect();
     Ok(respond(&headers, &Items { items }))
+}
+
+#[derive(Serialize)]
+struct LicenseRuleBody {
+    license: String,
+    action: Action,
+}
+
+#[derive(Serialize)]
+struct LicensePolicyBody {
+    /// Whether the policy can report anything; when it is not, no component is a violation.
+    active: bool,
+    unlisted: Action,
+    unknown: Action,
+    rules: Vec<LicenseRuleBody>,
+}
+
+/// `GET /api/organizations/{organization}/license-policy`: the organization's license policy.
+async fn license_policy(
+    State(state): State<AppState>,
+    ApiPath(organization): ApiPath<String>,
+    headers: HeaderMap,
+    session: AuthenticationSession,
+) -> Result<Response, ApiError> {
+    let reader = reader(&state, &headers, &session).await?;
+    let organization = organizations::find(&state.database, reader, &organization).await?;
+    let policy = licenses::policy(&state.database, reader, organization.id).await?;
+    Ok(respond(
+        &headers,
+        &LicensePolicyBody {
+            active: policy.is_active(),
+            unlisted: policy.unlisted,
+            unknown: policy.unknown,
+            rules: policy
+                .rules
+                .into_iter()
+                .map(|rule| LicenseRuleBody {
+                    license: rule.license,
+                    action: rule.action,
+                })
+                .collect(),
+        },
+    ))
+}
+
+#[derive(Serialize)]
+struct LicenseViolationBody {
+    component: ComponentBody,
+    verdict: Action,
+    licenses: Vec<String>,
+}
+
+#[derive(Serialize)]
+struct LicenseViolationPage {
+    #[serde(flatten)]
+    page: Page<LicenseViolationBody>,
+    /// Whether the organization's policy is active.
+    active: bool,
+    forbidden: u64,
+    warned: u64,
+}
+
+/// `GET /api/organizations/{organization}/projects/{project}/license-violations`: the
+/// project's components that the license policy forbids or warns about, forbidden first.
+async fn list_license_violations(
+    State(state): State<AppState>,
+    ApiPath((organization, project_slug)): ApiPath<(String, String)>,
+    pagination: Result<Query<Pagination>, QueryRejection>,
+    headers: HeaderMap,
+    session: AuthenticationSession,
+) -> Result<Response, ApiError> {
+    let Query(pagination) = pagination.map_err(query_error)?;
+    let (limit, offset) = pagination.bounds()?;
+    let reader = reader(&state, &headers, &session).await?;
+    let project = project(&state, reader, &organization, &project_slug).await?;
+    let violations =
+        licenses::violations(&state.database, reader, project.id, offset, limit).await?;
+    let total = usize::try_from(violations.total()).unwrap_or(usize::MAX);
+    Ok(respond(
+        &headers,
+        &LicenseViolationPage {
+            active: violations.active,
+            forbidden: violations.counts.forbidden,
+            warned: violations.counts.warned,
+            page: Page {
+                items: violations
+                    .items
+                    .into_iter()
+                    .map(|violation| LicenseViolationBody {
+                        component: ComponentBody {
+                            purl: violation.purl,
+                            name: violation.name,
+                            version: violation.version,
+                            ecosystem: violation.ecosystem,
+                            license: violation.license,
+                        },
+                        verdict: violation.verdict,
+                        licenses: violation.licenses,
+                    })
+                    .collect(),
+                total,
+                limit,
+                offset,
+            },
+        },
+    ))
 }

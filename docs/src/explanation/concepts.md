@@ -40,7 +40,9 @@ in the upload's response but cannot be checked. The SBOM's dependency graph, whe
 kept with the components and tells which direct dependency of the project pulls in each one
 ([Dependency paths](dependency-paths.md)). So is each component's license, as the SBOM states
 it: one SPDX license expression, shown on findings and in search results
-([how licenses are read](../reference/upload-api.md#the-document)).
+([how licenses are read](../reference/upload-api.md#the-document)). An organization's
+**license policy** allows, warns about or forbids licenses; the components that break it are
+computed from the latest SBOM whenever they are shown ([License policies](licenses.md)).
 
 ## Runs
 

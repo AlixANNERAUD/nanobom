@@ -324,6 +324,23 @@ pub fn OrganizationPage() -> impl IntoView {
                                     </Badge>
                                 }
                             });
+                            // Forbidden licenses outrank warnings: one badge, the most severe.
+                            let licenses = project.licenses;
+                            let license_badge = if licenses.forbidden > 0 {
+                                Some(view! {
+                                    <Badge variant=BadgeVariant::Destructive>
+                                        {tp!("organization.licenses_forbidden", licenses.forbidden)}
+                                    </Badge>
+                                })
+                            } else if licenses.warned > 0 {
+                                Some(view! {
+                                    <Badge variant=BadgeVariant::Outline>
+                                        {tp!("organization.licenses_warned", licenses.warned)}
+                                    </Badge>
+                                })
+                            } else {
+                                None
+                            };
                             view! {
                                 <tr class=TABLE_ROW>
                                     <th scope="row" class=format!("{TABLE_CELL} text-left font-medium")>
@@ -331,6 +348,7 @@ pub fn OrganizationPage() -> impl IntoView {
                                             {name}
                                         </a>
                                         {stale_badge}
+                                        {license_badge}
                                     </th>
                                     {cells}
                                     <td class=format!("{TABLE_CELL} text-right tabular-nums")>
