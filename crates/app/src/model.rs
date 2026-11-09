@@ -519,7 +519,17 @@ pub struct Webhook {
     pub format: String,
 }
 
-/// Where a webhook delivery stands.
+/// Where an organization's notifications are emailed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct EmailSettings {
+    pub recipients: Vec<String>,
+    /// `en` or `fr`: the tags of `nanobom_domain::email::Language`.
+    pub language: String,
+    pub minimum_severity: Severity,
+    pub exploited_only: bool,
+}
+
+/// Where a webhook or email delivery stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DeliveryState {
     /// The first attempt is about to be made or in progress.
@@ -546,10 +556,12 @@ impl DeliveryState {
     }
 }
 
-/// A recent delivery to the organization's webhook.
+/// A recent delivery of the organization's notifications, to its webhook or by email.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WebhookDelivery {
     pub id: i64,
+    /// The recipient of an email; `None` for a webhook post.
+    pub recipient: Option<String>,
     pub event: String,
     pub state: DeliveryState,
     pub attempts: i64,
@@ -567,7 +579,10 @@ pub struct SettingsData {
     pub tokens: Vec<UploadToken>,
     pub projects: Vec<String>,
     pub webhook: Option<Webhook>,
-    /// The latest deliveries to the webhook, the newest first.
+    pub email: Option<EmailSettings>,
+    /// Whether the instance sends email (an SMTP server is configured).
+    pub email_available: bool,
+    /// The latest deliveries to the webhook and by email, the newest first.
     pub deliveries: Vec<WebhookDelivery>,
     pub license_policy: LicensePolicy,
     /// A token created just before, shown once.

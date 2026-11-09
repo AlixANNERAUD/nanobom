@@ -16,6 +16,9 @@ ignore = [
 version = 2
 confidence-threshold = 0.9
 allow = [
+  # Zero-clause BSD, permissive without even an attribution requirement: quoted_printable, used
+  # by lettre to encode emails.
+  "0BSD",
   "MIT",
   "MIT-0",
   "ISC",

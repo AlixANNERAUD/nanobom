@@ -1,4 +1,4 @@
-//! The webhook delivery queue.
+//! The delivery queue of notifications: webhooks and emails.
 //!
 //! Every document is recorded in `webhook_deliveries` before its first attempt, so that a
 //! receiver that is down misses nothing: failed attempts are retried with backoff
@@ -24,6 +24,11 @@
 //! each time, and may see it twice if an attempt succeeded but its result could not be
 //! recorded. Only [`recent`] takes an actor; the rest serves the run worker and the server's
 //! retry loop.
+//!
+//! Each row has a [`Channel`]. Emails share the table and its lease, claim and backoff logic
+//! rather than having a queue of their own, which would duplicate every query of this module:
+//! an email row holds its one recipient in `url` (an email to several recipients is a row per
+//! recipient) and the rendered message in `payload` (see [`crate::email::Message`]).
 
 use chrono::{DateTime, FixedOffset, TimeDelta};
 use nanobom_entity::webhook_deliveries;
@@ -52,6 +57,36 @@ pub const ATTEMPT_LEASE: TimeDelta = TimeDelta::minutes(2);
 
 /// Delivered and failed rows older than this are deleted.
 pub const RETENTION: TimeDelta = TimeDelta::days(30);
+
+/// How a delivery reaches its receiver, stored in its row's `channel` column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Channel {
+    /// An HTTP post to a webhook.
+    Webhook,
+    /// An email sent through the instance's SMTP server.
+    Email,
+}
+
+impl Channel {
+    /// The stored name, also the value of the `channel` label of the delivery metrics.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Channel::Webhook => "webhook",
+            Channel::Email => "email",
+        }
+    }
+
+    /// The channel of a stored name; anything else is a webhook, the only channel of the rows
+    /// that predate the column.
+    pub fn parse(value: &str) -> Self {
+        if value == "email" {
+            Channel::Email
+        } else {
+            Channel::Webhook
+        }
+    }
+}
 
 /// Where a delivery stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -114,33 +149,48 @@ impl Outcome {
 pub enum Attempt {
     /// An HTTP answer, with its status code and a description such as `503 Service Unavailable`.
     Answered { status: u16, description: String },
+    /// The last reply of an SMTP server, with its code and a description such as
+    /// `550 mailbox unavailable`.
+    Replied { code: u16, description: String },
     /// No answer: the connection failed or timed out.
     Unreachable(String),
+    /// Not attempted, and never will be: the delivery cannot be made by this server, such as an
+    /// email while no SMTP server is configured.
+    Impossible(String),
 }
 
 impl Attempt {
     /// The status line of the answer, or why there was none.
     pub fn description(&self) -> &str {
         match self {
-            Attempt::Answered { description, .. } | Attempt::Unreachable(description) => {
-                description
-            }
+            Attempt::Answered { description, .. }
+            | Attempt::Replied { description, .. }
+            | Attempt::Unreachable(description)
+            | Attempt::Impossible(description) => description,
         }
     }
 
-    /// Any 2xx answer.
+    /// Any 2xx answer or reply.
     pub fn succeeded(&self) -> bool {
-        matches!(self, Attempt::Answered { status, .. } if (200..300).contains(status))
-    }
-
-    /// A 4xx answer other than 408 (Request Timeout) and 429 (Too Many Requests): the receiver
-    /// refuses this document and would refuse it again.
-    pub fn is_permanent_failure(&self) -> bool {
         matches!(
             self,
-            Attempt::Answered { status, .. }
-                if (400..500).contains(status) && !matches!(status, 408 | 429)
+            Attempt::Answered { status: code, .. } | Attempt::Replied { code, .. }
+                if (200..300).contains(code)
         )
+    }
+
+    /// An answer that would come again: an HTTP 4xx other than 408 (Request Timeout) and 429
+    /// (Too Many Requests), or an SMTP 5xx (permanent negative completion, such as an unknown
+    /// mailbox). SMTP 4xx replies are transient by definition and retried.
+    pub fn is_permanent_failure(&self) -> bool {
+        match self {
+            Attempt::Answered { status, .. } => {
+                (400..500).contains(status) && !matches!(status, 408 | 429)
+            }
+            Attempt::Replied { code, .. } => (500..600).contains(code),
+            Attempt::Unreachable(_) => false,
+            Attempt::Impossible(_) => true,
+        }
     }
 }
 
@@ -150,8 +200,8 @@ pub fn next_attempt(attempts: i64, now: DateTime<FixedOffset>) -> Option<DateTim
     RETRY_DELAYS.get(retry).map(|delay| now + *delay)
 }
 
-/// Records a delivery to attempt now. `organization_id` is `None` for the instance's failure
-/// webhook.
+/// Records a webhook delivery to attempt now. `organization_id` is `None` for the instance's
+/// failure webhook.
 pub async fn enqueue(
     database: &impl ConnectionTrait,
     organization_id: Option<i64>,
@@ -161,15 +211,26 @@ pub async fn enqueue(
     now: DateTime<FixedOffset>,
 ) -> Result<webhook_deliveries::Model> {
     let payload = serde_json::to_string(payload).expect("payloads serialize to JSON");
-    enqueue_body(database, organization_id, url, event, payload, now).await
+    enqueue_body(
+        database,
+        organization_id,
+        Channel::Webhook,
+        url,
+        event,
+        payload,
+        now,
+    )
+    .await
 }
 
 /// Like [`enqueue`], for a body rendered by the caller: the chat formats of
-/// [`crate::notifications::Format`] are not the serialization of the payload. The body is
-/// stored as is and posted as is by every attempt.
+/// [`crate::notifications::Format`] are not the serialization of the payload, and an email
+/// carries a rendered message. The body is stored as is and sent as is by every attempt. For an
+/// email, `url` holds its recipient.
 pub async fn enqueue_body(
     database: &impl ConnectionTrait,
     organization_id: Option<i64>,
+    channel: Channel,
     url: &str,
     event: &str,
     payload: String,
@@ -177,6 +238,7 @@ pub async fn enqueue_body(
 ) -> Result<webhook_deliveries::Model> {
     Ok(webhook_deliveries::ActiveModel {
         organization_id: Set(organization_id),
+        channel: Set(channel.as_str().to_owned()),
         url: Set(url.to_owned()),
         event: Set(event.to_owned()),
         payload: Set(payload),
@@ -279,19 +341,40 @@ pub async fn record(
     Ok((recorded.rows_affected > 0).then_some(outcome))
 }
 
-/// Abandons the pending deliveries to an organization's webhook, when it is removed, disabled or
-/// moved to another URL: they would otherwise go on posting to a URL its admins took away.
-pub async fn cancel_pending(database: &impl ConnectionTrait, organization_id: i64) -> Result<()> {
+/// Abandons the pending deliveries of an organization on one channel, when its webhook is
+/// removed, disabled or moved to another URL, or its email recipients change: they would
+/// otherwise go on reaching a receiver its admins took away.
+pub async fn cancel_pending(
+    database: &impl ConnectionTrait,
+    organization_id: i64,
+    channel: Channel,
+) -> Result<()> {
     webhook_deliveries::Entity::update_many()
         .col_expr(
             webhook_deliveries::Column::NextAttemptAt,
             Expr::value(Option::<DateTime<FixedOffset>>::None),
         )
         .filter(webhook_deliveries::Column::OrganizationId.eq(organization_id))
+        .filter(webhook_deliveries::Column::Channel.eq(channel.as_str()))
         .filter(webhook_deliveries::Column::NextAttemptAt.is_not_null())
         .exec(database)
         .await?;
     Ok(())
+}
+
+/// Abandons every pending email delivery; returns how many. Called at startup when no SMTP
+/// server is configured any more: they could never be sent.
+pub async fn cancel_pending_emails(database: &impl ConnectionTrait) -> Result<u64> {
+    Ok(webhook_deliveries::Entity::update_many()
+        .col_expr(
+            webhook_deliveries::Column::NextAttemptAt,
+            Expr::value(Option::<DateTime<FixedOffset>>::None),
+        )
+        .filter(webhook_deliveries::Column::Channel.eq(Channel::Email.as_str()))
+        .filter(webhook_deliveries::Column::NextAttemptAt.is_not_null())
+        .exec(database)
+        .await?
+        .rows_affected)
 }
 
 /// Abandons the pending deliveries to the instance's failure webhook that do not go to `url`,
@@ -307,6 +390,7 @@ pub async fn cancel_pending_failures(
             Expr::value(Option::<DateTime<FixedOffset>>::None),
         )
         .filter(webhook_deliveries::Column::OrganizationId.is_null())
+        .filter(webhook_deliveries::Column::Channel.eq(Channel::Webhook.as_str()))
         .filter(webhook_deliveries::Column::NextAttemptAt.is_not_null());
     if let Some(url) = url {
         query = query.filter(webhook_deliveries::Column::Url.ne(url));
@@ -328,18 +412,21 @@ pub async fn prune(database: &impl ConnectionTrait, now: DateTime<FixedOffset>) 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeliverySummary {
     pub id: i64,
+    pub channel: Channel,
+    /// The address of an email; `None` for a webhook, whose URL may hold a secret.
+    pub recipient: Option<String>,
     pub event: String,
     pub state: State,
     pub attempts: i64,
     pub created_at: DateTime<FixedOffset>,
     pub last_attempt_at: Option<DateTime<FixedOffset>>,
-    /// The HTTP status of the last attempt, or why it got no answer.
+    /// The HTTP status or SMTP reply of the last attempt, or why it got no answer.
     pub last_status: Option<String>,
     pub next_attempt_at: Option<DateTime<FixedOffset>>,
 }
 
-/// The latest deliveries to an organization's webhook, the newest first. Requires
-/// [`Permission::ManageWebhook`], like the webhook itself.
+/// The latest deliveries of an organization, webhooks and emails, the newest first. Requires
+/// [`Permission::ManageWebhook`], like the webhook and the email settings themselves.
 pub async fn recent(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -361,6 +448,8 @@ pub async fn recent(
         .map(|model| DeliverySummary {
             state: state(&model),
             id: model.id,
+            recipient: (Channel::parse(&model.channel) == Channel::Email).then_some(model.url),
+            channel: Channel::parse(&model.channel),
             event: model.event,
             attempts: model.attempts,
             created_at: model.created_at,

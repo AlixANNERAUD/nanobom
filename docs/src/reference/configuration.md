@@ -39,7 +39,7 @@ See [Run on PostgreSQL](../how-to/postgresql.md).
 
 | Variable | Flag | Default | |
 | --- | --- | --- | --- |
-| `NANOBOM_PUBLIC_URL` | `--public-url` | `http://localhost:8080` | The address users reach nanobom at. Used for links in webhooks and API responses, the OpenID Connect redirect URI, the `Secure` flag of cookies (set when it is `https`) and the cross-site request check (the `Origin` of form submissions must match it). Set it to the address in the browser's address bar, scheme and port included. |
+| `NANOBOM_PUBLIC_URL` | `--public-url` | `http://localhost:8080` | The address users reach nanobom at. Used for links in webhooks, emails and API responses, the OpenID Connect redirect URI, the `Secure` flag of cookies (set when it is `https`) and the cross-site request check (the `Origin` of form submissions must match it). Set it to the address in the browser's address bar, scheme and port included. |
 | `NANOBOM_LISTEN_ADDRESS` | `--listen-address` | `0.0.0.0:8080` | Address and port to listen on. `127.0.0.1:8080` keeps nanobom reachable only through a local reverse proxy. |
 | `NANOBOM_SITE_ROOT` | `--site-root` | `site` | The directory of the web interface's assets (the `site` directory of a release archive; `/app/site` in the image). Relative paths are relative to the working directory. |
 
@@ -55,6 +55,19 @@ See [Run on PostgreSQL](../how-to/postgresql.md).
 | `NANOBOM_MAXIMUM_SBOM_SIZE` | `--maximum-sbom-size` | `16` | Largest accepted SBOM, in MiB. Parsing takes a few times this much memory. |
 | `NANOBOM_STALE_AFTER_DAYS` | `--stale-after-days` | `30` | Days without an SBOM after which a project is stale; `0` turns the feature off. |
 | `NANOBOM_FAILURE_WEBHOOK_URL` | `--failure-webhook-url` | | Receives a [`run.failed`](webhooks.md#runfailed) document when a run fails. |
+
+## Email
+
+| Variable | Flag | Default | |
+| --- | --- | --- | --- |
+| `NANOBOM_SMTP_URL` | `--smtp-url` | | The SMTP server that sends [email notifications](webhooks.md#emails). Unset, email is off and organizations' email settings are hidden. `smtps://user:password@smtp.example.org` connects with TLS (port 465 by default); `smtp://user:password@smtp.example.org:587?tls=required` upgrades the connection with STARTTLS and fails without it; `smtp://relay.internal:25` sends in clear text, for a relay on a trusted network only, so a `smtp://` URL with a user or password must set `tls=required` or `tls=opportunistic` (STARTTLS when the server offers it); nanobom refuses to start otherwise. Percent-encode special characters of the user and password (`@` as `%40`). Certificates are checked against the public authorities of [webpki-roots](https://github.com/rustls/webpki-roots). Treat it as a secret: it is not shown by `--help` nor logged. |
+| `NANOBOM_SMTP_FROM` | `--smtp-from` | | The sender of the emails, `nanobom@example.org` or `nanobom <nanobom@example.org>`. Required with `NANOBOM_SMTP_URL`. |
+
+nanobom refuses to start when `NANOBOM_SMTP_URL` is set without `NANOBOM_SMTP_FROM`, when either
+is invalid, or when a `smtp://` URL has credentials but no `tls=required` or `tls=opportunistic`
+(the error says so without repeating the URL). The SMTP server itself is contacted at the first email: send a test email from an
+organization's settings to check it. Removing `NANOBOM_SMTP_URL` abandons, at the next start, the
+emails still waiting for a retry.
 
 ## Exploitation data
 

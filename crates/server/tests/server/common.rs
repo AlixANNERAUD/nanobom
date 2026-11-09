@@ -80,10 +80,17 @@ async fn build(
             .with_retry_delay(Duration::ZERO),
         )
     });
+    // `--smtp-url` and `--smtp-from` turn email on, as they do for the real server.
+    let mailer = serve::mailer(&options).expect("valid SMTP options");
+    let notifier = Notifier::new().expect("an HTTP client");
+    let notifier = match mailer.clone() {
+        Some(mailer) => notifier.with_mailer(mailer),
+        None => notifier,
+    };
     let runner = Runner::start(
         database.clone(),
         Arc::new(Evaluator::new(database.clone(), Arc::clone(&source))),
-        Notifier::new().expect("an HTTP client"),
+        notifier,
         NotificationSettings {
             public_url: options.public_url.clone(),
             failure_webhook: options.failure_webhook_url.clone(),
@@ -100,6 +107,7 @@ async fn build(
         leptos_options,
         runner.clone(),
         openid,
+        mailer,
     );
     TestServer {
         database,

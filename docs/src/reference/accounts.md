@@ -18,7 +18,7 @@ Each member of an organization has one of four roles, each including the ones be
 | Add, change and remove members other than owners | | | ✓ | ✓ |
 | Delete projects | | | ✓ | ✓ |
 | Create and revoke API tokens, upload or read | | | ✓ | ✓ |
-| Configure the webhook | | | ✓ | ✓ |
+| Configure the webhook and email notifications, send a test email | | | ✓ | ✓ |
 | Change the [license policy](license-policy.md) | | | ✓ | ✓ |
 | Rename the organization | | | ✓ | ✓ |
 | Grant and remove the owner role | | | | ✓ |

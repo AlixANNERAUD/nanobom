@@ -139,7 +139,7 @@ async fn a_stale_period_is_notified_once_and_again_after_a_new_upload() {
     let public_url = "https://nanobom.example.org/".parse().unwrap();
 
     // The organization without a webhook is left out, and its project stays unnotified.
-    let deliveries = notifications::stale_deliveries(&database, 30, &public_url)
+    let deliveries = notifications::stale_deliveries(&database, 30, &public_url, false)
         .await
         .unwrap();
     assert_eq!(deliveries.len(), 1);
@@ -156,7 +156,7 @@ async fn a_stale_period_is_notified_once_and_again_after_a_new_upload() {
 
     // Once per stale period.
     assert!(
-        notifications::stale_deliveries(&database, 30, &public_url)
+        notifications::stale_deliveries(&database, 30, &public_url, false)
             .await
             .unwrap()
             .is_empty()
@@ -173,7 +173,7 @@ async fn a_stale_period_is_notified_once_and_again_after_a_new_upload() {
     active.last_upload_at = Set(Some(Utc::now().fixed_offset()));
     let web = active.update(&database).await.unwrap();
     assert!(
-        notifications::stale_deliveries(&database, 30, &public_url)
+        notifications::stale_deliveries(&database, 30, &public_url, false)
             .await
             .unwrap()
             .is_empty()
@@ -183,7 +183,7 @@ async fn a_stale_period_is_notified_once_and_again_after_a_new_upload() {
     active.stale_notified_at = Set(Some((Utc::now() - Duration::days(36)).fixed_offset()));
     active.update(&database).await.unwrap();
     assert_eq!(
-        notifications::stale_deliveries(&database, 30, &public_url)
+        notifications::stale_deliveries(&database, 30, &public_url, false)
             .await
             .unwrap()
             .len(),
@@ -217,12 +217,12 @@ async fn projects_that_never_uploaded_are_notified_once() {
         .unwrap();
     age(&database, project, 45, None).await;
     let public_url = "https://nanobom.example.org/".parse().unwrap();
-    let first = notifications::stale_deliveries(&database, 30, &public_url)
+    let first = notifications::stale_deliveries(&database, 30, &public_url, false)
         .await
         .unwrap();
     assert_eq!(first[0].payload.projects[0].last_upload_at, None);
     assert!(
-        notifications::stale_deliveries(&database, 30, &public_url)
+        notifications::stale_deliveries(&database, 30, &public_url, false)
             .await
             .unwrap()
             .is_empty()

@@ -1,5 +1,5 @@
-//! Webhooks: each organization can send its new findings to a URL as JSON, grouped per run,
-//! and the instance can report failed runs to another URL.
+//! Webhooks and emails: each organization can send its new findings to a URL as JSON, grouped
+//! per run, and by email ([`crate::email`]); the instance can report failed runs to another URL.
 //!
 //! Payloads (documented in the guide's webhook reference):
 //!
@@ -9,21 +9,26 @@
 //! - `projects.stale`: projects of one organization whose SBOM stopped coming;
 //! - `run.failed`: a run that could not complete, sent to the instance's failure webhook.
 //!
-//! Deliveries go through the queue of [`crate::deliveries`], which retries failed ones.
+//! Deliveries go through the queue of [`crate::deliveries`], which retries failed ones. An
+//! organization's webhook and its email recipients are two [`Target`]s of the same documents,
+//! each with its own filters (minimum severity, known exploited only): a document is prepared
+//! for each.
 //!
 //! Only the webhook settings ([`get`], [`set`], [`delete`]) take an actor. The rest is called
 //! by the run worker after a run, with no actor; isolation then rests on grouping: a
 //! `findings.new` or `projects.stale` document is built per organization from that
-//! organization's projects only, and goes to that organization's webhook only. `run.failed`,
+//! organization's projects only, and goes to that organization's webhook and email recipients
+//! only. `run.failed`,
 //! whose error may name packages of any organization, goes to the instance's failure webhook,
 //! configured by the operator, never to an organization.
 //!
 //! Preparing a document and marking what it reports as notified (findings that became known
 //! exploited, stale projects) happen in one transaction with the enqueueing
 //! ([`queue_new_findings`], [`queue_stale`]): a crash cannot lose a notification nor send it
-//! twice. Findings are marked even in organizations without an enabled webhook, so enabling
-//! one later does not replay old findings; stale projects are marked only when a document
-//! reports them, so a webhook enabled later still hears about projects that are already stale.
+//! twice. Findings are marked even in organizations without an enabled webhook or email, so
+//! enabling one later does not replay old findings; stale projects are marked only when a
+//! document reports them, so a webhook enabled later still hears about projects that are
+//! already stale.
 //!
 //! An organization's webhook has a [`Format`]: the generic JSON documents above, or a message
 //! for Slack or Microsoft Teams ([`crate::chat`]) that says the same thing. The format applies to
@@ -54,8 +59,9 @@ use serde::{Deserialize, Serialize};
 use crate::{
     access::{Actor, Permission},
     chat,
-    deliveries::{self, Attempt, Outcome},
+    deliveries::{self, Attempt, Channel, Outcome},
     dependencies::Graph,
+    email::{self, Language, Mailer},
     error::{Error, Result},
     evaluation::{self, RunOutcome, Scope},
     exploitation::{self, Exploitation, QUERY_CHUNK},
@@ -176,7 +182,7 @@ pub async fn set(
     let model = match existing {
         Some(model) => {
             if !enabled || model.url != url.as_str() || model.format != format.as_str() {
-                deliveries::cancel_pending(database, organization_id).await?;
+                deliveries::cancel_pending(database, organization_id, Channel::Webhook).await?;
             }
             let mut active: organization_webhooks::ActiveModel = model.into();
             active.url = Set(url.to_string());
@@ -218,7 +224,7 @@ pub async fn delete(
     {
         model.delete(database).await?;
     }
-    deliveries::cancel_pending(database, organization_id).await?;
+    deliveries::cancel_pending(database, organization_id, Channel::Webhook).await?;
     Ok(())
 }
 
@@ -322,6 +328,11 @@ pub trait Payload: Serialize {
     fn render(&self, _format: Format) -> String {
         serde_json::to_string(self).expect("payloads serialize to JSON")
     }
+
+    /// The email of this document, for the documents organizations receive by email.
+    fn email(&self, _language: Language) -> Option<email::Message> {
+        None
+    }
 }
 
 impl Payload for NewFindingsPayload {
@@ -335,6 +346,10 @@ impl Payload for NewFindingsPayload {
             Format::Slack => chat::slack_new_findings(self),
             Format::Teams => chat::teams_new_findings(self),
         }
+    }
+
+    fn email(&self, language: Language) -> Option<email::Message> {
+        Some(email::new_findings(self, language))
     }
 }
 
@@ -350,6 +365,10 @@ impl Payload for StaleProjectsPayload {
             Format::Teams => chat::teams_stale_projects(self),
         }
     }
+
+    fn email(&self, language: Language) -> Option<email::Message> {
+        Some(email::stale_projects(self, language))
+    }
 }
 
 impl Payload for RunFailedPayload {
@@ -358,15 +377,81 @@ impl Payload for RunFailedPayload {
     }
 }
 
-/// A webhook delivery to make.
+/// Where a delivery goes, and how its payload is rendered when it is queued.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Target {
+    Webhook {
+        url: String,
+        format: Format,
+    },
+    Email {
+        recipients: Vec<String>,
+        language: Language,
+    },
+}
+
+/// A delivery to make.
 #[derive(Debug, Clone)]
 pub struct Delivery<T> {
     /// `None` for the instance's failure webhook.
     pub organization_id: Option<i64>,
-    pub url: String,
-    /// How the payload is rendered when the delivery is queued.
-    pub format: Format,
+    pub target: Target,
     pub payload: T,
+}
+
+/// Where an organization's notifications go, with the filters of each destination.
+struct Destination {
+    target: Target,
+    minimum_severity: Severity,
+    exploited_only: bool,
+}
+
+impl Destination {
+    fn accepts(&self, entry: &Entry) -> bool {
+        if self.exploited_only {
+            entry.exploitation.known_exploited
+        } else {
+            entry.exploitation.known_exploited || entry.severity >= self.minimum_severity
+        }
+    }
+}
+
+/// The destinations of an organization: its webhook if enabled, and its email recipients when
+/// the instance sends email (`email`) and the organization has some.
+async fn destinations(
+    database: &impl ConnectionTrait,
+    organization_id: i64,
+    email: bool,
+) -> Result<Vec<Destination>> {
+    let mut destinations = Vec::new();
+    if let Some(webhook) = organization_webhooks::Entity::find_by_id(organization_id)
+        .one(database)
+        .await?
+        .filter(|webhook| webhook.enabled)
+    {
+        destinations.push(Destination {
+            minimum_severity: webhook
+                .minimum_severity
+                .parse()
+                .unwrap_or(Severity::Unknown),
+            exploited_only: webhook.exploited_only,
+            target: Target::Webhook {
+                format: Format::parse(&webhook.format).unwrap_or_default(),
+                url: webhook.url,
+            },
+        });
+    }
+    if email && let Some(settings) = email::settings(database, organization_id).await? {
+        destinations.push(Destination {
+            minimum_severity: settings.minimum_severity,
+            exploited_only: settings.exploited_only,
+            target: Target::Email {
+                recipients: settings.recipients,
+                language: settings.language,
+            },
+        });
+    }
+    Ok(destinations)
 }
 
 /// A finding to deliver, with why and what is known about its exploitation.
@@ -493,21 +578,23 @@ async fn mark_notified(database: &impl ConnectionTrait, ids: &[i64]) -> Result<(
     Ok(())
 }
 
-/// The `findings.new` deliveries a successful run calls for: one per organization with an
-/// enabled webhook and findings to report, which are
+/// The `findings.new` deliveries a successful run calls for: one per organization and
+/// destination (an enabled webhook, email recipients when `email` is on) with findings to
+/// report, which are
 ///
-/// - the findings the run opened or reopened, at or above the webhook's minimum severity
+/// - the findings the run opened or reopened, at or above the destination's minimum severity
 ///   (known exploited ones whatever their severity);
 /// - the open findings of the run's scope that are known exploited and were never notified as
 ///   such (`exploited` reason), once.
 ///
 /// With `exploited_only`, only known exploited findings are delivered. Every known exploited
-/// open finding of the scope is then marked as notified, with or without a webhook, so that
-/// enabling a webhook later does not replay old findings.
+/// open finding of the scope is then marked as notified, with or without a destination, so
+/// that enabling one later does not replay old findings.
 pub async fn new_findings_deliveries(
     database: &impl ConnectionTrait,
     outcome: &RunOutcome,
     public_url: &Url,
+    email: bool,
 ) -> Result<Vec<Delivery<NewFindingsPayload>>> {
     let opened: BTreeSet<i64> = outcome
         .new_findings
@@ -603,28 +690,8 @@ pub async fn new_findings_deliveries(
     let mut deliveries = Vec::new();
     let mut graphs: HashMap<i64, Graph> = HashMap::new();
     for (organization_id, entries) in by_organization {
-        let Some(webhook) = organization_webhooks::Entity::find_by_id(organization_id)
-            .one(database)
-            .await?
-            .filter(|webhook| webhook.enabled)
-        else {
-            continue;
-        };
-        let minimum: Severity = webhook
-            .minimum_severity
-            .parse()
-            .unwrap_or(Severity::Unknown);
-        let entries: Vec<Entry> = entries
-            .into_iter()
-            .filter(|entry| {
-                if webhook.exploited_only {
-                    entry.exploitation.known_exploited
-                } else {
-                    entry.exploitation.known_exploited || entry.severity >= minimum
-                }
-            })
-            .collect();
-        if entries.is_empty() {
+        let destinations = destinations(database, organization_id, email).await?;
+        if destinations.is_empty() {
             continue;
         }
         let Some(organization) = organizations::Entity::find_by_id(organization_id)
@@ -633,52 +700,37 @@ pub async fn new_findings_deliveries(
         else {
             continue;
         };
-        let mut introduced_via = Vec::with_capacity(entries.len());
-        for entry in &entries {
-            let graph = match graphs.entry(entry.project_id) {
-                std::collections::hash_map::Entry::Occupied(graph) => graph.into_mut(),
-                std::collections::hash_map::Entry::Vacant(vacant) => {
-                    vacant.insert(Graph::load(database, entry.project_id).await?)
-                }
-            };
-            let mut names: Vec<String> = graph
-                .introduced_via(&entry.purl)
-                .into_iter()
-                .map(|component| component.name)
+        for destination in destinations {
+            let entries: Vec<&Entry> = entries
+                .iter()
+                .filter(|entry| destination.accepts(entry))
                 .collect();
-            names.dedup();
-            introduced_via.push(names);
-        }
-        let payload = NewFindingsPayload {
-            event: "findings.new".to_owned(),
-            organization: PayloadOrganization {
-                url: link(public_url, &format!("organizations/{}", organization.slug)),
-                slug: organization.slug,
-                name: organization.name,
-            },
-            run: run(outcome),
-            count: entries.len(),
-            highest_severity: entries
-                .iter()
-                .map(|entry| entry.severity)
-                .max()
-                .unwrap_or(Severity::Unknown),
-            known_exploited_count: entries
-                .iter()
-                .filter(|entry| entry.exploitation.known_exploited)
-                .count(),
-            findings: entries
-                .into_iter()
-                .zip(introduced_via)
-                .map(|(entry, introduced_via)| PayloadFinding {
+            if entries.is_empty() {
+                continue;
+            }
+            let mut findings = Vec::with_capacity(entries.len());
+            for entry in &entries {
+                let graph = match graphs.entry(entry.project_id) {
+                    std::collections::hash_map::Entry::Occupied(graph) => graph.into_mut(),
+                    std::collections::hash_map::Entry::Vacant(vacant) => {
+                        vacant.insert(Graph::load(database, entry.project_id).await?)
+                    }
+                };
+                let mut introduced_via: Vec<String> = graph
+                    .introduced_via(&entry.purl)
+                    .into_iter()
+                    .map(|component| component.name)
+                    .collect();
+                introduced_via.dedup();
+                findings.push(PayloadFinding {
                     url: link(public_url, &format!("findings/{}", entry.finding_id)),
-                    project: entry.project_slug,
-                    component: entry.purl,
-                    vulnerability: entry.vulnerability_id,
-                    aliases: entry.aliases,
+                    project: entry.project_slug.clone(),
+                    component: entry.purl.clone(),
+                    vulnerability: entry.vulnerability_id.clone(),
+                    aliases: entry.aliases.clone(),
                     severity: entry.severity,
                     cvss_score: entry.cvss_score,
-                    summary: entry.summary,
+                    summary: entry.summary.clone(),
                     reopened: entry.reason == Reason::Reopened,
                     reason: entry.reason.as_str().to_owned(),
                     known_exploited: entry.exploitation.known_exploited,
@@ -686,27 +738,48 @@ pub async fn new_findings_deliveries(
                     epss: entry.exploitation.epss_score,
                     epss_percentile: entry.exploitation.epss_percentile,
                     introduced_via,
-                })
-                .collect(),
-        };
-        deliveries.push(Delivery {
-            organization_id: Some(organization_id),
-            url: webhook.url,
-            format: Format::parse(&webhook.format).unwrap_or_default(),
-            payload,
-        });
+                });
+            }
+            let payload = NewFindingsPayload {
+                event: "findings.new".to_owned(),
+                organization: PayloadOrganization {
+                    url: link(public_url, &format!("organizations/{}", organization.slug)),
+                    slug: organization.slug.clone(),
+                    name: organization.name.clone(),
+                },
+                run: run(outcome),
+                count: entries.len(),
+                highest_severity: entries
+                    .iter()
+                    .map(|entry| entry.severity)
+                    .max()
+                    .unwrap_or(Severity::Unknown),
+                known_exploited_count: entries
+                    .iter()
+                    .filter(|entry| entry.exploitation.known_exploited)
+                    .count(),
+                findings,
+            };
+            deliveries.push(Delivery {
+                organization_id: Some(organization_id),
+                target: destination.target,
+                payload,
+            });
+        }
     }
     mark_notified(database, &to_mark).await?;
     Ok(deliveries)
 }
 
-/// The `projects.stale` deliveries to make: one per organization with an enabled webhook and
-/// projects that became stale since their last notification, whatever the webhook's minimum
-/// severity and `exploited_only`. The projects are marked as notified.
+/// The `projects.stale` deliveries to make: one per organization and destination (an enabled
+/// webhook, email recipients when `email` is on) for the projects that became stale since their
+/// last notification, whatever the destination's minimum severity and `exploited_only`. The
+/// projects are marked as notified.
 pub async fn stale_deliveries(
     database: &impl ConnectionTrait,
     stale_after_days: u32,
     public_url: &Url,
+    email: bool,
 ) -> Result<Vec<Delivery<StaleProjectsPayload>>> {
     let mut deliveries = Vec::new();
     let mut notified = Vec::new();
@@ -717,41 +790,40 @@ pub async fn stale_deliveries(
         else {
             continue;
         };
-        let Some(webhook) = organization_webhooks::Entity::find_by_id(organization_id)
-            .one(database)
-            .await?
-            .filter(|webhook| webhook.enabled)
-        else {
+        let destinations = destinations(database, organization_id, email).await?;
+        if destinations.is_empty() {
             continue;
-        };
+        }
         notified.extend(projects.iter().map(|project| project.id));
-        deliveries.push(Delivery {
-            organization_id: Some(organization_id),
-            format: Format::parse(&webhook.format).unwrap_or_default(),
-            url: webhook.url,
-            payload: StaleProjectsPayload {
-                event: "projects.stale".to_owned(),
-                projects: projects
-                    .into_iter()
-                    .map(|project| PayloadStaleProject {
-                        url: link(
-                            public_url,
-                            &format!(
-                                "organizations/{}/projects/{}",
-                                organization.slug, project.slug
-                            ),
+        let payload = StaleProjectsPayload {
+            event: "projects.stale".to_owned(),
+            projects: projects
+                .into_iter()
+                .map(|project| PayloadStaleProject {
+                    url: link(
+                        public_url,
+                        &format!(
+                            "organizations/{}/projects/{}",
+                            organization.slug, project.slug
                         ),
-                        project: project.slug,
-                        last_upload_at: project.last_upload_at,
-                    })
-                    .collect(),
-                organization: PayloadOrganization {
-                    url: link(public_url, &format!("organizations/{}", organization.slug)),
-                    slug: organization.slug,
-                    name: organization.name,
-                },
+                    ),
+                    project: project.slug,
+                    last_upload_at: project.last_upload_at,
+                })
+                .collect(),
+            organization: PayloadOrganization {
+                url: link(public_url, &format!("organizations/{}", organization.slug)),
+                slug: organization.slug,
+                name: organization.name,
             },
-        });
+        };
+        for destination in destinations {
+            deliveries.push(Delivery {
+                organization_id: Some(organization_id),
+                target: destination.target,
+                payload: payload.clone(),
+            });
+        }
     }
     staleness::mark_notified(database, &notified).await?;
     Ok(deliveries)
@@ -775,19 +847,58 @@ pub async fn enqueue<T: Payload>(
     database: &impl ConnectionTrait,
     deliveries: &[Delivery<T>],
 ) -> Result<Vec<i64>> {
+    Ok(enqueue_each(database, deliveries)
+        .await?
+        .into_iter()
+        .flatten()
+        .collect())
+}
+
+/// Like [`enqueue`], with the ids of each delivery apart: a webhook delivery is one row, an
+/// email one row per recipient, all with the same message, so that a recipient the SMTP
+/// server refuses fails alone (see [`crate::email`]).
+async fn enqueue_each<T: Payload>(
+    database: &impl ConnectionTrait,
+    deliveries: &[Delivery<T>],
+) -> Result<Vec<Vec<i64>>> {
     let now = Utc::now().fixed_offset();
     let mut ids = Vec::with_capacity(deliveries.len());
     for delivery in deliveries {
-        let row = deliveries::enqueue_body(
-            database,
-            delivery.organization_id,
-            &delivery.url,
-            delivery.payload.event(),
-            delivery.payload.render(delivery.format),
-            now,
-        )
-        .await?;
-        ids.push(row.id);
+        let rows: Vec<(Channel, &str, String)> = match &delivery.target {
+            Target::Webhook { url, format } => {
+                vec![(Channel::Webhook, url, delivery.payload.render(*format))]
+            }
+            Target::Email {
+                recipients,
+                language,
+            } => {
+                let mut message = delivery
+                    .payload
+                    .email(*language)
+                    .expect("only documents with an email are sent by email");
+                message.to.clone_from(recipients);
+                let body = serde_json::to_string(&message).expect("messages serialize to JSON");
+                recipients
+                    .iter()
+                    .map(|recipient| (Channel::Email, recipient.as_str(), body.clone()))
+                    .collect()
+            }
+        };
+        let mut delivery_ids = Vec::with_capacity(rows.len());
+        for (channel, address, body) in rows {
+            let row = deliveries::enqueue_body(
+                database,
+                delivery.organization_id,
+                channel,
+                address,
+                delivery.payload.event(),
+                body,
+                now,
+            )
+            .await?;
+            delivery_ids.push(row.id);
+        }
+        ids.push(delivery_ids);
     }
     Ok(ids)
 }
@@ -799,23 +910,30 @@ pub async fn queue_new_findings(
     database: &DatabaseConnection,
     outcome: &RunOutcome,
     public_url: &Url,
+    email: bool,
 ) -> Result<Vec<i64>> {
     let transaction = crate::database::begin_write(database).await?;
-    let deliveries = new_findings_deliveries(&transaction, outcome, public_url).await?;
-    let ids = enqueue(&transaction, &deliveries).await?;
+    let deliveries = new_findings_deliveries(&transaction, outcome, public_url, email).await?;
+    let ids = enqueue_each(&transaction, &deliveries).await?;
     transaction.commit().await?;
-    // The attempt logs only know the queued row, whose body is rendered (JSON, Slack or
-    // Teams), so the number of findings is logged here, under the same delivery id.
-    for (delivery, id) in deliveries.iter().zip(&ids) {
-        tracing::info!(
-            delivery = id,
-            organization = delivery.organization_id,
-            findings = delivery.payload.count,
-            known_exploited = delivery.payload.known_exploited_count,
-            "findings.new delivery queued"
-        );
+    // The attempt logs only know the queued row, whose body is rendered (JSON, Slack, Teams or
+    // an email), so the number of findings is logged here, under the same delivery id.
+    for (delivery, ids) in deliveries.iter().zip(&ids) {
+        for id in ids {
+            tracing::info!(
+                delivery = id,
+                organization = delivery.organization_id,
+                channel = match delivery.target {
+                    Target::Webhook { .. } => Channel::Webhook.as_str(),
+                    Target::Email { .. } => Channel::Email.as_str(),
+                },
+                findings = delivery.payload.count,
+                known_exploited = delivery.payload.known_exploited_count,
+                "findings.new delivery queued"
+            );
+        }
     }
-    Ok(ids)
+    Ok(ids.into_iter().flatten().collect())
 }
 
 /// Prepares the `projects.stale` deliveries ([`stale_deliveries`]) and records them in the
@@ -824,9 +942,10 @@ pub async fn queue_stale(
     database: &DatabaseConnection,
     stale_after_days: u32,
     public_url: &Url,
+    email: bool,
 ) -> Result<Vec<i64>> {
     let transaction = crate::database::begin_write(database).await?;
-    let deliveries = stale_deliveries(&transaction, stale_after_days, public_url).await?;
+    let deliveries = stale_deliveries(&transaction, stale_after_days, public_url, email).await?;
     let ids = enqueue(&transaction, &deliveries).await?;
     transaction.commit().await?;
     Ok(ids)
@@ -850,8 +969,10 @@ pub async fn fail_interrupted_runs(
             .filter_map(|outcome| {
                 Some(Delivery {
                     organization_id: None,
-                    url: url.to_string(),
-                    format: Format::Json,
+                    target: Target::Webhook {
+                        url: url.to_string(),
+                        format: Format::Json,
+                    },
                     payload: run_failed_payload(outcome, public_url)?,
                 })
             })
@@ -862,22 +983,37 @@ pub async fn fail_interrupted_runs(
     Ok(outcomes)
 }
 
-/// Sends webhook payloads through the delivery queue.
+/// Sends webhook payloads and emails through the delivery queue.
 #[derive(Debug, Clone)]
 pub struct Notifier {
     http: reqwest::Client,
+    /// `None` when the instance has no SMTP server: email is off.
+    mailer: Option<Mailer>,
 }
 
 impl Notifier {
     /// A client with a 15-second timeout per post, so a receiver that hangs holds one attempt
-    /// only. Fails only if the TLS backend cannot be initialized.
+    /// only, and no mailer. Fails only if the TLS backend cannot be initialized.
     pub fn new() -> std::result::Result<Self, reqwest::Error> {
         Ok(Self {
             http: reqwest::Client::builder()
                 .user_agent(concat!("nanobom/", env!("CARGO_PKG_VERSION")))
                 .timeout(Duration::from_secs(15))
                 .build()?,
+            mailer: None,
         })
+    }
+
+    /// Sends emails through this mailer.
+    #[must_use]
+    pub fn with_mailer(mut self, mailer: Mailer) -> Self {
+        self.mailer = Some(mailer);
+        self
+    }
+
+    /// The mailer, when the instance sends email.
+    pub fn mailer(&self) -> Option<&Mailer> {
+        self.mailer.as_ref()
     }
 
     /// Posts a JSON body once. Slack and Teams answer 200 and 202, which count as delivered
@@ -904,7 +1040,7 @@ impl Notifier {
         &self,
         database: &impl ConnectionTrait,
         deliveries: Vec<Delivery<T>>,
-    ) -> Result<Vec<Outcome>> {
+    ) -> Result<Vec<(Channel, Outcome)>> {
         let ids = enqueue(database, &deliveries).await?;
         self.attempt_all(database, &ids).await
     }
@@ -915,7 +1051,7 @@ impl Notifier {
         &self,
         database: &impl ConnectionTrait,
         ids: &[i64],
-    ) -> Result<Vec<Outcome>> {
+    ) -> Result<Vec<(Channel, Outcome)>> {
         let mut outcomes = Vec::new();
         for &id in ids {
             outcomes.extend(self.attempt(database, id).await?);
@@ -929,7 +1065,7 @@ impl Notifier {
         &self,
         database: &impl ConnectionTrait,
         limit: u64,
-    ) -> Result<Vec<Outcome>> {
+    ) -> Result<Vec<(Channel, Outcome)>> {
         let mut outcomes = Vec::new();
         for row in deliveries::due(database, Utc::now().fixed_offset(), limit).await? {
             outcomes.extend(self.attempt(database, row.id).await?);
@@ -937,46 +1073,61 @@ impl Notifier {
         Ok(outcomes)
     }
 
-    /// Claims a delivery, posts it and records the result; `None` when another attempt holds
-    /// it, it is not due, or it was cancelled during the attempt.
-    async fn attempt(&self, database: &impl ConnectionTrait, id: i64) -> Result<Option<Outcome>> {
+    /// Claims a delivery, posts or mails it and records the result; `None` when another
+    /// attempt holds it, it is not due, or it was cancelled during the attempt.
+    async fn attempt(
+        &self,
+        database: &impl ConnectionTrait,
+        id: i64,
+    ) -> Result<Option<(Channel, Outcome)>> {
         let Some(row) = deliveries::claim(database, id, Utc::now().fixed_offset()).await? else {
             return Ok(None);
         };
-        let attempt = self.post(&row.url, row.payload.clone()).await;
-        log(&row, &attempt);
+        let channel = Channel::parse(&row.channel);
+        let attempt = match (channel, &self.mailer) {
+            (Channel::Webhook, _) => self.post(&row.url, row.payload.clone()).await,
+            (Channel::Email, Some(mailer)) => mailer.send_stored(&row.url, &row.payload).await,
+            (Channel::Email, None) => {
+                Attempt::Impossible("email is not configured on this server".to_owned())
+            }
+        };
+        log(&row, channel, &attempt);
         let delivery = row.id;
         let outcome =
             deliveries::record(database, row, &attempt, Utc::now().fixed_offset()).await?;
         if outcome.is_none() {
             tracing::info!(
                 delivery,
-                "webhook delivery cancelled or taken over during its attempt; result not recorded"
+                channel = channel.as_str(),
+                "delivery cancelled or taken over during its attempt; result not recorded"
             );
         }
-        Ok(outcome)
+        Ok(outcome.map(|outcome| (channel, outcome)))
     }
 }
 
-fn log(row: &webhook_deliveries::Model, attempt: &Attempt) {
+fn log(row: &webhook_deliveries::Model, channel: Channel, attempt: &Attempt) {
     let number = row.attempts + 1;
+    let channel = channel.as_str();
     if attempt.succeeded() {
         tracing::info!(
             delivery = row.id,
             organization = row.organization_id,
+            channel,
             event = row.event,
             attempt = number,
-            "webhook delivered"
+            "notification delivered"
         );
     } else {
         let status = attempt.description();
         tracing::warn!(
             delivery = row.id,
             organization = row.organization_id,
+            channel,
             event = row.event,
             attempt = number,
             status,
-            "webhook delivery failed"
+            "notification delivery failed"
         );
     }
 }

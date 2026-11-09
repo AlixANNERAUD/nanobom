@@ -19,7 +19,7 @@
 //!   the command line (the `*_from_command_line` functions of [`tokens`]);
 //! - background work of the server over the whole instance: runs ([`evaluation::Evaluator`],
 //!   which trusts its caller to have checked [`evaluation::authorize`]), exploitation data,
-//!   webhook deliveries, stale projects;
+//!   webhook and email deliveries, stale projects;
 //! - instance-wide counts for the metrics, which never name an organization.
 //!
 //! # Concepts
@@ -36,9 +36,9 @@
 //!   expiry.
 //! - Findings are prioritized with exploitation signals ([`exploitation`]: CISA KEV and EPSS),
 //!   projects whose SBOM stopped coming are flagged ([`staleness`]), and organizations are told
-//!   about new findings through webhooks ([`notifications`]), whose deliveries are queued and
-//!   retried ([`deliveries`]); they can post to Slack and Microsoft Teams ([`chat`]) instead of
-//!   sending JSON.
+//!   about new findings through webhooks ([`notifications`]) and email ([`email`]), whose
+//!   deliveries are queued and retried ([`deliveries`]); webhooks can post to Slack and
+//!   Microsoft Teams ([`chat`]) instead of sending JSON.
 //! - An organization's **license policy** ([`licenses`]) allows, warns about or forbids the
 //!   licenses of its components; violations are computed when read.
 //!
@@ -65,6 +65,7 @@ pub mod chat;
 pub mod database;
 pub mod deliveries;
 pub mod dependencies;
+pub mod email;
 pub mod error;
 pub mod evaluation;
 pub mod exploitation;
@@ -85,6 +86,9 @@ pub mod vex;
 
 pub use error::{Error, Result};
 pub use problem::{Field, Problem};
+/// The URL type of addresses such as the instance's public URL, for crates that do not depend
+/// on `reqwest` themselves.
+pub use reqwest::Url;
 
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;

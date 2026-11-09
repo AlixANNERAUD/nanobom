@@ -51,16 +51,16 @@ run request (upload, schedule, manual)
               5. the run is recorded as succeeded or failed (a failure changes no finding)
         └─► if it succeeded: exploitation data (KEV, EPSS) refreshed for the scope (≤ 60 s)
         └─► uploads waiting for this run are answered
-        └─► gauges updated; webhook documents queued and posted (findings.new;
+        └─► gauges updated; webhook documents and emails queued and sent (findings.new;
             projects.stale after scheduled runs), or run.failed to the failure webhook
 
-webhook retry loop (every 30 s): due deliveries posted again, a few at a time;
+delivery retry loop (every 30 s): due webhook posts and emails sent again, a few at a time;
   delivered and abandoned ones deleted after 30 days
 ```
 
 Exploitation data comes before the waiting uploads so that `fail_on=exploited` sees the CVEs of
-this run; notifications come after, so slow webhooks never hold CI. Webhook documents are stored
-before their first attempt, so a receiver that is down gets them once it is back (see
+this run; notifications come after, so slow webhooks never hold CI. Webhook documents and emails
+are stored before their first attempt, so a receiver that is down gets them once it is back (see
 [Delivery](../reference/webhooks.md#delivery)). A run that panics, or that a restart interrupts,
 is recorded as failed and notified like any failed run; at startup the failure document is only
 queued, and the retry loop posts it, so the server listens without waiting for the receiver. The

@@ -3,7 +3,7 @@
 use nanobom_domain::{
     Error,
     access::{Actor, Role},
-    deliveries::{self, Outcome, State},
+    deliveries::{self, Channel, Outcome, State},
     evaluation::{NewFinding, RunOutcome, Scope, Trigger},
     memberships, notifications, organizations, testing,
     users::{self, NewUser},
@@ -219,7 +219,7 @@ async fn new_findings_are_grouped_per_organization_and_filtered_by_severity() {
         None,
     );
     let public_url = "https://nanobom.example.org/".parse().unwrap();
-    let deliveries = notifications::new_findings_deliveries(&database, &run, &public_url)
+    let deliveries = notifications::new_findings_deliveries(&database, &run, &public_url, false)
         .await
         .unwrap();
     assert_eq!(
@@ -245,7 +245,7 @@ async fn new_findings_are_grouped_per_organization_and_filtered_by_severity() {
         .deliver(&database, deliveries)
         .await
         .unwrap();
-    assert_eq!(outcomes, [Outcome::Delivered]);
+    assert_eq!(outcomes, [(Channel::Webhook, Outcome::Delivered)]);
     let requests = server.received_requests().await.unwrap();
     let body: Value = serde_json::from_slice(&requests[0].body).unwrap();
     assert_eq!(body["event"], "findings.new");
@@ -291,6 +291,7 @@ async fn failed_deliveries_are_recorded_for_a_retry() {
         &database,
         &run,
         &"http://localhost/".parse().unwrap(),
+        false,
     )
     .await
     .unwrap();
@@ -300,7 +301,7 @@ async fn failed_deliveries_are_recorded_for_a_retry() {
         .deliver(&database, deliveries)
         .await
         .unwrap();
-    assert_eq!(outcomes, [Outcome::Retried]);
+    assert_eq!(outcomes, [(Channel::Webhook, Outcome::Retried)]);
     let recent = deliveries::recent(&database, &owner, acme.id, 10)
         .await
         .unwrap();
@@ -433,6 +434,7 @@ impl Exploited {
             &self.database,
             &outcome(new_findings, None),
             &"https://nanobom.example.org/".parse().unwrap(),
+            false,
         )
         .await
         .unwrap()

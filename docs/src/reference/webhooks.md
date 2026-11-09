@@ -1,16 +1,19 @@
-# Webhook payloads
+# Webhook payloads and emails
 
 nanobom sends documents with `POST` to webhooks, as JSON or, for an organization's webhook,
-as a message for Slack or Microsoft Teams:
+as a message for Slack or Microsoft Teams, and emails them to an organization's recipients:
 
 | Event | Sent to | When |
 | --- | --- | --- |
-| `findings.new` | the organization's webhook | after a successful run that opened or reopened findings worth reporting, or found open findings newly known exploited |
-| `projects.stale` | the organization's webhook | after a successful scheduled run, when projects became stale |
+| `findings.new` | the organization's webhook and email recipients | after a successful run that opened or reopened findings worth reporting, or found open findings newly known exploited |
+| `projects.stale` | the organization's webhook and email recipients | after a successful scheduled run, when projects became stale |
 | `run.failed` | `NANOBOM_FAILURE_WEBHOOK_URL` (instance) | when a run fails |
 
 An organization's webhook is configured in **Settings → Webhook** (URL, format, minimum severity,
-only known exploited vulnerabilities, enabled); see [Get notified](../how-to/notifications.md).
+only known exploited vulnerabilities, enabled), its email recipients in **Settings → Email
+notifications** (recipients, language, minimum severity, only known exploited vulnerabilities);
+see [Get notified](../how-to/notifications.md). The webhook and the email apply their own
+filters: each gets the findings that pass its own.
 
 ## Formats
 
@@ -108,7 +111,46 @@ A Workflows webhook usually answers `202 Accepted` before the workflow posts the
 delivery shown as delivered can still fail inside Power Automate (see the workflow's run
 history).
 
+## Emails
+
+When the instance has an SMTP server (`NANOBOM_SMTP_URL`, see
+[configuration](configuration.md#email)), an organization's `findings.new` and `projects.stale`
+events are also emailed to its recipients:
+
+- **One message per event and organization**, sent to each recipient separately: the SMTP
+  envelope of each copy holds one recipient, so an address the SMTP server refuses fails alone
+  and the others still get the email. The `To` header lists every recipient: they are the
+  organization's own people, and seeing who else was told helps them coordinate. At most 20
+  recipients; use a mailing list for more.
+- **From** `NANOBOM_SMTP_FROM`.
+- **Language**: English or French, chosen per organization (English by default).
+- **Subject**: `nanobom: 3 new vulnerabilities in acme/web` (the organization's slug and the
+  project when every finding is in one project, the organization's name otherwise) and
+  `nanobom: 2 projects stopped sending SBOMs`; in French, `nanobom : 3 nouvelles vulnérabilités
+  dans acme/web` and `nanobom : 2 projets n’envoient plus de SBOM`.
+- **Body**: a plain-text part and an HTML alternative with the same content: a headline (the
+  organization and the number of findings or projects), the highest severity and the number of
+  known exploited findings, then up to 50 findings, each with its identifier linking to its page,
+  its severity and tags (`reopened`, `known exploited`, `newly known exploited`), the component and
+  project, the summary and the direct dependencies that introduce it; for stale projects, each
+  project linking to its page with the time of its last SBOM. A line counts the items left out,
+  a link opens the organization, and a footer says why the reader gets the email and links to
+  the organization's settings.
+- Values from the data (names, components, summaries) are kept on one line and clipped (100
+  characters for names, 250 for components, 300 for summaries); the HTML part escapes them.
+- Links use `NANOBOM_PUBLIC_URL`.
+
+`run.failed` is not emailed: it goes to the failure webhook only.
+
+The **Send a test email** button of the settings sends a test message to each saved recipient at
+once and shows the SMTP server's reply for each address it refuses. The test message names the
+organization by its slug, never its display name, since it goes on demand to addresses nobody
+verified. Test emails are limited to one every 30 seconds per organization, one every 30 seconds
+per user, and 10 every 10 minutes for the whole instance.
+
 ## Delivery
+
+Webhook documents and emails go through the same queue, with the same retries.
 
 - One `POST` per document, `Content-Type: application/json`, with the `User-Agent`
   `nanobom/<version>`; the body is in the webhook's [format](#formats).
@@ -125,14 +167,26 @@ history).
   | `4xx`, except `408` and `429` | Failed for good: the receiver refuses the document and would refuse it again, so it is not retried |
   | `408`, `429`, `5xx`, any other status, a network error or a timeout | Retried |
 
+- Each recipient of an email is a delivery of its own, retried and abandoned on its own. Its copy
+  is sent in one connection; each SMTP command may take 15 seconds, the whole message 60. How
+  the SMTP server's reply is handled:
+
+  | Reply | Outcome |
+  | --- | --- |
+  | `2xx` (`250` once the message is queued) | Delivered |
+  | `5xx` (unknown mailbox, refused as spam, authentication failed) | Failed for good, not retried |
+  | `4xx` (mailbox busy, greylisting), a network or TLS error, or a timeout | Retried |
+  | No SMTP server configured any more | Failed for good |
+
 - Retries come 1 minute after the first attempt, then 10 minutes after the first retry, then
   1 hour after the second; when the third retry fails, the delivery is abandoned. Due retries are
   looked for every 30 seconds, so one can come up to 30 seconds late. The schedule survives a
   restart; an attempt cut short by a restart is retried 2 minutes later.
-- Every attempt that fails is logged (`webhook delivery failed`, with the delivery, its event,
-  the attempt number and the status) and counted by `nanobom_webhook_deliveries_total`
-  ([metrics](metrics.md)). The latest deliveries to an organization's webhook are listed in its
-  settings.
+- Every attempt that fails is logged (`notification delivery failed`, with the delivery, its
+  channel, its event, the attempt number and the status) and counted by
+  `nanobom_webhook_deliveries_total` ([metrics](metrics.md)). The latest deliveries of an
+  organization, webhook and email, are listed in its settings with their channel, and the
+  recipient of each email.
 - Removing an organization's webhook, disabling it or changing its URL or format abandons its deliveries
   still waiting for an attempt or a retry: no new attempt goes to an address the admins replaced
   or turned off. An attempt already in progress at that moment is not stopped, so its request
@@ -141,6 +195,10 @@ history).
   abandoned after a failed attempt as **Failed**. In the same way, the `run.failed` deliveries
   still waiting for a retry are abandoned at startup when `NANOBOM_FAILURE_WEBHOOK_URL` changed
   or was removed.
+- Changing an organization's email recipients or language, or removing its email settings,
+  abandons its emails still waiting for an attempt or a retry, the same way; changing only its
+  filters does not. All pending emails are abandoned at startup when `NANOBOM_SMTP_URL` was
+  removed.
 - Delivered and abandoned deliveries are deleted after 30 days.
 - A document can arrive more than once, when the receiver accepted it but its answer was lost or
   came after 15 seconds. The `event`, with the run's `id` for `findings.new` and `run.failed`,
@@ -228,7 +286,7 @@ finding notified to a receiver that is down is not lost: its delivery is retried
 ## `projects.stale`
 
 After a **successful scheduled** run (and unless `NANOBOM_STALE_AFTER_DAYS` is `0`), each
-organization with an enabled webhook receives the projects that became
+organization with an enabled webhook or email recipients receives the projects that became
 [stale](../explanation/findings.md#stale-projects) since they were last notified, whatever the
 minimum severity and the known exploited option:
 
@@ -258,8 +316,9 @@ minimum severity and the known exploited option:
 | `projects[].url` | The project's page |
 
 A project is notified once per stale period: again only if it receives an SBOM and later goes
-stale again. Projects of an organization without an enabled webhook are not marked as notified,
-so enabling one sends the currently stale projects after the next scheduled run.
+stale again. Projects of an organization without an enabled webhook or email recipients are not
+marked as notified, so configuring either sends the currently stale projects after the next
+scheduled run.
 
 ## `run.failed`
 

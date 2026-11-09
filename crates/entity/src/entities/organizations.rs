@@ -23,6 +23,8 @@ pub enum Relation {
     LicenseRules,
     #[sea_orm(has_many = "super::memberships::Entity")]
     Memberships,
+    #[sea_orm(has_one = "super::organization_emails::Entity")]
+    OrganizationEmails,
     #[sea_orm(has_one = "super::organization_webhooks::Entity")]
     OrganizationWebhooks,
     #[sea_orm(has_many = "super::projects::Entity")]
@@ -44,6 +46,12 @@ impl Related<super::license_rules::Entity> for Entity {
 impl Related<super::memberships::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Memberships.def()
+    }
+}
+
+impl Related<super::organization_emails::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::OrganizationEmails.def()
     }
 }
 

@@ -42,7 +42,7 @@ const VIA_NAMES: usize = 5;
 
 /// Writes `text` with each character mapped through `piece`, clipped to `limit` characters
 /// (the escaped text counts) and ended with `...` if anything was left out.
-fn clipped(text: &str, limit: usize, piece: impl Fn(char) -> String) -> String {
+pub(crate) fn clipped(text: &str, limit: usize, piece: impl Fn(char) -> String) -> String {
     let pieces: Vec<String> = text.chars().map(piece).collect();
     let total: usize = pieces.iter().map(|piece| piece.chars().count()).sum();
     if total <= limit {
@@ -63,7 +63,7 @@ fn clipped(text: &str, limit: usize, piece: impl Fn(char) -> String) -> String {
 }
 
 /// Collapses whitespace, so that a value cannot start a new line or a new block.
-fn one_line(text: &str) -> String {
+pub(crate) fn one_line(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
@@ -77,7 +77,7 @@ fn plain(text: &str, limit: usize) -> String {
     clipped(&one_line(text), limit, |character| character.to_string())
 }
 
-fn utc(time: chrono::DateTime<chrono::FixedOffset>) -> String {
+pub(crate) fn utc(time: chrono::DateTime<chrono::FixedOffset>) -> String {
     time.with_timezone(&chrono::Utc)
         .format("%Y-%m-%d %H:%M UTC")
         .to_string()

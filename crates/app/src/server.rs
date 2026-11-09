@@ -34,6 +34,8 @@ pub struct InterfaceContext {
     /// absorbed this one. It does not check permissions: call
     /// `nanobom_domain::evaluation::authorize` first.
     pub request_run: Arc<dyn Fn(Trigger, Scope, Option<i64>) -> bool + Send + Sync>,
+    /// Sends test emails; `None` when no SMTP server is configured, and email is off.
+    pub mailer: Option<nanobom_domain::email::Mailer>,
 }
 
 /// The part of the server's configuration the interface shows or enforces.
@@ -46,6 +48,8 @@ pub struct InterfaceSettings {
     pub personal_organizations: bool,
     /// Days without an SBOM after which a project is stale (0: never).
     pub stale_after_days: u32,
+    /// The address users reach nanobom at, for the links of test emails.
+    pub public_url: nanobom_domain::Url,
 }
 
 /// The [`InterfaceContext`] of the current request; an error outside a request.

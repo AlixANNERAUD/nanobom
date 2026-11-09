@@ -4,6 +4,7 @@ mod chat;
 mod database;
 mod deliveries;
 mod dependencies;
+mod email;
 mod exploitation;
 mod findings;
 mod inventory;

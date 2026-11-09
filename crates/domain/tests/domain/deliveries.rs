@@ -6,7 +6,7 @@ use chrono::{DateTime, FixedOffset, SubsecRound, TimeDelta, Utc};
 use nanobom_domain::{
     Error,
     access::{Actor, Role},
-    deliveries::{self, ATTEMPT_LEASE, Attempt, Outcome, RETENTION, RETRY_DELAYS, State},
+    deliveries::{self, ATTEMPT_LEASE, Attempt, Channel, Outcome, RETENTION, RETRY_DELAYS, State},
     memberships,
     notifications::{self, Delivery, Notifier, Payload},
     organizations, testing,
@@ -400,14 +400,16 @@ async fn the_notifier_retries_a_delivery_once_its_backoff_expires() {
             &database,
             vec![Delivery {
                 organization_id: None,
-                url: format!("{}/hook", receiver.uri()),
-                format: notifications::Format::Json,
+                target: notifications::Target::Webhook {
+                    url: format!("{}/hook", receiver.uri()),
+                    format: notifications::Format::Json,
+                },
                 payload: ping(),
             }],
         )
         .await
         .unwrap();
-    assert_eq!(outcomes, [Outcome::Retried]);
+    assert_eq!(outcomes, [(Channel::Webhook, Outcome::Retried)]);
     assert!(
         notifier.retry_due(&database, 10).await.unwrap().is_empty(),
         "not due yet"
@@ -424,7 +426,7 @@ async fn the_notifier_retries_a_delivery_once_its_backoff_expires() {
 
     assert_eq!(
         notifier.retry_due(&database, 10).await.unwrap(),
-        [Outcome::Delivered]
+        [(Channel::Webhook, Outcome::Delivered)]
     );
     let delivered = row(&database, pending.id).await;
     assert_eq!(delivered.attempts, 2);
@@ -456,7 +458,7 @@ async fn an_attempt_does_not_overwrite_a_cancellation_or_a_newer_claim() {
         .await
         .unwrap()
         .unwrap();
-    deliveries::cancel_pending(&database, acme.id)
+    deliveries::cancel_pending(&database, acme.id, Channel::Webhook)
         .await
         .unwrap();
     assert_eq!(
@@ -633,12 +635,14 @@ async fn every_delivery_is_recorded_before_the_first_attempt() {
         .enumerate()
         .map(|(index, &organization)| Delivery {
             organization_id: Some(organization),
-            url: format!(
-                "{}/{}",
-                receiver.uri(),
-                if index == 0 { "hangs" } else { "answers" }
-            ),
-            format: notifications::Format::Json,
+            target: notifications::Target::Webhook {
+                url: format!(
+                    "{}/{}",
+                    receiver.uri(),
+                    if index == 0 { "hangs" } else { "answers" }
+                ),
+                format: notifications::Format::Json,
+            },
             payload: ping(),
         })
         .collect();

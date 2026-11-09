@@ -52,9 +52,72 @@
     "invalid_webhook_url": "the webhook URL is not a valid URL",
     "webhook_scheme": "the webhook URL must be an http or https URL",
     "unknown_webhook_format": "unknown webhook format",
+    "invalid_recipient": "\"{address}\" is not an email address (expected name@example.org, one per line or separated by commas)",
+    "no_recipients": "at least one recipient is required",
+    "too_many_recipients": "at most {maximum} recipients are allowed; use a mailing list for more",
+    "unknown_email_language": "unknown email language",
+    "email_not_configured": "email is not configured on this server",
+    "test_email_too_soon": "too many test emails were sent recently; try again in {seconds} seconds",
+    "test_email_failed": "the test email could not be sent: {detail}",
     "unknown_license_id": "\"{license}\" is not an SPDX license identifier (see https://spdx.org/licenses) nor LicenseRef- followed by letters, digits, '.' or '-'",
     "unknown_license_action": "unknown license action \"{action}\"; expected allow, warn or forbid",
     "conflicting_license_rule": "\"{license}\" is listed with two different actions",
     "too_many_license_rules": "a license policy holds at most {maximum} rules"
+  },
+  "email": {
+    "new_findings_subject": {
+      "one": "nanobom: {count} new vulnerability in {place}",
+      "other": "nanobom: {count} new vulnerabilities in {place}"
+    },
+    "new_findings_headline": {
+      "one": "{organization}: {count} new finding",
+      "other": "{organization}: {count} new findings"
+    },
+    "highest_severity": "Highest severity: {severity}",
+    "known_exploited_count": {
+      "one": "{count} known exploited",
+      "other": "{count} known exploited"
+    },
+    "component_in_project": "{component} in {project}",
+    "introduced_via": "Introduced via {names}",
+    "more_names": {
+      "one": "{count} more",
+      "other": "{count} more"
+    },
+    "hidden_findings": {
+      "one": "{count} more finding not shown.",
+      "other": "{count} more findings not shown."
+    },
+    "stale_subject": {
+      "one": "nanobom: {count} project stopped sending SBOMs",
+      "other": "nanobom: {count} projects stopped sending SBOMs"
+    },
+    "stale_headline": {
+      "one": "{organization}: {count} project stopped sending SBOMs",
+      "other": "{organization}: {count} projects stopped sending SBOMs"
+    },
+    "never_uploaded": "never received an SBOM",
+    "last_upload": "last SBOM {time}",
+    "hidden_projects": {
+      "one": "{count} more project not shown.",
+      "other": "{count} more projects not shown."
+    },
+    "open_organization": "Open {organization} in nanobom",
+    "footer": "You receive this email as a recipient of the notifications of {organization} in nanobom. Its administrators choose the recipients in the organization's settings:",
+    "test_subject": "nanobom: test email",
+    "test_headline": "{organization}: test email",
+    "test_body": "Email notifications work. New vulnerabilities and projects that stop sending SBOMs will be sent to {recipients}.",
+    "tags": {
+      "reopened": "reopened",
+      "known_exploited": "known exploited",
+      "newly_known_exploited": "newly known exploited"
+    },
+    "severity": {
+      "critical": "critical",
+      "high": "high",
+      "medium": "medium",
+      "low": "low",
+      "unknown": "unknown"
+    }
   }
 }

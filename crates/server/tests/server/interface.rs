@@ -7,8 +7,11 @@ use axum::{
 };
 use nanobom_domain::{
     deliveries::{self, Attempt},
+    email::{self, Language},
     findings::{self, Filter, Status},
-    notifications, organizations, projects, tokens,
+    notifications, organizations, projects,
+    testing::SmtpSink,
+    tokens,
 };
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use serde_json::json;
@@ -1053,4 +1056,234 @@ async fn license_policies_are_edited_and_violations_shown() {
     save("organization=acme&unlisted=allow&unknown=allow&allowed=&warned=&forbidden=").await;
     let html = alice.page("/organizations/acme/projects/web").await;
     assert!(!html.contains("Components breaking the license policy"));
+}
+
+#[tokio::test]
+async fn email_settings_say_why_they_are_off_without_smtp() {
+    let server = server(&[]).await;
+    local_user(&server.database, "alice", PASSWORD).await;
+    let owner = local_user(&server.database, "bob", PASSWORD).await;
+    organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let bob = Browser::sign_in(&server, "bob").await;
+    let page = "/organizations/acme/settings";
+    let html = bob.page(page).await;
+    assert!(html.contains("Email is off on this server"), "{html}");
+    assert!(!html.contains("name=\"recipients\""));
+
+    let response = bob
+        .submit(page, "send_test_email", "organization=acme")
+        .await;
+    assert!(
+        location(&response).contains("error=Email%20is%20not%20configured"),
+        "{}",
+        location(&response)
+    );
+}
+
+#[tokio::test]
+async fn the_email_form_saves_recipients_and_sends_a_test_email() {
+    let sink = SmtpSink::start().await;
+    let server = server(&[
+        "--smtp-url",
+        &sink.url(),
+        "--smtp-from",
+        "nanobom@example.org",
+    ])
+    .await;
+    let owner = local_user(&server.database, "alice", PASSWORD).await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let alice = Browser::sign_in(&server, "alice").await;
+    let page = "/organizations/acme/settings";
+    let html = alice.page(page).await;
+    assert!(html.contains("name=\"recipients\""), "{html}");
+    assert!(!html.contains("Send a test email"), "nothing to test yet");
+
+    let response = alice
+        .submit(
+            page,
+            "save_email",
+            "organization=acme&recipients=not-an-address&language=en&minimum_severity=high",
+        )
+        .await;
+    assert!(
+        location(&response)
+            .contains("error=%22not-an-address%22%20is%20not%20an%20email%20address"),
+        "{}",
+        location(&response)
+    );
+    let response = alice
+        .submit(
+            page,
+            "save_email",
+            "organization=acme&recipients=alice%40example.org%0D%0Abob%40example.org&language=fr&minimum_severity=critical&exploited_only=on",
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert!(location(&response).contains("notice=Email%20settings%20saved"));
+    let saved = email::get(&server.database, &owner, organization.id)
+        .await
+        .unwrap()
+        .expect("email settings");
+    assert_eq!(saved.recipients, ["alice@example.org", "bob@example.org"]);
+    assert_eq!(saved.language, Language::French);
+    assert!(saved.exploited_only);
+    let html = alice.page(page).await;
+    assert!(
+        html.contains("alice@example.org\nbob@example.org"),
+        "{html}"
+    );
+    assert!(html.contains("<option value=\"fr\" selected"), "{html}");
+
+    let response = alice
+        .submit(page, "send_test_email", "organization=acme")
+        .await;
+    assert!(
+        location(&response).contains("notice=Test%20email%20sent"),
+        "{}",
+        location(&response)
+    );
+    // One message per recipient, each listing both in `To`.
+    let received = sink.received();
+    assert_eq!(received.len(), 2);
+    assert_eq!(received[0].recipients, ["alice@example.org"]);
+    assert_eq!(received[1].recipients, ["bob@example.org"]);
+    assert!(
+        received[1]
+            .data
+            .contains("To: alice@example.org, bob@example.org"),
+        "{}",
+        received[1].data
+    );
+    let response = alice
+        .submit(page, "send_test_email", "organization=acme")
+        .await;
+    assert!(
+        location(&response).contains("error=Too%20many%20test%20emails%20were%20sent%20recently"),
+        "{}",
+        location(&response)
+    );
+    assert_eq!(sink.received().len(), 2);
+
+    alice
+        .submit(page, "delete_email", "organization=acme")
+        .await;
+    assert_eq!(
+        email::get(&server.database, &owner, organization.id)
+            .await
+            .unwrap(),
+        None
+    );
+}
+
+#[tokio::test]
+async fn new_findings_of_an_upload_are_emailed() {
+    let sink = SmtpSink::start().await;
+    let server = server(&[
+        "--smtp-url",
+        &sink.url(),
+        "--smtp-from",
+        "nanobom@example.org",
+    ])
+    .await;
+    server.source.publish(
+        json!({
+            "id": "GHSA-35jh-r3h4-6jhm",
+            "modified": "2024-01-01T00:00:00Z",
+            "summary": "Command Injection in lodash",
+            "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H"}],
+            "affected": [{"package": {"ecosystem": "npm", "name": "lodash"},
+                "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "4.17.21"}]}]}]
+        }),
+        &["pkg:npm/lodash@4.17.20"],
+    );
+    let owner = local_user(&server.database, "alice", PASSWORD).await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    email::set(
+        &server.database,
+        &owner,
+        organization.id,
+        &email::EmailSettings {
+            recipients: vec!["security@example.org".to_owned()],
+            language: Language::English,
+            minimum_severity: nanobom_osv::Severity::Low,
+            exploited_only: false,
+        },
+    )
+    .await
+    .unwrap();
+    let secret = tokens::create(&server.database, &owner, organization.id, None, "CI")
+        .await
+        .unwrap()
+        .secret;
+    server
+        .send(
+            Request::put("/api/organizations/acme/projects/web/sbom")
+                .header(header::AUTHORIZATION, format!("Bearer {secret}"))
+                .body(Body::from(sbom_document("cyclonedx-npm.json")))
+                .unwrap(),
+        )
+        .await;
+    server.runner.wait_until_idle().await;
+
+    let received = sink.received();
+    assert_eq!(received.len(), 1, "one email for the run");
+    assert_eq!(received[0].recipients, ["security@example.org"]);
+    assert!(
+        received[0]
+            .data
+            .contains("Subject: nanobom: 1 new vulnerability in acme/web"),
+        "{}",
+        received[0].data
+    );
+    let alice = Browser::sign_in(&server, "alice").await;
+    let html = alice.page("/organizations/acme/settings").await;
+    assert!(html.contains("Recent deliveries"), "{html}");
+    assert!(html.contains("Email to security@example.org"), "{html}");
+}
+
+#[tokio::test]
+async fn smtp_settings_are_checked_at_startup_without_revealing_the_password() {
+    let options = crate::common::options(&["--smtp-url", "smtps://user:hunter2@smtp.example.org"]);
+    assert!(!format!("{options:?}").contains("hunter2"));
+    let error = nanobom::serve::mailer(&options).unwrap_err().to_string();
+    assert!(error.contains("NANOBOM_SMTP_FROM"), "{error}");
+    let options = crate::common::options(&[
+        "--smtp-url",
+        "smtps://user:hunter2@smtp.example.org",
+        "--smtp-from",
+        "not a mailbox",
+    ]);
+    let error = nanobom::serve::mailer(&options).unwrap_err().to_string();
+    assert!(error.contains("NANOBOM_SMTP_FROM"), "{error}");
+    assert!(!error.contains("hunter2"), "{error}");
+    let options = crate::common::options(&[
+        "--smtp-url",
+        "imap://user:hunter2@smtp.example.org",
+        "--smtp-from",
+        "nanobom@example.org",
+    ]);
+    let error = nanobom::serve::mailer(&options).unwrap_err().to_string();
+    assert!(error.contains("NANOBOM_SMTP_URL"), "{error}");
+    assert!(!error.contains("hunter2"), "{error}");
+    // Credentials over plain SMTP would be sent in clear text.
+    let options = crate::common::options(&[
+        "--smtp-url",
+        "smtp://user:hunter2@smtp.example.org:587",
+        "--smtp-from",
+        "nanobom@example.org",
+    ]);
+    let error = nanobom::serve::mailer(&options).unwrap_err().to_string();
+    assert!(error.contains("tls=required"), "{error}");
+    assert!(!error.contains("hunter2"), "{error}");
+    assert!(
+        nanobom::serve::mailer(&crate::common::options(&[]))
+            .unwrap()
+            .is_none()
+    );
 }

@@ -89,9 +89,10 @@ upload to nanobom with a new address and key: see [Dependency-Track clients](htt
   you want), with each project's violations and SPDX `AND`/`OR` expressions understood.
 - CycloneDX VEX: export which vulnerabilities do not affect a project, and why, for customers
   and auditors; import a vendor's statements or your own to ignore findings.
-- Webhooks per organization for new and newly exploited vulnerabilities, and for projects whose
-  SBOM stopped coming, as JSON or as messages posted straight to Slack and Microsoft Teams; a
-  Home Assistant example turns them into phone notifications.
+- Notifications per organization for new and newly exploited vulnerabilities, and for projects
+  whose SBOM stopped coming: webhooks as JSON or as messages posted straight to Slack and
+  Microsoft Teams, and emails in English or French through your SMTP server; a Home Assistant
+  example turns webhooks into phone notifications.
 
 **Fits your stack**
 - One container (about 20 MB compressed, amd64 and arm64) with its database, SQLite in a volume
@@ -120,7 +121,7 @@ The full guide lives at **<https://alixanneraud.github.io/nanobom/>**:
 - **Reference** - [configuration](https://alixanneraud.github.io/nanobom/reference/configuration.html),
   [upload API](https://alixanneraud.github.io/nanobom/reference/upload-api.html),
   [read API](https://alixanneraud.github.io/nanobom/reference/read-api.html),
-  [webhook payloads](https://alixanneraud.github.io/nanobom/reference/webhooks.html),
+  [webhook payloads and emails](https://alixanneraud.github.io/nanobom/reference/webhooks.html),
   [roles and permissions](https://alixanneraud.github.io/nanobom/reference/accounts.html),
   [metrics](https://alixanneraud.github.io/nanobom/reference/metrics.html).
 - **Explanation** - [concepts](https://alixanneraud.github.io/nanobom/explanation/concepts.html),

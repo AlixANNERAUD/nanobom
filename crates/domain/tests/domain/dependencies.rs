@@ -727,6 +727,7 @@ async fn findings_webhooks_and_ci_name_the_direct_dependency() {
         &fixture.database,
         &outcome,
         &"https://nanobom.example.org/".parse().unwrap(),
+        false,
     )
     .await
     .unwrap();

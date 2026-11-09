@@ -38,7 +38,7 @@
 - [VEX API](reference/vex-api.md)
 - [Read API](reference/read-api.md)
 - [License policy](reference/license-policy.md)
-- [Webhook payloads](reference/webhooks.md)
+- [Webhook payloads and emails](reference/webhooks.md)
 - [Accounts, roles and permissions](reference/accounts.md)
 - [Metrics, health and logs](reference/metrics.md)
 - [Languages](reference/languages.md)

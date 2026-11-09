@@ -95,6 +95,13 @@ pub enum Problem {
     InvalidWebhookUrl,
     WebhookScheme,
     UnknownWebhookFormat,
+    InvalidRecipient { address: String },
+    NoRecipients,
+    TooManyRecipients { maximum: usize },
+    UnknownEmailLanguage,
+    EmailNotConfigured,
+    TestEmailTooSoon { seconds: u64 },
+    TestEmailFailed { detail: String },
     UnknownLicenseId { license: String },
     UnknownLicenseAction { action: String },
     ConflictingLicenseRule { license: String },
@@ -306,6 +313,40 @@ impl Problem {
                 locale = locale,
                 "problems.unknown_webhook_format"
             )),
+            P::InvalidRecipient { address } => translate_write!(
+                output,
+                locale = locale,
+                "problems.invalid_recipient",
+                address = address
+            ),
+            P::NoRecipients => {
+                output.write_str(translate!(locale = locale, "problems.no_recipients"))
+            }
+            P::TooManyRecipients { maximum } => translate_write!(
+                output,
+                locale = locale,
+                "problems.too_many_recipients",
+                maximum = maximum
+            ),
+            P::UnknownEmailLanguage => output.write_str(translate!(
+                locale = locale,
+                "problems.unknown_email_language"
+            )),
+            P::EmailNotConfigured => {
+                output.write_str(translate!(locale = locale, "problems.email_not_configured"))
+            }
+            P::TestEmailTooSoon { seconds } => translate_write!(
+                output,
+                locale = locale,
+                "problems.test_email_too_soon",
+                seconds = seconds
+            ),
+            P::TestEmailFailed { detail } => translate_write!(
+                output,
+                locale = locale,
+                "problems.test_email_failed",
+                detail = detail
+            ),
             P::UnknownLicenseId { license } => translate_write!(
                 output,
                 locale = locale,

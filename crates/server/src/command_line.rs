@@ -243,6 +243,9 @@ pub struct ServeOptions {
     #[arg(long, env = "NANOBOM_FAILURE_WEBHOOK_URL")]
     pub failure_webhook_url: Option<reqwest::Url>,
 
+    #[command(flatten)]
+    pub smtp: SmtpOptions,
+
     /// Allow sign-in with local accounts (username or email address and password).
     #[arg(long, env = "NANOBOM_LOCAL_ACCOUNTS", default_value_t = true, action = ArgAction::Set)]
     pub local_accounts: bool,
@@ -261,6 +264,38 @@ pub struct ServeOptions {
 
     #[command(flatten)]
     pub openid: OpenIdOptions,
+}
+
+/// Email notifications, enabled by setting the SMTP server.
+#[derive(Debug, Clone, Args)]
+pub struct SmtpOptions {
+    /// SMTP server for email notifications, for example `smtps://user:password@smtp.example.org`
+    /// or `smtp://relay.example.org:25?tls=required`. Without it, email is off.
+    #[arg(long, env = "NANOBOM_SMTP_URL", hide_env_values = true)]
+    pub smtp_url: Option<Secret>,
+
+    /// Sender of the emails, such as `nanobom@example.org` or
+    /// `nanobom <nanobom@example.org>`; required with the SMTP server.
+    #[arg(long, env = "NANOBOM_SMTP_FROM")]
+    pub smtp_from: Option<String>,
+}
+
+/// A value that may hold a password, never shown by `Debug`.
+#[derive(Clone)]
+pub struct Secret(pub String);
+
+impl std::fmt::Debug for Secret {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("Secret(\"[redacted]\")")
+    }
+}
+
+impl std::str::FromStr for Secret {
+    type Err = std::convert::Infallible;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Ok(Self(value.to_owned()))
+    }
 }
 
 /// OpenID Connect sign-in, enabled by setting the issuer and the client identifier.
