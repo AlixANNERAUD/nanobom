@@ -2,7 +2,8 @@
 
 The interface bundles its fonts, so a page never asks a third party for one. The files are
 copied unchanged from the [Fontsource](https://fontsource.org) npm packages below: the `latin`
-subset only (Basic Latin and Latin-1, which covers English and French), as WOFF2.
+subset only (Basic Latin, Latin-1 and a few more characters such as œ, which covers English and
+French), as WOFF2.
 `style/main.css` declares them with `@font-face`.
 
 | File | Font | Package | Version | SHA-256 |
