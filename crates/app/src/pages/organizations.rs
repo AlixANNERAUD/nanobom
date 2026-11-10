@@ -40,7 +40,10 @@ pub fn SignInPage() -> impl IntoView {
         <Title text=title />
         <main id="content" class="mx-auto grid max-w-sm gap-6 px-4 py-16">
             <div class="grid gap-1 text-center">
-                <h1 class="text-2xl font-semibold tracking-tight">"nanobom"</h1>
+                <h1 class="flex items-center justify-center gap-2 text-2xl font-semibold tracking-tight">
+                    <Mark class="size-6" />
+                    "nanobom"
+                </h1>
                 <p class="text-muted-foreground text-sm">{t!("sign_in.subtitle")}</p>
             </div>
             {move || error().map(|error| view! { <Alert variant=AlertVariant::Destructive>{error}</Alert> })}
@@ -132,7 +135,7 @@ pub fn OrganizationsPage() -> impl IntoView {
                                             <li>
                                                 <a
                                                     href=href
-                                                    class="bg-card hover:bg-accent focus-visible:ring-ring/50 block rounded-xl border p-4 shadow-sm outline-none focus-visible:ring-[3px]"
+                                                    class="bg-card hover:bg-accent focus-visible:ring-ring/70 block rounded-xl border p-4 shadow-sm outline-none focus-visible:ring-[3px]"
                                                 >
                                                     <span class="font-medium">{organization.name}</span>
                                                     <span class="text-muted-foreground block text-sm">

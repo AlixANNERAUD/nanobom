@@ -111,6 +111,68 @@ async fn the_sign_in_page_offers_local_accounts() {
         !html.contains("single sign-on"),
         "OpenID Connect is not configured"
     );
+    let heading = element(&html, "<h1", "</h1>");
+    assert_mark_before_wordmark(heading);
+}
+
+/// The first element of `html` opened by `open`, up to `close`.
+fn element<'a>(html: &'a str, open: &str, close: &str) -> &'a str {
+    let start = html.find(open).unwrap_or_else(|| panic!("no {open}"));
+    let end = html[start..]
+        .find(close)
+        .unwrap_or_else(|| panic!("{open} is not closed"));
+    &html[start..start + end]
+}
+
+/// The mark is decorative (hidden from assistive technology) and sits before the name.
+fn assert_mark_before_wordmark(html: &str) {
+    let mark = html.find("<svg").expect("the mark");
+    let name = html.find("nanobom").expect("the wordmark");
+    assert!(mark < name, "the mark comes first: {html}");
+    let svg = element(html, "<svg", ">");
+    assert!(
+        svg.contains("aria-hidden=\"true\""),
+        "the mark is decorative: {html}"
+    );
+    // Without its view box, the drawing is clipped to the element's size instead of scaled.
+    assert!(svg.contains("viewBox=\"0 0 18 18\""), "{html}");
+}
+
+#[tokio::test]
+async fn the_header_shows_the_mark_before_the_wordmark() {
+    let server = server(&[]).await;
+    local_user(&server.database, "alice", PASSWORD).await;
+    let alice = Browser::sign_in(&server, "alice").await;
+    let html = alice.page("/organizations").await;
+    let header = element(&html, "<header", "</header>");
+    assert_mark_before_wordmark(element(header, "<a href=\"/organizations\"", "</a>"));
+}
+
+/// The stylesheet loads its fonts from the site root, where the build copies `public/`: the
+/// sign-in page needs them before any session exists.
+#[tokio::test]
+async fn fonts_are_served() {
+    let public = concat!(env!("CARGO_MANIFEST_DIR"), "/../../public");
+    let server = server(&["--site-root", public]).await;
+    for font in [
+        "inter-latin-wght-normal.woff2",
+        "ibm-plex-mono-latin-400-normal.woff2",
+        "ibm-plex-mono-latin-500-normal.woff2",
+    ] {
+        let response = server
+            .send(
+                Request::get(format!("/fonts/{font}"))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await;
+        assert_eq!(response.status(), StatusCode::OK, "{font}");
+        assert_eq!(response.headers()[header::CONTENT_TYPE], "font/woff2");
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        assert!(body.starts_with(b"wOF2"), "{font} is a WOFF2 file");
+    }
 }
 
 #[tokio::test]

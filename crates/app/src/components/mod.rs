@@ -204,7 +204,8 @@ fn Header(user: CurrentUser) -> impl IntoView {
     view! {
         <header class="border-b bg-background">
             <div class="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
-                <a href="/organizations" class="font-semibold tracking-tight">
+                <a href="/organizations" class="flex items-center gap-2 font-semibold tracking-tight">
+                    <Mark />
                     "nanobom"
                 </a>
                 <details class="relative">

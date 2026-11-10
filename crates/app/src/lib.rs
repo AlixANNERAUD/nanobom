@@ -163,4 +163,47 @@ mod tests {
         // Light, dark by class, dark by system preference.
         assert_eq!(definitions, 3);
     }
+
+    /// The dark theme is declared twice, for the theme switch and for the system preference:
+    /// CSS has no way to share the block. A token changed in one only would make the theme
+    /// depend on how it was chosen.
+    #[test]
+    fn dark_tokens_are_the_same_by_class_and_by_system_preference() {
+        let stylesheet = include_str!("../../../style/main.css");
+        let declarations = |selector: &str| -> Vec<&str> {
+            stylesheet
+                .lines()
+                .map(str::trim)
+                .skip_while(|line| *line != selector)
+                .skip(1)
+                .take_while(|line| *line != "}")
+                .collect()
+        };
+        let by_class = declarations(":root.dark {");
+        assert!(
+            by_class
+                .iter()
+                .any(|line| line.starts_with("--background:"))
+        );
+        assert_eq!(by_class, declarations(":root:not(.light) {"));
+    }
+
+    /// The stylesheet names its fonts by address. The build copies `public/` to the site root,
+    /// so each address must be a file there, or the page silently falls back to system fonts.
+    #[test]
+    fn fonts_of_the_stylesheet_are_bundled() {
+        let stylesheet = include_str!("../../../style/main.css");
+        let public = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../public");
+        let fonts: Vec<&str> = stylesheet
+            .split("url(\"/")
+            .skip(1)
+            .map(|rest| rest.split('"').next().expect("a closing quote"))
+            .collect();
+        // Inter (variable) and two weights of IBM Plex Mono.
+        assert_eq!(fonts.len(), 3, "{fonts:?}");
+        for font in fonts {
+            assert!(font.starts_with("fonts/"), "{font}");
+            assert!(public.join(font).is_file(), "{font} is not in public/");
+        }
+    }
 }
