@@ -5,6 +5,21 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2](https://github.com/AlixANNERAUD/nanobom/compare/v0.1.1...v0.1.2) - 2026-11-10
+
+### Added
+
+- give the interface a violet accent, bundled fonts and a mark ([#79](https://github.com/AlixANNERAUD/nanobom/pull/79))
+- fit the header on one line with a user menu ([#80](https://github.com/AlixANNERAUD/nanobom/pull/80))
+- summarize a project's findings and fit each on one line ([#81](https://github.com/AlixANNERAUD/nanobom/pull/81))
+- show advisory text as formatted text ([#82](https://github.com/AlixANNERAUD/nanobom/pull/82))
+- draw each project's findings and tabulate recent runs ([#84](https://github.com/AlixANNERAUD/nanobom/pull/84))
+
+### Fixed
+
+- apply the dark theme ([#77](https://github.com/AlixANNERAUD/nanobom/pull/77))
+- escape page titles ([#83](https://github.com/AlixANNERAUD/nanobom/pull/83))
+
 ## [0.1.1](https://github.com/AlixANNERAUD/nanobom/compare/v0.1.0...v0.1.1) - 2026-11-09
 
 ### Miscellaneous

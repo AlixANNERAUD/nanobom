@@ -3149,7 +3149,7 @@ checksum = "743fb55ba31b18fb1ecef6bdc9aa2743314978ac084044301a7eee33fb99a20d"
 
 [[package]]
 name = "nanobom"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "axum",
  "axum-login",
@@ -3185,7 +3185,7 @@ dependencies = [
 
 [[package]]
 name = "nanobom-app"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "axum",
  "chrono",
@@ -3206,7 +3206,7 @@ dependencies = [
 
 [[package]]
 name = "nanobom-authentication"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "async-trait",
  "axum",
@@ -3229,7 +3229,7 @@ dependencies = [
 
 [[package]]
 name = "nanobom-domain"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "chrono",
  "cyclonedx-bom",
@@ -3257,7 +3257,7 @@ dependencies = [
 
 [[package]]
 name = "nanobom-entity"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "sea-orm",
  "serde",
@@ -3265,7 +3265,7 @@ dependencies = [
 
 [[package]]
 name = "nanobom-frontend"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "console_error_panic_hook",
  "leptos",
@@ -3275,14 +3275,14 @@ dependencies = [
 
 [[package]]
 name = "nanobom-migration"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "sea-orm-migration",
 ]
 
 [[package]]
 name = "nanobom-osv"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "chrono",
  "cvss",
