@@ -439,7 +439,9 @@ pub fn Page(#[prop(into)] title: String, children: ChildrenFn) -> impl IntoView 
     }
 }
 
-/// A page heading with optional actions on the right.
+/// A page heading with optional actions on the right. The title and subtitle may hold a name
+/// without any space (a project named by its slug): they break anywhere rather than widen the
+/// page.
 #[component]
 pub fn Heading(
     #[prop(into)] title: String,
@@ -448,9 +450,9 @@ pub fn Heading(
 ) -> impl IntoView {
     view! {
         <div class="flex flex-wrap items-end justify-between gap-4">
-            <div class="grid gap-1">
-                <h1 class="text-2xl font-semibold tracking-tight">{title}</h1>
-                {subtitle.map(|subtitle| view! { <p class="text-muted-foreground">{subtitle}</p> })}
+            <div class="grid min-w-0 gap-1">
+                <h1 class="text-2xl font-semibold tracking-tight wrap-anywhere">{title}</h1>
+                {subtitle.map(|subtitle| view! { <p class="text-muted-foreground wrap-anywhere">{subtitle}</p> })}
             </div>
             <div class="flex flex-wrap items-center gap-2">{children.map(|children| children())}</div>
         </div>

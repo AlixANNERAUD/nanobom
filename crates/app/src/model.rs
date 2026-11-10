@@ -171,6 +171,7 @@ pub struct Organization {
     pub role: Role,
 }
 
+/// Open findings by severity.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SeverityCounts {
     pub critical: u64,
@@ -446,6 +447,11 @@ pub struct ProjectData {
     pub stale: bool,
     /// `None` when the organization has no active license policy.
     pub licenses: Option<LicenseViolations>,
+    /// The open findings of the version shown by severity. Unlike `findings`, they do not
+    /// follow the filters: the summary describes the version, the table what was asked of it.
+    pub counts: SeverityCounts,
+    /// How many open findings of the version shown are known exploited, whatever the filters.
+    pub known_exploited: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

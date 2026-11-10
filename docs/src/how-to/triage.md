@@ -4,8 +4,9 @@ A project with a few hundred dependencies easily has dozens of findings. Why the
 they are is explained in [Prioritization](../explanation/prioritization.md); a reasonable
 routine, from most to least urgent:
 
-1. **Known exploited** findings: someone exploits them in the wild. CISA gives federal agencies a
-   due date to fix each one; it is a fair deadline for anyone.
+1. **Known exploited** findings, tagged **KEV** on the project page: someone exploits them in
+   the wild. CISA gives federal agencies a due date to fix each one; it is a fair deadline for
+   anyone.
 2. **Critical and high** findings with a high EPSS score.
 3. The rest, by severity, during regular dependency updates.
 
@@ -65,7 +66,12 @@ findings can be restored; fixed findings need no action.
 ## Filter a project's findings
 
 On the project page, filters narrow the findings by severity, status (open and ignored by
-default, or one status, or all), ecosystem, or to **Only known exploited vulnerabilities**.
+default, or one status, or all), ecosystem, or to **Only known exploited vulnerabilities**:
+choose them and select **Filter**. For a project that names versions, the same form chooses the
+[version shown](track-versions.md#read-one-version).
+
+The summary under the project's name does not follow the filters: it always counts the open
+findings of the version shown, by severity, and how many of them are known exploited.
 
 ## Find which projects use a package
 

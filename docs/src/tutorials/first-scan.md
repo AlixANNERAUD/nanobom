@@ -128,7 +128,8 @@ findings by severity, how many are ignored or known exploited, and the time of i
 SBOM. Under **Recent runs**, the run your upload
 started is listed as succeeded.
 
-Open `demo`. Its findings are listed most urgent first: known exploited ones, then by severity.
+Open `demo`. Under its name, a bar and its legend count the open findings by severity. Below,
+the findings are listed most urgent first: known exploited ones, then by severity.
 Open the high finding of `lodash`. Its page shows:
 
 - the vulnerability's description, and the version that fixes it under **Fixed in**;
@@ -148,8 +149,9 @@ decision on the finding's page, under **Triage**:
 3. Select **Ignore finding**.
 
 The page says **Finding ignored.**, and **History** gains an **Ignored** entry with your name
-and the reason. Back on the project page, the finding's status is now **Ignored**; the default
-filter, **Open and ignored**, still lists it, and setting **Status** to **Open** hides it.
+and the reason. Back on the project page, the summary counts one open finding less, and a
+**Status** column marks the finding as **Ignored**. The default filter, **Open and ignored**,
+still lists it; set **Status** to **Open** and select **Filter** to hide it.
 
 Upload the same SBOM again:
 

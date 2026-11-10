@@ -46,7 +46,8 @@ the shortest path from it to the component. They are shown shortest first:
   *direct dependency*. At most 5 paths are shown; the others are counted.
 - on the project page, in the **Introduced via** column: the direct dependencies, the first two
   by name (with their versions only when several versions of one lead to the component) and how
-  many more, or *direct* when the component is one itself;
+  many more, or *direct* when the component is one itself; the column is left out when no
+  finding listed has one to show;
 - in [webhooks](../reference/webhooks.md#findingsnew) and in the
   [evaluation returned to CI](../reference/upload-api.md#the-evaluation-object), as
   `introduced_via`: the names of the direct dependencies.

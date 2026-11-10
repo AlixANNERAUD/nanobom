@@ -24,7 +24,7 @@ An **inactive** version is kept as it was when it was made inactive:
 | Found by component searches | ✓ | With **Include inactive versions** (interface) or `inactive=true` ([read API](read-api.md#projects-components-runs-and-search)) |
 | Listed in a finding's **Also affected** (`affected_components`) | ✓ | |
 | Notified: `findings.new`, known exploited, emails | ✓ | |
-| Shown on the project page (selector, **Versions** table) and in `/versions` | ✓ | ✓, marked inactive |
+| Shown on the project page (**Version** filter, **Versions** table) and in `/versions` | ✓ | ✓, marked inactive |
 | Readable: findings, components, license violations, finding pages, VEX export | ✓ | ✓ |
 | Listed in a finding's **Versions of this project** (`versions`) | ✓ | ✓, marked inactive |
 

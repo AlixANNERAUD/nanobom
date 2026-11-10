@@ -46,7 +46,12 @@
     "high": "High",
     "medium": "Medium",
     "low": "Low",
-    "unknown": "Unknown"
+    "unknown": "Unknown",
+    "legend": "Open findings by severity",
+    "known_exploited": {
+      "one": "{count} known exploited",
+      "other": "{count} known exploited"
+    }
   },
   "status": {
     "open": "Open",
@@ -142,6 +147,10 @@
       "other": "{count} components"
     },
     "last_upload": "last upload {time}",
+    "open_findings": {
+      "one": "{count} open finding",
+      "other": "{count} open findings"
+    },
     "stale_alert": "No SBOM received since {date}: check the CI job uploading it.",
     "stale_never_alert": "No SBOM received since this project was created on {date}: check the CI job uploading it.",
     "without_purl_title": "Some components cannot be checked",
@@ -167,8 +176,6 @@
     "commit": "commit {commit}",
     "image": "image {tag}",
     "version": "Version",
-    "version_form": "Project version",
-    "version_show": "Show",
     "version_unnamed": "Unnamed version",
     "version_latest": "{version} (latest)",
     "upload_version": "version {version}",
@@ -186,6 +193,7 @@
     "filter_ecosystem": "Ecosystem",
     "filter": "Filter",
     "known_exploited": "Known exploited",
+    "known_exploited_tag": "KEV",
     "known_exploited_due": "CISA due date: {date}",
     "epss": "EPSS",
     "filter_exploited": "Only known exploited vulnerabilities",

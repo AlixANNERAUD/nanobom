@@ -82,142 +82,152 @@ fn introduced_via(finding: &FindingRow) -> impl IntoView + use<> {
     view! { <span title=title>{shown}</span> }.into_any()
 }
 
-fn finding_rows(findings: Vec<FindingRow>) -> impl IntoView {
+/// The optional columns of the findings table: each is shown only when a row has something to
+/// put in it, so a project that needs neither keeps the room for the vulnerability.
+#[derive(Clone, Copy)]
+struct Columns {
+    /// A row says which direct dependencies lead to its component.
+    via: bool,
+    /// A row is not open. Open rows leave the cell empty: the default filter shows open
+    /// findings, and repeating the word on every row would hide the ones that differ.
+    status: bool,
+}
+
+impl Columns {
+    fn of(findings: &[FindingRow]) -> Self {
+        Self {
+            via: findings
+                .iter()
+                .any(|finding| !finding.introduced_via.is_empty()),
+            status: findings
+                .iter()
+                .any(|finding| finding.status != Status::Open),
+        }
+    }
+}
+
+/// A component as one line of text, for the tooltip of its cell: the cell cuts what does not
+/// fit.
+fn component_title(name: &str, version: Option<&str>, ecosystem: &str) -> String {
+    match version {
+        Some(version) => format!("{name} {version} · {ecosystem}"),
+        None => format!("{name} · {ecosystem}"),
+    }
+}
+
+/// The tag of a known exploited finding. The row shows the short `KEV`; the full text, with
+/// CISA's due date when there is one, is what assistive technology reads and what the tooltip
+/// says.
+fn known_exploited_tag(finding: &FindingRow) -> Option<impl IntoView + use<>> {
+    finding.exploitation.known_exploited.then(|| {
+        let text = match finding.exploitation.kev_due_date {
+            Some(date) => format!(
+                "{} · {}",
+                t!("project.known_exploited"),
+                tf!("project.known_exploited_due", date = date.to_string()),
+            ),
+            None => t!("project.known_exploited").to_owned(),
+        };
+        view! {
+            <Badge variant=BadgeVariant::Destructive title=text.clone()>
+                <span class="sr-only">{text.clone()}</span>
+                <span aria-hidden="true">{t!("project.known_exploited_tag")}</span>
+            </Badge>
+        }
+    })
+}
+
+/// The rows of the findings table, one line each. The table has a fixed layout (see
+/// [`ProjectPage`]), so a cell never grows with its text: long names are cut with an ellipsis
+/// and keep their full text in a tooltip.
+fn finding_rows(findings: Vec<FindingRow>, columns: Columns) -> impl IntoView {
     findings
         .into_iter()
         .map(|finding| {
             let href = format!("/findings/{}", finding.id);
-            let exploited = finding.exploitation.known_exploited.then(|| {
-                let title = finding
-                    .exploitation
-                    .kev_due_date
-                    .map(|date| tf!("project.known_exploited_due", date = date.to_string()));
-                view! {
-                    <span title=title class="mt-1 block">
-                        <Badge variant=BadgeVariant::Destructive>{t!("project.known_exploited")}</Badge>
-                    </span>
-                }
-            });
+            let exploited = known_exploited_tag(&finding);
             let epss = finding
                 .exploitation
                 .epss_percentile
                 .map(percent)
                 .unwrap_or_default();
-            let via = introduced_via(&finding);
+            let via = columns.via.then(|| {
+                view! { <td class=format!("{TABLE_CELL} truncate")>{introduced_via(&finding)}</td> }
+            });
+            let status = columns.status.then(|| {
+                view! {
+                    <td class=TABLE_CELL>
+                        {(finding.status != Status::Open).then(|| view! { <StatusBadge status=finding.status /> })}
+                    </td>
+                }
+            });
+            let summary = finding
+                .summary
+                .clone()
+                .filter(|summary| !summary.is_empty())
+                .map(|summary| {
+                    view! {
+                        <span class="text-muted-foreground truncate" title=summary.clone()>
+                            {summary.clone()}
+                        </span>
+                    }
+                });
+            let component = component_title(
+                &finding.component_name,
+                finding.component_version.as_deref(),
+                &finding.ecosystem,
+            );
             view! {
                 <tr class=TABLE_ROW>
-                    <td class=TABLE_CELL>
+                    <td class=format!("{TABLE_CELL} whitespace-nowrap")>
                         <SeverityBadge severity=finding.severity />
                         {finding
                             .cvss_score
                             .map(|score| {
                                 view! {
-                                    <span class="text-muted-foreground ml-1 text-xs tabular-nums">
+                                    <span class=format!("{MONO} text-muted-foreground ml-1.5 tabular-nums")>
                                         {format!("{score:.1}")}
                                     </span>
                                 }
                             })}
                     </td>
                     <th scope="row" class=format!("{TABLE_CELL} text-left font-normal")>
-                        <a href=href.clone() class="font-medium underline-offset-4 hover:underline">
-                            {finding.vulnerability_id.clone()}
-                        </a>
-                        <span class="text-muted-foreground block max-w-md truncate text-xs">
-                            {finding.summary.clone().unwrap_or_default()}
-                        </span>
-                        {exploited}
+                        // The tag and the identifier take the room they need and the summary what
+                        // is left, so the summary is cut first. The identifier is cut only when
+                        // it does not fit the column by itself.
+                        <div class="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2">
+                            <span class="flex min-w-0 items-center gap-2">
+                                {exploited}
+                                <a
+                                    href=href
+                                    class=format!("{MONO} min-w-0 truncate font-medium underline-offset-4 hover:underline")
+                                >
+                                    {finding.vulnerability_id.clone()}
+                                </a>
+                            </span>
+                            {summary}
+                        </div>
                     </th>
-                    <td class=TABLE_CELL>
+                    <td class=format!("{TABLE_CELL} truncate") title=component>
                         <span class="font-medium">{finding.component_name.clone()}</span>
-                        <span class="text-muted-foreground block text-xs">
-                            {finding.component_version.clone().unwrap_or_default()} " · "
-                            {finding.ecosystem.clone()}
-                        </span>
+                        {finding
+                            .component_version
+                            .clone()
+                            .map(|version| {
+                                view! { <span class=format!("{MONO} text-muted-foreground ml-1.5")>{version}</span> }
+                            })}
+                        <span class="text-muted-foreground ml-1.5 text-xs">{finding.ecosystem.clone()}</span>
                     </td>
-                    <td class=format!("{TABLE_CELL} text-sm")>{via}</td>
+                    {via}
                     <td class=format!("{TABLE_CELL} text-right tabular-nums")>{epss}</td>
-                    <td class=TABLE_CELL>
-                        <StatusBadge status=finding.status />
-                    </td>
-                    <td class=format!("{TABLE_CELL} whitespace-nowrap text-muted-foreground")>
+                    {status}
+                    <td class=format!("{TABLE_CELL} text-muted-foreground whitespace-nowrap")>
                         {format_date(finding.first_seen_at)}
                     </td>
                 </tr>
             }
         })
         .collect_view()
-}
-
-#[component]
-fn Filters(page: ProjectData, filter: FindingFilter) -> impl IntoView {
-    let selected = |current: &Option<String>, value: &str| current.as_deref() == Some(value);
-    view! {
-        <form method="get" class="flex flex-wrap items-end gap-3" aria-label=t!("project.filter_label")>
-            {filter.version.clone().map(|version| view! { <input type="hidden" name="version" value=version /> })}
-            <div class="grid gap-2">
-                <label class=LABEL for="filter-severity">{t!("project.severity")}</label>
-                <select id="filter-severity" name="severity" class=SELECT>
-                    <option value="">{t!("project.filter_any_severity")}</option>
-                    {Severity::DESCENDING
-                        .into_iter()
-                        .map(|severity| {
-                            view! {
-                                <option
-                                    value=severity.as_str()
-                                    selected=selected(&filter.severity, severity.as_str())
-                                >
-                                    {severity.label()}
-                                </option>
-                            }
-                        })
-                        .collect_view()}
-                </select>
-            </div>
-            <div class="grid gap-2">
-                <label class=LABEL for="filter-status">{t!("project.status")}</label>
-                <select id="filter-status" name="status" class=SELECT>
-                    <option value="">{t!("project.filter_open_and_ignored")}</option>
-                    {Status::ALL
-                        .into_iter()
-                        .map(|status| {
-                            view! {
-                                <option
-                                    value=status.as_str()
-                                    selected=selected(&filter.status, status.as_str())
-                                >
-                                    {status.label()}
-                                </option>
-                            }
-                        })
-                        .collect_view()}
-                    <option value="all" selected=selected(&filter.status, "all")>{t!("project.filter_all")}</option>
-                </select>
-            </div>
-            <div class="grid gap-2">
-                <label class=LABEL for="filter-ecosystem">{t!("project.filter_ecosystem")}</label>
-                <select id="filter-ecosystem" name="ecosystem" class=SELECT>
-                    <option value="">{t!("project.filter_any_ecosystem")}</option>
-                    {page
-                        .ecosystems
-                        .into_iter()
-                        .map(|ecosystem| {
-                            let is_selected = selected(&filter.ecosystem, &ecosystem);
-                            view! {
-                                <option value=ecosystem.clone() selected=is_selected>
-                                    {ecosystem.clone()}
-                                </option>
-                            }
-                        })
-                        .collect_view()}
-                </select>
-            </div>
-            <label class=format!("{LABEL} h-9")>
-                <input type="checkbox" name="exploited" value="1" class=CHECKBOX checked=filter.exploited />
-                {t!("project.filter_exploited")}
-            </label>
-            <Button variant=ButtonVariant::Secondary>{t!("project.filter")}</Button>
-        </form>
-    }
 }
 
 /// How a version is named in the interface: the unnamed version gets a label.
@@ -239,44 +249,141 @@ fn version_query(name: &str) -> String {
     )
 }
 
-/// The version selector of the project page, a plain GET form; shown only when the project has
-/// named versions. Changing the version drops the filters, which may not apply to it.
+/// The ecosystems the filter offers: those of the version's findings, and the one the address
+/// asks for when the version has no finding of it. The filter applies either way, so the form
+/// must show it rather than read "Any" over an empty table; that happens when the version
+/// changes while an ecosystem is chosen.
+fn ecosystem_options(found: &[String], chosen: Option<&str>) -> Vec<String> {
+    let mut options = found.to_vec();
+    if let Some(chosen) = chosen
+        && !found.iter().any(|ecosystem| ecosystem == chosen)
+    {
+        options.push(chosen.to_owned());
+    }
+    options
+}
+
+/// Whether a project names versions. One that never did has only the unnamed version, and
+/// nothing to choose or compare.
+fn names_versions(versions: &[VersionOption]) -> bool {
+    versions.iter().any(|version| !version.name.is_empty())
+}
+
+/// What the findings table shows, a plain GET form with one button: the version, for projects
+/// that name versions, and the filters. Both are sent together, so changing the version keeps
+/// the filters and filtering keeps the version.
 #[component]
-fn VersionSelector(page: ProjectData) -> impl IntoView {
-    let options = page
-        .versions
-        .into_iter()
-        .map(|version| {
-            let selected = version.name == page.version.name;
-            let label = if version.latest {
-                tf!(
-                    "project.version_latest",
-                    version = version_label(&version.name)
-                )
-            } else if !version.active {
-                tf!(
-                    "project.version_inactive_option",
-                    version = version_label(&version.name)
-                )
-            } else {
-                version_label(&version.name)
-            };
+fn Filters(page: ProjectData, filter: FindingFilter) -> impl IntoView {
+    let selected = |current: &Option<String>, value: &str| current.as_deref() == Some(value);
+    let version = if names_versions(&page.versions) {
+        let options = page
+            .versions
+            .iter()
+            .map(|version| {
+                let selected = version.name == page.version.name;
+                let label = if version.latest {
+                    tf!(
+                        "project.version_latest",
+                        version = version_label(&version.name)
+                    )
+                } else if !version.active {
+                    tf!(
+                        "project.version_inactive_option",
+                        version = version_label(&version.name)
+                    )
+                } else {
+                    version_label(&version.name)
+                };
+                view! {
+                    <option value=version.name.clone() selected=selected>
+                        {label}
+                    </option>
+                }
+            })
+            .collect_view();
+        Some(
             view! {
-                <option value=version.name selected=selected>
-                    {label}
-                </option>
+                <div class="grid min-w-0 gap-1">
+                    <label class=FILTER_LABEL for="version">{t!("project.version")}</label>
+                    <select id="version" name="version" class=format!("{SELECT_COMPACT} max-w-56")>
+                        {options}
+                    </select>
+                </div>
             }
+            .into_any(),
+        )
+    } else {
+        // Without a select, the version named in the address is all the form has to go by.
+        filter.version.clone().map(|version| {
+            view! { <input type="hidden" name="version" value=version /> }.into_any()
         })
-        .collect_view();
+    };
+    let ecosystems = ecosystem_options(&page.ecosystems, filter.ecosystem.as_deref());
     view! {
-        <form method="get" class="flex flex-wrap items-end gap-3" aria-label=t!("project.version_form")>
-            <div class="grid gap-2">
-                <label class=LABEL for="version">{t!("project.version")}</label>
-                <select id="version" name="version" class=SELECT>
-                    {options}
+        // The row wraps on a narrow page: only the table scrolls sideways.
+        <form method="get" class="flex flex-wrap items-end gap-x-3 gap-y-2" aria-label=t!("project.filter_label")>
+            {version}
+            <div class="grid min-w-0 gap-1">
+                <label class=FILTER_LABEL for="filter-severity">{t!("project.severity")}</label>
+                <select id="filter-severity" name="severity" class=SELECT_COMPACT>
+                    <option value="">{t!("project.filter_any_severity")}</option>
+                    {Severity::DESCENDING
+                        .into_iter()
+                        .map(|severity| {
+                            view! {
+                                <option
+                                    value=severity.as_str()
+                                    selected=selected(&filter.severity, severity.as_str())
+                                >
+                                    {severity.label()}
+                                </option>
+                            }
+                        })
+                        .collect_view()}
                 </select>
             </div>
-            <Button variant=ButtonVariant::Secondary>{t!("project.version_show")}</Button>
+            <div class="grid min-w-0 gap-1">
+                <label class=FILTER_LABEL for="filter-status">{t!("project.status")}</label>
+                <select id="filter-status" name="status" class=SELECT_COMPACT>
+                    <option value="">{t!("project.filter_open_and_ignored")}</option>
+                    {Status::ALL
+                        .into_iter()
+                        .map(|status| {
+                            view! {
+                                <option
+                                    value=status.as_str()
+                                    selected=selected(&filter.status, status.as_str())
+                                >
+                                    {status.label()}
+                                </option>
+                            }
+                        })
+                        .collect_view()}
+                    <option value="all" selected=selected(&filter.status, "all")>{t!("project.filter_all")}</option>
+                </select>
+            </div>
+            <div class="grid min-w-0 gap-1">
+                <label class=FILTER_LABEL for="filter-ecosystem">{t!("project.filter_ecosystem")}</label>
+                <select id="filter-ecosystem" name="ecosystem" class=format!("{SELECT_COMPACT} max-w-40")>
+                    <option value="">{t!("project.filter_any_ecosystem")}</option>
+                    {ecosystems
+                        .into_iter()
+                        .map(|ecosystem| {
+                            let is_selected = selected(&filter.ecosystem, &ecosystem);
+                            view! {
+                                <option value=ecosystem.clone() selected=is_selected>
+                                    {ecosystem.clone()}
+                                </option>
+                            }
+                        })
+                        .collect_view()}
+                </select>
+            </div>
+            <label class="flex min-h-8 items-center gap-2 text-sm select-none">
+                <input type="checkbox" name="exploited" value="1" class=CHECKBOX checked=filter.exploited />
+                {t!("project.filter_exploited")}
+            </label>
+            <Button variant=ButtonVariant::Secondary size=ButtonSize::Small>{t!("project.filter")}</Button>
         </form>
     }
 }
@@ -456,8 +563,7 @@ pub fn ProjectPage() -> impl IntoView {
                     let organization_slug = organization.slug.clone();
                     let project_slug = page.slug.clone();
                     let latest = page.version_upload.clone();
-                    let versioned = page.versions.iter().any(|version| !version.name.is_empty());
-                    let selector = versioned.then(|| view! { <VersionSelector page=page.clone() /> });
+                    let versioned = names_versions(&page.versions);
                     let versions = versioned.then(|| view! { <Versions page=page.clone() /> });
                     let inactive = (!page.version.active).then(|| {
                         view! {
@@ -519,7 +625,8 @@ pub fn ProjectPage() -> impl IntoView {
                         view! { <Alert variant=AlertVariant::Warning>{message}</Alert> }
                     });
                     let count = page.findings.len();
-                    let rows = finding_rows(page.findings.clone());
+                    let columns = Columns::of(&page.findings);
+                    let rows = finding_rows(page.findings.clone(), columns);
                     let table = if page.findings.is_empty() {
                         view! {
                             <Empty title=t!("project.no_match_title")>
@@ -529,16 +636,24 @@ pub fn ProjectPage() -> impl IntoView {
                             .into_any()
                     } else {
                         view! {
-                            <Table caption=tp!("project.findings_caption", count)>
+                            // A fixed layout: every column but the vulnerability has a width, the
+                            // vulnerability takes what is left, and no text can widen a column. The
+                            // minimum width keeps room for the vulnerability on a narrow page, where
+                            // the table scrolls inside its frame instead of squeezing it to nothing.
+                            <Table caption=tp!("project.findings_caption", count) class="min-w-[60rem] table-fixed">
                                 <thead>
                                     <tr class=TABLE_HEAD_ROW>
-                                        <th scope="col" class=TABLE_HEAD>{t!("project.severity")}</th>
+                                        <th scope="col" class=format!("{TABLE_HEAD} w-32")>{t!("project.severity")}</th>
                                         <th scope="col" class=TABLE_HEAD>{t!("project.vulnerability")}</th>
-                                        <th scope="col" class=TABLE_HEAD>{t!("project.component")}</th>
-                                        <th scope="col" class=TABLE_HEAD>{t!("project.via")}</th>
-                                        <th scope="col" class=format!("{TABLE_HEAD} text-right")>{t!("project.epss")}</th>
-                                        <th scope="col" class=TABLE_HEAD>{t!("project.status")}</th>
-                                        <th scope="col" class=TABLE_HEAD>{t!("project.since")}</th>
+                                        <th scope="col" class=format!("{TABLE_HEAD} w-56")>{t!("project.component")}</th>
+                                        {columns.via.then(|| view! {
+                                            <th scope="col" class=format!("{TABLE_HEAD} w-36")>{t!("project.via")}</th>
+                                        })}
+                                        <th scope="col" class=format!("{TABLE_HEAD} w-[4.5rem] text-right")>{t!("project.epss")}</th>
+                                        {columns.status.then(|| view! {
+                                            <th scope="col" class=format!("{TABLE_HEAD} w-28")>{t!("project.status")}</th>
+                                        })}
+                                        <th scope="col" class=format!("{TABLE_HEAD} w-28")>{t!("project.since")}</th>
                                     </tr>
                                 </thead>
                                 <tbody>{rows}</tbody>
@@ -552,7 +667,7 @@ pub fn ProjectPage() -> impl IntoView {
                         .into_iter()
                         .map(|upload| {
                             view! {
-                                <li class="flex flex-wrap gap-x-2">
+                                <li class="flex flex-wrap gap-x-2 wrap-anywhere">
                                     <span class="font-medium">{format_time(upload.uploaded_at)}</span>
                                     <span class="text-muted-foreground">
                                         {tp!("project.components", upload.component_count)} " · "
@@ -587,7 +702,7 @@ pub fn ProjectPage() -> impl IntoView {
                                         <form
                                             method="post"
                                             action={action::<DeleteProject>()}
-                                            class="flex flex-wrap items-end gap-3"
+                                            class="flex flex-wrap items-end gap-3 wrap-anywhere"
                                         >
                                             <input type="hidden" name="organization" value=organization_slug />
                                             <input type="hidden" name="project" value=project_slug.clone() />
@@ -612,7 +727,7 @@ pub fn ProjectPage() -> impl IntoView {
                     });
                     view! {
                         <Title text=format!("{} · nanobom", page.name) />
-                        <nav aria-label=t!("common.breadcrumb") class="text-muted-foreground text-sm">
+                        <nav aria-label=t!("common.breadcrumb") class="text-muted-foreground text-sm wrap-anywhere">
                             <a class="hover:underline" href=format!("/organizations/{organization_slug}")>
                                 {organization.name.clone()}
                             </a>
@@ -628,8 +743,15 @@ pub fn ProjectPage() -> impl IntoView {
                             </LinkButton>
                             {check_now}
                         </Heading>
+                        // The open findings of the version shown, whatever the filters below.
+                        <div class="grid gap-2">
+                            <SeverityBar counts=page.counts />
+                            <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+                                <p class="font-medium">{tp!("project.open_findings", page.counts.total())}</p>
+                                <SeverityLegend counts=page.counts known_exploited=page.known_exploited />
+                            </div>
+                        </div>
                         {stale}
-                        {selector}
                         {inactive}
                         {without_purl}
                         <Filters page=page.clone() filter />
@@ -1507,6 +1629,66 @@ mod tests {
             ]),
             ["bar", "foo 1.0.0", "foo 2.0.0"]
         );
+    }
+
+    #[test]
+    fn a_component_title_names_everything_its_cell_may_cut() {
+        assert_eq!(
+            component_title("org.example/core", Some("2.14.1"), "maven"),
+            "org.example/core 2.14.1 · maven"
+        );
+        assert_eq!(component_title("left-pad", None, "npm"), "left-pad · npm");
+    }
+
+    #[test]
+    fn the_ecosystem_asked_for_is_offered_even_when_the_version_has_none() {
+        let found = ["npm".to_owned(), "pypi".to_owned()];
+        assert_eq!(ecosystem_options(&found, None), ["npm", "pypi"]);
+        assert_eq!(ecosystem_options(&found, Some("pypi")), ["npm", "pypi"]);
+        assert_eq!(
+            ecosystem_options(&found, Some("cargo")),
+            ["npm", "pypi", "cargo"]
+        );
+    }
+
+    fn row(status: Status, via: Vec<DependencyComponent>) -> FindingRow {
+        FindingRow {
+            id: 1,
+            version: String::new(),
+            component_name: "lodash".to_owned(),
+            component_version: Some("4.17.20".to_owned()),
+            license: None,
+            ecosystem: "npm".to_owned(),
+            purl: "pkg:npm/lodash@4.17.20".to_owned(),
+            vulnerability_id: "GHSA-35jh-r3h4-6jhm".to_owned(),
+            aliases: Vec::new(),
+            summary: None,
+            severity: Severity::High,
+            cvss_score: None,
+            status,
+            first_seen_at: chrono::DateTime::UNIX_EPOCH.fixed_offset(),
+            fixed_at: None,
+            ignore_reason: None,
+            ignore_expires_at: None,
+            ignore_justification: None,
+            exploitation: crate::model::Exploitation::default(),
+            introduced_via: via,
+        }
+    }
+
+    #[test]
+    fn optional_columns_follow_the_rows() {
+        let columns = Columns::of(&[]);
+        assert!(!columns.via && !columns.status);
+        let columns = Columns::of(&[row(Status::Open, Vec::new())]);
+        assert!(!columns.via && !columns.status);
+        let columns = Columns::of(&[
+            row(Status::Open, Vec::new()),
+            row(Status::Ignored, vec![component("express", "4.0.0")]),
+        ]);
+        assert!(columns.via && columns.status);
+        let columns = Columns::of(&[row(Status::Fixed, Vec::new())]);
+        assert!(!columns.via && columns.status);
     }
 
     #[test]

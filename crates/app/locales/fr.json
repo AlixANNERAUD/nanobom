@@ -46,7 +46,12 @@
     "high": "Élevée",
     "medium": "Moyenne",
     "low": "Faible",
-    "unknown": "Inconnue"
+    "unknown": "Inconnue",
+    "legend": "Vulnérabilités ouvertes par gravité",
+    "known_exploited": {
+      "one": "{count} exploitée connue",
+      "other": "{count} exploitées connues"
+    }
   },
   "status": {
     "open": "Ouverte",
@@ -142,6 +147,10 @@
       "other": "{count} composants"
     },
     "last_upload": "dernier envoi {time}",
+    "open_findings": {
+      "one": "{count} vulnérabilité ouverte",
+      "other": "{count} vulnérabilités ouvertes"
+    },
     "stale_alert": "Aucun SBOM reçu depuis le {date} : vérifiez le job d’intégration continue qui l’envoie.",
     "stale_never_alert": "Aucun SBOM reçu depuis la création du projet le {date} : vérifiez le job d’intégration continue qui l’envoie.",
     "without_purl_title": "Certains composants ne peuvent pas être vérifiés",
@@ -167,8 +176,6 @@
     "commit": "commit {commit}",
     "image": "image {tag}",
     "version": "Version",
-    "version_form": "Version du projet",
-    "version_show": "Afficher",
     "version_unnamed": "Version sans nom",
     "version_latest": "{version} (la plus récente)",
     "upload_version": "version {version}",
@@ -186,6 +193,7 @@
     "filter_ecosystem": "Écosystème",
     "filter": "Filtrer",
     "known_exploited": "Exploitée connue",
+    "known_exploited_tag": "KEV",
     "known_exploited_due": "Échéance CISA : {date}",
     "epss": "EPSS",
     "filter_exploited": "Uniquement les vulnérabilités exploitées connues",
