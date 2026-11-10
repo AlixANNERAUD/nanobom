@@ -454,10 +454,41 @@ pub struct ProjectData {
     pub known_exploited: i64,
 }
 
+/// A reference of an advisory. Its address is written by the advisory's author: see
+/// [`Reference::target`] before linking to it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Reference {
     pub kind: String,
     pub url: String,
+}
+
+impl Reference {
+    /// The address as a link target, or `None` when it must be shown as text only.
+    pub fn target(&self) -> Option<&str> {
+        link_target(&self.url)
+    }
+}
+
+/// The target of a link to an address taken from an advisory, or `None` when the address must
+/// not become a link: only complete web addresses and `mailto:` are followed. The check is an
+/// allow-list on purpose. `javascript:` and `data:` addresses run or show what their author
+/// chose within the page; relative addresses would lead into nanobom itself.
+///
+/// The address is trimmed and the result is what was checked: write the result, not the
+/// address. A browser removes tabs and line breaks from an address, and control characters
+/// before it, prior to reading its scheme; an address holding any control character is refused
+/// rather than interpreted the same way.
+pub fn link_target(address: &str) -> Option<&str> {
+    let address = address.trim();
+    let starts_with = |prefix: &str| {
+        address
+            .get(..prefix.len())
+            .is_some_and(|start| start.eq_ignore_ascii_case(prefix))
+    };
+    let allowed = ["http://", "https://", "mailto:"]
+        .into_iter()
+        .any(starts_with);
+    (allowed && !address.chars().any(char::is_control)).then_some(address)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -505,7 +536,10 @@ pub struct FindingData {
     pub project_slug: String,
     /// Whether the viewer may ignore or restore this finding (shows the controls only).
     pub can_triage: bool,
-    pub details: Option<String>,
+    /// The advisory's text as HTML, inserted into the page as it is: only ever the result of
+    /// `markdown::render` (a server-only module), which makes untrusted Markdown harmless.
+    /// `None` when the advisory has no text.
+    pub details_html: Option<String>,
     pub published: Option<DateTime<FixedOffset>>,
     pub modified: DateTime<FixedOffset>,
     pub cvss_version: Option<String>,
@@ -662,4 +696,87 @@ pub struct AdministrationData {
     pub organizations: Vec<Organization>,
     pub local_accounts: bool,
     pub password_minimum_length: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::link_target;
+
+    #[test]
+    fn web_and_mail_addresses_are_link_targets() {
+        for address in [
+            "http://example.org",
+            "https://example.org/a?b=1&c=2#d",
+            "HTTPS://EXAMPLE.ORG",
+            "hTtP://example.org",
+            "https://example.org/a b",
+            "https://example.org/é",
+            "mailto:security@example.org",
+            "MAILTO:security@example.org?subject=x",
+        ] {
+            assert_eq!(link_target(address), Some(address), "{address}");
+        }
+        assert_eq!(
+            link_target("  https://example.org\n"),
+            Some("https://example.org")
+        );
+        // Whitespace around the address is not part of the target, whatever its kind.
+        for address in [
+            "\u{a0}https://example.org\u{3000}",
+            "https://example.org\u{85}",
+        ] {
+            assert_eq!(link_target(address), Some("https://example.org"));
+        }
+    }
+
+    #[test]
+    fn other_addresses_are_not_link_targets() {
+        for address in [
+            "",
+            " ",
+            "javascript:alert(1)",
+            "JaVaScRiPt:alert(1)",
+            " javascript:alert(1)",
+            "\tjavascript:alert(1)",
+            "\u{1}javascript:alert(1)",
+            "java\tscript:alert(1)",
+            "java\nscript:alert(1)",
+            "javascript://example.org/%0Aalert(1)",
+            "data:text/html,hi",
+            "vbscript:x",
+            "file:///etc/passwd",
+            "ftp://example.org",
+            "blob:https://example.org/1",
+            "view-source:https://example.org",
+            "//example.org",
+            "/organizations",
+            "../settings",
+            "example.org",
+            "#fragment",
+            "?query",
+            "http",
+            "https",
+            "https:",
+            "https:/",
+            "https:example.org",
+            "https:/example.org",
+            "https:\\\\example.org",
+            "http:javascript:alert(1)",
+            "mailto",
+            // A browser drops tabs and line breaks from an address before reading its scheme, and
+            // control characters before it.
+            "ht\ttps://example.org",
+            "https\n://example.org",
+            "https://example.org/\u{0}",
+            "https://example.org/\r\nx",
+            "https://example.org/\u{7f}",
+            "https://example.org/\u{85}x",
+            "\u{1}https://example.org",
+            "ht\u{200b}tps://example.org",
+            "é://example.org",
+            "ｈttps://example.org",
+        ] {
+            assert_eq!(link_target(address), None, "{address:?}");
+        }
+    }
 }

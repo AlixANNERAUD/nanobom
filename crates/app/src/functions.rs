@@ -306,7 +306,10 @@ pub async fn load_finding(finding: i64) -> Result<FindingData, ServerFnError> {
         organization_slug: detail.organization_slug,
         project_slug: detail.finding.project_slug.clone(),
         can_triage: detail.can_triage,
-        details: detail.details,
+        details_html: detail
+            .details
+            .map(|details| crate::markdown::render(&details))
+            .filter(|html| !html.trim().is_empty()),
         published: detail.published,
         modified: detail.modified,
         cvss_version: detail.cvss_version,

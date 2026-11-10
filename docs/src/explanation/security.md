@@ -106,6 +106,22 @@ Every response carries `X-Content-Type-Options: nosniff`, `Referrer-Policy: same
 `X-Frame-Options: DENY` and `Content-Security-Policy: frame-ancestors 'none'`, which prevent
 nanobom from being framed by another site. HSTS is left to the TLS-terminating proxy.
 
+## Advisory text
+
+Advisories come from OSV and their description is Markdown written by third parties. A finding's
+page shows it formatted, and treats it as untrusted:
+
+- HTML in the description is shown as text, never interpreted.
+- A link is kept only when it leads to an `http`, `https` or `mailto` address, and carries
+  `rel="noopener noreferrer nofollow"`. Any other link, relative ones included, is reduced to
+  its text.
+- An image is replaced by a link to its address, so opening a finding makes the browser request
+  nothing from a third party.
+
+The addresses listed under **References** follow the same rule: one that is not a web address is
+shown without a link. The [read API](../reference/read-api.md) returns the description as
+published.
+
 ## Outbound requests
 
 nanobom makes requests to:
