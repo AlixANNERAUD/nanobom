@@ -116,14 +116,12 @@
     "run_succeeded": "Réussie",
     "run_failed": "Échouée",
     "run_running": "En cours",
-    "run_new": {
-      "one": "{count} nouvelle",
-      "other": "{count} nouvelles"
-    },
-    "run_fixed": {
-      "one": "{count} corrigée",
-      "other": "{count} corrigées"
-    },
+    "run_status": "Statut",
+    "run_started": "Début",
+    "run_trigger": "Déclencheur",
+    "run_scope": "Périmètre",
+    "run_new": "Nouvelles",
+    "run_fixed": "Corrigées",
     "trigger_scheduled": "planifiée",
     "trigger_manual": "manuelle",
     "trigger_upload": "envoi",

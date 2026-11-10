@@ -123,10 +123,10 @@ vulnerability, the component it affects, and the address of its page.
 
 ## 5. Read the findings
 
-Open <http://localhost:8080/organizations/acme>. The project `demo` is listed with its open
-findings by severity, how many are ignored or known exploited, and the time of its last
-SBOM. Under **Recent runs**, the run your upload
-started is listed as succeeded.
+Open <http://localhost:8080/organizations/acme>. The project `demo` is listed with a bar of
+its open findings by severity next to their counts, how many are known exploited (**KEV**) or
+ignored, and the day of its last SBOM. Under **Recent runs**, the run your upload started is
+listed as succeeded, with its counts of new and fixed findings.
 
 Open `demo`. Under its name, a bar and its legend count the open findings by severity. Below,
 the findings are listed most urgent first: known exploited ones, then by severity.

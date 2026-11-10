@@ -11,7 +11,7 @@
 //! ```ignore
 //! let label = t!("settings.save");
 //! let notice = tf!("notices.user_created", username = user.username);
-//! let new_findings = tp!("organization.run_new", run.new_findings);
+//! let components = tp!("project.components", upload.component_count);
 //! ```
 
 use embedded_i18n::Locale;
