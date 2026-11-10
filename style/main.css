@@ -149,6 +149,77 @@
   }
 }
 
+@layer components {
+  /* Advisory text, rendered from Markdown by crates/app/src/markdown.rs. Its elements carry no
+     class, so they are styled from their container. Long words (addresses, package coordinates)
+     break anywhere, and what cannot wrap (code blocks, tables) scrolls inside its own box: the
+     text never widens the page. */
+  .prose-advisory {
+    /* Quotes and lists nested by the dozen shift their text past the card: it scrolls here. */
+    @apply overflow-x-auto text-sm leading-relaxed wrap-anywhere;
+  }
+
+  .prose-advisory :where(p, ul, ol, pre, blockquote, table, hr, h3, h4, h5, h6):not(:first-child) {
+    @apply mt-3;
+  }
+
+  /* Headings stay at text size: they sit under the title of a card, which is not larger. */
+  .prose-advisory :where(h3, h4, h5, h6) {
+    @apply font-semibold;
+  }
+
+  .prose-advisory :where(h3, h4, h5, h6):not(:first-child) {
+    @apply mt-5;
+  }
+
+  .prose-advisory ul {
+    @apply list-disc pl-5;
+  }
+
+  .prose-advisory ol {
+    @apply list-decimal pl-5;
+  }
+
+  .prose-advisory li + li {
+    @apply mt-1;
+  }
+
+  .prose-advisory a {
+    @apply text-primary underline underline-offset-4;
+  }
+
+  .prose-advisory code {
+    @apply bg-muted rounded-sm px-1 py-0.5 font-mono text-[0.8125rem];
+  }
+
+  .prose-advisory pre {
+    @apply bg-muted overflow-x-auto rounded-md p-3;
+  }
+
+  .prose-advisory pre code {
+    @apply bg-transparent p-0;
+  }
+
+  .prose-advisory blockquote {
+    @apply text-muted-foreground border-l-2 pl-4;
+  }
+
+  /* As a block, a table can scroll. Its cells wrap between words only: breaking anywhere would
+     let the columns shrink to one letter instead of scrolling. */
+  .prose-advisory table {
+    @apply block w-max max-w-full overflow-x-auto border-collapse;
+    overflow-wrap: normal;
+  }
+
+  .prose-advisory :where(th, td) {
+    @apply border px-2 py-1 text-left align-top;
+  }
+
+  .prose-advisory th {
+    @apply bg-muted/50 font-medium;
+  }
+}
+
 @theme inline {
   --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;

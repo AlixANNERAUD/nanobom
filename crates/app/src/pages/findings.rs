@@ -983,7 +983,7 @@ fn dependency_paths(paths: Option<DependencyPaths>) -> impl IntoView {
             });
             let text = path.iter().map(path_component).collect::<Vec<_>>().join(" → ");
             view! {
-                <li class="break-words">
+                <li class="wrap-anywhere">
                     {text}
                     {direct}
                 </li>
@@ -1089,7 +1089,7 @@ pub fn FindingPage() -> impl IntoView {
                     let cvss = page.cvss_vector.clone().map(move |vector| {
                         view! {
                             <dt class="text-muted-foreground">"CVSS " {cvss_version}</dt>
-                            <dd class="font-mono text-xs break-all">
+                            <dd class=format!("{MONO} break-all")>
                                 {cvss_score.map(|score| format!("{score:.1} · "))} {vector}
                             </dd>
                         }
@@ -1105,7 +1105,7 @@ pub fn FindingPage() -> impl IntoView {
                         .map(move |reason| {
                         view! {
                             <dt class="text-muted-foreground">{t!("finding.ignored")}</dt>
-                            <dd>
+                            <dd class="wrap-anywhere">
                                 {reason}
                                 {ignored_by.map(|by| format!(" ({by})"))}
                                 {ignore_expires_at
@@ -1117,6 +1117,13 @@ pub fn FindingPage() -> impl IntoView {
                             })}
                         }
                     });
+                    let details = match page.details_html.clone() {
+                        // Advisory text is untrusted: this HTML is the result of `markdown::render`,
+                        // which writes no markup of the source. Nothing else may be inserted this way.
+                        Some(html) => view! { <div class="prose-advisory" inner_html=html></div> }.into_any(),
+                        None => view! { <p class="text-muted-foreground text-sm">{t!("finding.no_description")}</p> }
+                            .into_any(),
+                    };
                     let exploitation = finding.exploitation.clone();
                     let known_exploited = exploitation.known_exploited;
                     let exploitation_body = if known_exploited || exploitation.epss_score.is_some() {
@@ -1156,7 +1163,7 @@ pub fn FindingPage() -> impl IntoView {
                         .then(|| view! { <Badge variant=BadgeVariant::Destructive>{t!("project.known_exploited")}</Badge> });
                     view! {
                         <Title text=format!("{} · nanobom", finding.vulnerability_id) />
-                        <nav aria-label=t!("common.breadcrumb") class="text-muted-foreground text-sm">
+                        <nav aria-label=t!("common.breadcrumb") class="text-muted-foreground text-sm wrap-anywhere">
                             <a class="hover:underline" href=format!("/organizations/{}", page.organization_slug)>
                                 {page.organization_slug.clone()}
                             </a>
@@ -1195,8 +1202,11 @@ pub fn FindingPage() -> impl IntoView {
                             {known_exploited_badge}
                             <StatusBadge status=finding.status />
                         </Heading>
-                        <div class="grid gap-6 lg:grid-cols-[2fr_1fr]">
-                            <div class="grid content-start gap-6">
+                        // Every column is `minmax(0, ...)`, here and in the two nested grids: a column sized
+                        // by its content would grow with the longest unbreakable string of an advisory (an
+                        // address, a line of code) and the page would scroll sideways.
+                        <div class="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+                            <div class="grid grid-cols-1 content-start gap-6">
                                 <Card>
                                     <CardHeader>
                                         <CardTitle>{t!("finding.details")}</CardTitle>
@@ -1207,11 +1217,7 @@ pub fn FindingPage() -> impl IntoView {
                                             {tf!("finding.modified", date = format_date(page.modified))}
                                         </CardDescription>
                                     </CardHeader>
-                                    <CardContent>
-                                        <p class="text-sm whitespace-pre-wrap break-words">
-                                            {page.details.clone().unwrap_or_else(|| t!("finding.no_description").to_owned())}
-                                        </p>
-                                    </CardContent>
+                                    <CardContent>{details}</CardContent>
                                 </Card>
                                 <Card>
                                     <CardHeader>
@@ -1222,14 +1228,14 @@ pub fn FindingPage() -> impl IntoView {
                                         {exploitation_body}
                                         <p class="flex flex-wrap gap-x-4 text-sm">
                                             <a
-                                                class="underline-offset-4 hover:underline"
+                                                class="text-primary underline underline-offset-4"
                                                 href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog"
                                                 rel="noreferrer"
                                             >
                                                 {t!("finding.kev_link")}
                                             </a>
                                             <a
-                                                class="underline-offset-4 hover:underline"
+                                                class="text-primary underline underline-offset-4"
                                                 href="https://www.first.org/epss/"
                                                 rel="noreferrer"
                                             >
@@ -1272,7 +1278,7 @@ pub fn FindingPage() -> impl IntoView {
                                                                     .map(|value| format!(" · {}", justification_label(value)))}
                                                             </span>
                                                             {reason
-                                                                .map(|reason| view! { <p class="mt-1 whitespace-pre-wrap">{reason}</p> })}
+                                                                .map(|reason| view! { <p class="mt-1 whitespace-pre-wrap wrap-anywhere">{reason}</p> })}
                                                         </li>
                                                     }
                                                 })
@@ -1282,19 +1288,23 @@ pub fn FindingPage() -> impl IntoView {
                                 </Card>
                                 {triage}
                             </div>
-                            <div class="grid content-start gap-6">
+                            <div class="grid grid-cols-1 content-start gap-6">
                                 <Card>
                                     <CardHeader>
                                         <CardTitle>{t!("finding.component")}</CardTitle>
                                     </CardHeader>
                                     <CardContent>
-                                        <dl class="grid gap-2 text-sm">
+                                        // Labels take the width of the longest one; values take the rest and
+                                        // wrap inside it, however long (package URLs, CVSS vectors).
+                                        <dl class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
                                             <dt class="text-muted-foreground">{t!("finding.package")}</dt>
-                                            <dd class="font-medium break-all">{finding.component_name.clone()}</dd>
+                                            <dd class="font-medium wrap-anywhere">{finding.component_name.clone()}</dd>
                                             <dt class="text-muted-foreground">{t!("finding.version")}</dt>
-                                            <dd>{finding.component_version.clone().unwrap_or_default()}</dd>
+                                            <dd class=format!("{MONO} wrap-anywhere")>
+                                                {finding.component_version.clone().unwrap_or_default()}
+                                            </dd>
                                             <dt class="text-muted-foreground">{t!("finding.license")}</dt>
-                                            <dd class="break-words">
+                                            <dd class="wrap-anywhere">
                                                 {match finding.license.clone() {
                                                     Some(license) => license.into_any(),
                                                     None => view! {
@@ -1304,7 +1314,7 @@ pub fn FindingPage() -> impl IntoView {
                                                 }}
                                             </dd>
                                             <dt class="text-muted-foreground">{t!("finding.fixed_in")}</dt>
-                                            <dd>
+                                            <dd class="wrap-anywhere">
                                                 {if page.fixed_versions.is_empty() {
                                                     t!("finding.no_fixed_version").to_owned()
                                                 } else {
@@ -1312,7 +1322,7 @@ pub fn FindingPage() -> impl IntoView {
                                                 }}
                                             </dd>
                                             <dt class="text-muted-foreground">{t!("finding.package_url")}</dt>
-                                            <dd class="font-mono text-xs break-all">{finding.purl.clone()}</dd>
+                                            <dd class=format!("{MONO} break-all")>{finding.purl.clone()}</dd>
                                             {cvss}
                                             {ignored}
                                         </dl>
@@ -1341,7 +1351,7 @@ pub fn FindingPage() -> impl IntoView {
                                                 .collect_view()}
                                             <li>
                                                 <a
-                                                    class="text-sm underline-offset-4 hover:underline"
+                                                    class="text-primary text-sm underline underline-offset-4"
                                                     href=format!("https://osv.dev/vulnerability/{}", finding.vulnerability_id)
                                                     rel="noreferrer"
                                                 >
@@ -1378,7 +1388,7 @@ pub fn FindingPage() -> impl IntoView {
                                                         .into_iter()
                                                         .map(|component| {
                                                             view! {
-                                                                <li>
+                                                                <li class="wrap-anywhere">
                                                                     <a class="underline-offset-4 hover:underline" href=format!("/findings/{}", component.finding_id)>
                                                                         {component.organization_slug.clone()} "/" {component.project_slug.clone()}
                                                                         {(!component.version.is_empty())
@@ -1409,11 +1419,24 @@ pub fn FindingPage() -> impl IntoView {
                                                 .clone()
                                                 .into_iter()
                                                 .map(|reference| {
-                                                    view! {
-                                                        <li class="break-all">
-                                                            <a class="underline-offset-4 hover:underline" href=reference.url.clone() rel="noreferrer">
+                                                    // The address comes from the advisory: it is a link only
+                                                    // when it is a web address, and plain text otherwise.
+                                                    let address = match reference.target() {
+                                                        Some(target) => view! {
+                                                            <a
+                                                                class="text-primary underline underline-offset-4"
+                                                                href=target.to_owned()
+                                                                rel="noopener noreferrer nofollow"
+                                                            >
                                                                 {reference.url.clone()}
                                                             </a>
+                                                        }
+                                                            .into_any(),
+                                                        None => reference.url.clone().into_any(),
+                                                    };
+                                                    view! {
+                                                        <li class="break-all">
+                                                            {address}
                                                             <span class="text-muted-foreground text-xs">" " {reference.kind.to_lowercase()}</span>
                                                         </li>
                                                     }
@@ -1464,7 +1487,7 @@ fn FindingVersions(
                 None => view! { <Badge variant=BadgeVariant::Muted>{t!("finding.not_affected")}</Badge> }.into_any(),
             };
             view! {
-                <li class="flex flex-wrap items-center gap-2">
+                <li class="flex flex-wrap items-center gap-2 wrap-anywhere">
                     {if version.current {
                         view! { <span class="font-medium" aria-current="page">{version_label(&version.name)}</span> }.into_any()
                     } else {
