@@ -131,7 +131,7 @@ pub fn Empty(#[prop(into)] title: String, children: Children) -> impl IntoView {
 
 /// A row of a header menu: a link or a button as wide as the menu. Its focus ring is drawn
 /// inside the row, where the menu's border cannot hide it.
-const MENU_ITEM: &str = "hover:bg-accent hover:text-accent-foreground flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring";
+const MENU_ITEM: &str = "hover:bg-accent hover:text-accent-foreground flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring/70";
 
 /// The panel of a header menu, opening under its `<details>` button and above the page. Each menu
 /// adds its own position and width.
@@ -140,7 +140,7 @@ const MENU_PANEL: &str =
 
 /// A language of the account menu. The focus ring keeps a gap from the button: on the current
 /// language, both are the accent color and would merge.
-const LANGUAGE_BUTTON: &str = "h-8 flex-1 rounded-md px-3 text-sm font-medium hover:cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+const LANGUAGE_BUTTON: &str = "h-8 flex-1 rounded-md px-3 text-sm font-medium hover:cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring/70";
 
 /// The `name` shared by the header's menus: browsers that support it close one when the other
 /// opens, the others let both stay open.
@@ -172,7 +172,7 @@ pub fn ThemeToggle() -> impl IntoView {
         }
     };
     view! {
-        <button type="button" on:click=toggle class=MENU_ITEM aria-label=t!("theme.label")>
+        <button type="button" on:click=toggle class=MENU_ITEM title=t!("theme.label")>
             <span aria-hidden="true">"◐"</span>
             {t!("theme.title")}
         </button>
@@ -254,13 +254,13 @@ fn OrganizationSwitcher(organizations: Vec<Organization>) -> impl IntoView {
     view! {
         <details name=HEADER_MENUS class="md:relative">
             <summary class=format!(
-                "{} list-none [&::-webkit-details-marker]:hidden",
+                "{} list-none",
                 button_class(ButtonVariant::Outline, ButtonSize::Small),
             )>{t!("header.organizations")}" ▾"</summary>
             // Below `md` the details is not positioned, so the list is placed against the header
             // and spans the page: next to the wordmark, a list starting at its button would run
             // off a phone's screen.
-            <ul class=format!("{MENU_PANEL} inset-x-4 md:inset-x-auto md:min-w-56")>
+            <ul class=format!("{MENU_PANEL} inset-x-4 max-h-[70vh] overflow-y-auto md:inset-x-auto md:min-w-56")>
                 {organizations
                     .into_iter()
                     .map(|organization| {
@@ -268,10 +268,10 @@ fn OrganizationSwitcher(organizations: Vec<Organization>) -> impl IntoView {
                             <li>
                                 <a
                                     href=format!("/organizations/{}", organization.slug)
-                                    class="hover:bg-accent block rounded-sm px-2 py-1.5 text-sm break-words"
+                                    class=format!("{MENU_ITEM} break-words")
                                 >
-                                    {organization.name}
-                                    <span class="text-muted-foreground ml-2 text-xs">
+                                    <span class="min-w-0">{organization.name}</span>
+                                    <span class="text-muted-foreground text-xs">
                                         {organization.role.label()}
                                     </span>
                                 </a>
@@ -280,7 +280,7 @@ fn OrganizationSwitcher(organizations: Vec<Organization>) -> impl IntoView {
                     })
                     .collect_view()}
                 <li class="mt-1 border-t pt-1">
-                    <a href="/organizations" class="hover:bg-accent block rounded-sm px-2 py-1.5 text-sm">
+                    <a href="/organizations" class=MENU_ITEM>
                         {t!("header.all_organizations")}
                     </a>
                 </li>
@@ -295,7 +295,7 @@ fn OrganizationSwitcher(organizations: Vec<Organization>) -> impl IntoView {
 #[component]
 fn UserMenu(user: CurrentUser) -> impl IntoView {
     let initial = initial(&user.display_name, &user.username);
-    let name = if user.display_name.trim().is_empty() {
+    let name = if !user.display_name.chars().any(is_visible) {
         user.username.clone()
     } else {
         user.display_name
@@ -306,20 +306,24 @@ fn UserMenu(user: CurrentUser) -> impl IntoView {
         // On phones the button sits at the end of the first line, the search below it.
         <details name=HEADER_MENUS class="relative ml-auto md:ml-0">
             <summary
-                class="bg-primary text-primary-foreground flex size-8 list-none items-center justify-center rounded-full text-sm font-semibold select-none hover:cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden"
+                class="bg-primary text-primary-foreground flex size-8 list-none items-center justify-center rounded-full text-sm font-semibold select-none hover:cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring/70"
                 aria-label=t!("header.account")
                 title=t!("header.account")
             >
                 <span aria-hidden="true">{initial}</span>
             </summary>
-            // The button ends the header's first line at every width, so a panel aligned on its
-            // right edge and no wider than the page stays on screen.
+            // The button is pushed to the right end of its line at every width, so a panel
+            // aligned on its right edge and no wider than the page stays on screen.
             <div class=format!("{MENU_PANEL} right-0 w-64 max-w-[calc(100vw-2rem)]")>
                 <div class="px-2 py-1.5">
-                    <p class="truncate text-sm font-medium">{name}</p>
+                    <p class="truncate text-sm font-medium" title=name.clone()>{name.clone()}</p>
                     {username
                         .map(|username| {
-                            view! { <p class="text-muted-foreground truncate text-xs">{username}</p> }
+                            view! {
+                                <p class="text-muted-foreground truncate text-xs" title=username.clone()>
+                                    {username.clone()}
+                                </p>
+                            }
                         })}
                 </div>
                 <div class="mt-1 border-t pt-1">
@@ -355,8 +359,9 @@ fn Header(user: CurrentUser) -> impl IntoView {
     let organizations = user.organizations.clone();
     view! {
         <header class="border-b bg-background">
-            // `relative`: on phones the organization menu is placed against the header.
-            <div class="relative mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 md:flex-nowrap">
+            // `relative`: on phones the organization menu is placed against the header. The
+            // narrower gap below `md` keeps the account button on the first line at 320 px.
+            <div class="relative mx-auto flex max-w-6xl flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 md:flex-nowrap md:gap-x-4">
                 <a
                     href="/organizations"
                     class="flex shrink-0 items-center gap-2 font-semibold tracking-tight"

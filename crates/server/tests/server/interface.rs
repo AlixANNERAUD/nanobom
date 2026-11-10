@@ -201,7 +201,7 @@ async fn the_user_menu_holds_language_theme_and_sign_out() {
     // The button shows the initial; the name is spelled out inside.
     let summary = element(account, "<summary", "</summary>");
     assert!(summary.contains("title=\"Account\""), "{summary}");
-    assert!(summary.contains('É'), "{summary}");
+    assert!(summary.contains(">É<"), "{summary}");
     assert!(account.contains("Émilie Dupont"), "{account}");
     assert!(account.contains("alice"), "the username, since it differs");
     assert!(account.contains("href=\"/administration\""));
@@ -227,13 +227,18 @@ async fn the_user_menu_holds_language_theme_and_sign_out() {
     assert!(!french.contains("aria-current"), "{french}");
     assert!(account.contains(">English<") && account.contains(">Français<"));
 
-    // The theme switch keeps its accessible name and gains a visible label.
+    // The theme switch is named by its visible label, which voice control relies on; the full
+    // sentence is its tooltip.
     let theme = account
         .split("<button")
-        .find(|button| button.contains("aria-label=\"Switch between the light and dark themes\""))
+        .find(|button| button.contains("Switch theme"))
         .expect("the theme switch");
     let theme = theme.split("</button>").next().unwrap();
-    assert!(theme.contains("Switch theme"), "{theme}");
+    assert!(!theme.contains("aria-label"), "{theme}");
+    assert!(
+        theme.contains("title=\"Switch between the light and dark themes\""),
+        "{theme}"
+    );
 
     let sign_out = element(
         account,
@@ -278,7 +283,8 @@ async fn the_user_menu_names_the_user_once_without_a_display_name() {
     let account = menu(element(&html, "<header", "</header>"), "Account");
     let summary = element(account, "<summary", "</summary>");
     assert!(summary.contains(">B<"), "{summary}");
-    assert_eq!(account.matches("bob").count(), 1, "{account}");
+    // Shown once; the tooltip of the line, for names cut short, repeats it.
+    assert_eq!(account.matches(">bob<").count(), 1, "{account}");
     assert!(!account.contains("/administration"));
 }
 

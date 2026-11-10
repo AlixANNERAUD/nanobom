@@ -8,7 +8,7 @@ The web interface is available in **English** and **French**. Each request is an
 3. otherwise, English.
 
 The choice is per browser, not per account: signing in elsewhere starts from the browser's
-preferences again. The switch works without JavaScript, like the rest of the interface.
+preferences again. The choice works without JavaScript, like the rest of the interface.
 
 Error messages of the interface are translated too. Some texts stay in English whatever the
 language:
