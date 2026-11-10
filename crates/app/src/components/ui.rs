@@ -4,6 +4,11 @@
 
 use leptos::prelude::*;
 
+use crate::{
+    model::{Severity, SeverityCounts},
+    t, tp,
+};
+
 const BUTTON_BASE: &str = "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/70 focus-visible:ring-[3px] hover:cursor-pointer";
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -30,7 +35,7 @@ pub fn button_class(variant: ButtonVariant, size: ButtonSize) -> String {
             "bg-primary text-primary-foreground shadow-xs hover:bg-primary/90"
         }
         ButtonVariant::Destructive => {
-            "bg-destructive text-white shadow-xs hover:bg-destructive/90 focus-visible:ring-destructive/20"
+            "bg-destructive text-destructive-foreground shadow-xs hover:bg-destructive/90 focus-visible:ring-destructive/20"
         }
         ButtonVariant::Outline => {
             "border border-input bg-background shadow-xs hover:bg-accent hover:text-accent-foreground"
@@ -101,6 +106,13 @@ pub const SELECT: &str = "text-foreground border-input flex h-9 w-full min-w-0 r
 
 pub const TEXTAREA: &str = "text-foreground placeholder:text-muted-foreground border-input flex min-h-20 w-full rounded-md border bg-transparent px-3 py-2 text-base shadow-xs outline-none md:text-sm focus-visible:border-ring focus-visible:ring-ring/70 focus-visible:ring-[3px]";
 
+/// A select of a row of filters: as high as a small button and as wide as its options, where
+/// [`SELECT`] fills its column.
+pub const SELECT_COMPACT: &str = "text-foreground border-input h-8 min-w-0 rounded-md border bg-background px-2 text-base shadow-xs outline-none md:text-sm focus-visible:border-ring focus-visible:ring-ring/70 focus-visible:ring-[3px]";
+
+/// The label above a control of a row of filters.
+pub const FILTER_LABEL: &str = "text-muted-foreground text-xs select-none";
+
 /// Identifiers read character by character: vulnerability ids, versions, package URLs, CVSS
 /// vectors, token prefixes and scores. Slightly smaller than the text around it, since the
 /// monospace face runs wider.
@@ -158,12 +170,17 @@ pub fn CardContent(children: Children) -> impl IntoView {
     view! { <div class="px-6">{children()}</div> }
 }
 
-/// A scrollable table with a caption for screen readers.
+/// A table with a caption for screen readers, scrolling sideways inside its frame when it is
+/// wider than the page. `class` adds to the table itself, such as a fixed layout.
 #[component]
-pub fn Table(#[prop(into)] caption: String, children: Children) -> impl IntoView {
+pub fn Table(
+    #[prop(into)] caption: String,
+    #[prop(optional, into)] class: String,
+    children: Children,
+) -> impl IntoView {
     view! {
         <div class="w-full overflow-x-auto rounded-md border">
-            <table class="w-full text-sm caption-bottom">
+            <table class=format!("w-full text-sm caption-bottom {class}")>
                 <caption class="sr-only">{caption}</caption>
                 {children()}
             </table>
@@ -195,7 +212,9 @@ pub fn Badge(
     let variant = match variant {
         BadgeVariant::Secondary => "border-transparent bg-secondary text-secondary-foreground",
         BadgeVariant::Outline => "text-foreground",
-        BadgeVariant::Destructive => "border-transparent bg-destructive text-white",
+        BadgeVariant::Destructive => {
+            "border-transparent bg-destructive text-destructive-foreground"
+        }
         BadgeVariant::Muted => "border-transparent bg-muted text-muted-foreground",
     };
     view! {
@@ -237,4 +256,133 @@ pub fn Alert(
     }
 }
 
+/// The color of a severity in a [`SeverityBar`] and its legend. Unknown is a neutral grey: it
+/// says nothing about how bad a finding is, so it must not read as the least severe.
+fn severity_fill(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Critical => "bg-severity-critical",
+        Severity::High => "bg-severity-high",
+        Severity::Medium => "bg-severity-medium",
+        Severity::Low => "bg-severity-low",
+        Severity::Unknown => "bg-muted-foreground/40",
+    }
+}
+
+/// The segments of a [`SeverityBar`]: the severities that have findings, most severe first.
+fn segments(counts: SeverityCounts) -> Vec<(Severity, u64)> {
+    Severity::DESCENDING
+        .into_iter()
+        .map(|severity| (severity, counts.get(severity)))
+        .filter(|(_, count)| *count > 0)
+        .collect()
+}
+
+/// Open findings by severity as a stacked bar. It is decorative: the numbers next to it, such
+/// as a [`SeverityLegend`], say the same to everyone.
+///
+/// Each severity that has findings gets a segment growing with its count (`flex-grow`), so no
+/// share is ever computed and an empty total divides nothing: it leaves the track empty.
+/// Segments keep a minimum width, so one finding among hundreds stays visible.
+#[component]
+pub fn SeverityBar(counts: SeverityCounts, #[prop(optional, into)] class: String) -> impl IntoView {
+    let segments = segments(counts);
+    let segments = if segments.is_empty() {
+        view! { <div class="bg-muted-foreground/20 flex-1"></div> }.into_any()
+    } else {
+        segments
+            .into_iter()
+            .map(|(severity, count)| {
+                view! {
+                    <div
+                        class=format!("min-w-1.5 {}", severity_fill(severity))
+                        style=format!("flex-grow:{count}")
+                    ></div>
+                }
+            })
+            .collect_view()
+            .into_any()
+    };
+    view! {
+        <div aria-hidden="true" class=format!("flex h-2 gap-0.5 overflow-hidden rounded-full {class}")>
+            {segments}
+        </div>
+    }
+}
+
+/// The numbers behind a [`SeverityBar`]: the count of every severity, those without findings
+/// included so the list always reads the same, then how many open findings are known exploited
+/// when `known_exploited` is given.
+#[component]
+pub fn SeverityLegend(
+    counts: SeverityCounts,
+    #[prop(optional)] known_exploited: Option<i64>,
+) -> impl IntoView {
+    let severities = Severity::DESCENDING
+        .into_iter()
+        .map(|severity| {
+            view! {
+                <li class="flex items-center gap-1.5">
+                    <span aria-hidden="true" class=format!("size-2.5 rounded-xs {}", severity_fill(severity))></span>
+                    <span class="font-medium tabular-nums">{counts.get(severity)}</span>
+                    <span class="text-muted-foreground">{severity.label()}</span>
+                </li>
+            }
+        })
+        .collect_view();
+    let known_exploited = known_exploited.map(|count| {
+        let class = if count > 0 {
+            "text-destructive font-medium"
+        } else {
+            "text-muted-foreground"
+        };
+        view! { <li class=class>{tp!("severity.known_exploited", count)}</li> }
+    });
+    view! {
+        <ul aria-label=t!("severity.legend") class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+            {severities}
+            {known_exploited}
+        </ul>
+    }
+}
+
 pub const SEPARATOR: &str = "shrink-0 bg-border h-px w-full";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_bar_draws_the_severities_that_have_findings_most_severe_first() {
+        let counts = SeverityCounts {
+            critical: 0,
+            high: 12,
+            medium: 0,
+            low: 1,
+            unknown: 3,
+        };
+        assert_eq!(
+            segments(counts),
+            [
+                (Severity::High, 12),
+                (Severity::Low, 1),
+                (Severity::Unknown, 3)
+            ]
+        );
+    }
+
+    #[test]
+    fn the_bar_has_no_segment_without_findings() {
+        assert!(segments(SeverityCounts::default()).is_empty());
+    }
+
+    #[test]
+    fn findings_of_unknown_severity_alone_still_draw_a_segment() {
+        let counts = SeverityCounts {
+            unknown: 4,
+            ..SeverityCounts::default()
+        };
+        assert_eq!(segments(counts), [(Severity::Unknown, 4)]);
+        // Neutral, not one of the severity colors.
+        assert!(!severity_fill(Severity::Unknown).contains("severity"));
+    }
+}

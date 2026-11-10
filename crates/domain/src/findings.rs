@@ -1150,6 +1150,68 @@ impl SeverityCounts {
     }
 }
 
+/// The open findings of a project version, for the summary of the project page.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OpenSummary {
+    pub counts: SeverityCounts,
+    /// Open findings with a known exploited CVE.
+    pub known_exploited: i64,
+}
+
+/// The open findings of the version named `version` (`None`: the latest) of a project, by
+/// severity, and how many of them are known exploited. Requires [`Permission::View`]; a missing
+/// version is [`Error::NotFound`].
+///
+/// Unlike [`overview`], which merges the versions of a project, each finding of the version
+/// counts once, so the counts are those of [`list_in_version`] restricted to open findings.
+pub async fn open_summary_in_version(
+    database: &impl ConnectionTrait,
+    reader: impl Into<Reader>,
+    project_id: i64,
+    version: Option<&str>,
+) -> Result<OpenSummary> {
+    let version = crate::versions::find(database, reader, project_id, version).await?;
+    let rows: Vec<(i64, String, String)> = findings::Entity::find()
+        .select_only()
+        .column(findings::Column::Id)
+        .column(findings::Column::VulnerabilityId)
+        .column(findings::Column::Severity)
+        .filter(findings::Column::VersionId.eq(version.id))
+        .filter(findings::Column::Status.eq(Status::Open.as_str()))
+        .into_tuple()
+        .all(database)
+        .await?;
+    let facts = vulnerability_facts(
+        database,
+        rows.iter()
+            .map(|(_, vulnerability, _)| vulnerability.as_str()),
+    )
+    .await?;
+    let keys: Vec<(i64, Vec<String>)> = rows
+        .iter()
+        .map(|(id, vulnerability, _)| {
+            let aliases = facts
+                .get(vulnerability)
+                .map_or(&[][..], |facts| facts.aliases.as_slice());
+            (*id, exploitation::cve_ids(vulnerability, aliases))
+        })
+        .collect();
+    let exploitations = exploitation::for_findings(database, &keys).await?;
+    let mut summary = OpenSummary::default();
+    for (id, _, severity) in rows {
+        summary
+            .counts
+            .add(severity.parse().unwrap_or(Severity::Unknown));
+        if exploitations
+            .get(&id)
+            .is_some_and(|exploitation| exploitation.known_exploited)
+        {
+            summary.known_exploited += 1;
+        }
+    }
+    Ok(summary)
+}
+
 /// A project with its open findings, for the organization page.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProjectOverview {

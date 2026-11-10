@@ -181,6 +181,9 @@ pub async fn load_project(
     let ecosystems = findings::ecosystems_in_version(database, &actor, model.id, version)
         .await
         .map_err(failure)?;
+    let summary = findings::open_summary_in_version(database, &actor, model.id, version)
+        .await
+        .map_err(failure)?;
     let summaries = versions::list(database, &actor, model.id)
         .await
         .map_err(failure)?;
@@ -275,6 +278,8 @@ pub async fn load_project(
         version_upload,
         component_count,
         licenses,
+        counts: crate::server::counts(summary.counts),
+        known_exploited: summary.known_exploited,
     })
 }
 

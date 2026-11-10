@@ -422,7 +422,7 @@ async fn findings_show_the_direct_dependency_that_introduces_them() {
     let alice = Browser::sign_in(&server, "alice").await;
 
     let html = alice.page("/organizations/acme/projects/shop").await;
-    assert!(html.contains("Introduced via"));
+    assert!(findings_table(&html).contains(">Introduced via<"), "{html}");
     assert!(html.contains("web-framework"));
     let project = projects::find(&server.database, &owner, organization.id, "shop")
         .await
@@ -443,6 +443,10 @@ async fn findings_show_the_direct_dependency_that_introduces_them() {
     server.runner.wait_until_idle().await;
     let html = alice.page(&page).await;
     assert!(html.contains("does not say which components the project depends on directly"));
+    // Without a dependency graph no row has a value: the project page drops the column.
+    let html = alice.page("/organizations/acme/projects/shop").await;
+    assert!(html.contains("GHSA-35jh-r3h4-6jhm"));
+    assert!(!html.contains("Introduced via"), "{html}");
 
     // A link through a component without a package URL is lost, and the page says so.
     document["components"]
@@ -815,6 +819,88 @@ fn table_row<'a>(html: &'a str, text: &str) -> &'a str {
         .unwrap_or_else(|| panic!("no row mentions {text}"))
 }
 
+/// The text a page shows in `html`: tags removed, whitespace collapsed.
+fn text(html: &str) -> String {
+    let mut text = String::new();
+    let mut inside_tag = false;
+    for character in html.chars() {
+        match character {
+            '<' => {
+                inside_tag = true;
+                text.push(' ');
+            }
+            '>' => inside_tag = false,
+            _ if !inside_tag => text.push(character),
+            _ => {}
+        }
+    }
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The form of a page whose accessible name is `label`.
+fn form<'a>(html: &'a str, label: &str) -> &'a str {
+    let name = format!("aria-label=\"{label}\"");
+    html.split("<form")
+        .skip(1)
+        .map(|rest| rest.split("</form>").next().unwrap_or(rest))
+        .find(|form| {
+            form.split('>')
+                .next()
+                .is_some_and(|tag| tag.contains(&name))
+        })
+        .unwrap_or_else(|| panic!("no form labelled {label}"))
+}
+
+/// The value of an attribute of an opening tag.
+fn attribute<'a>(tag: &'a str, name: &str) -> &'a str {
+    let start = tag
+        .find(&format!("{name}=\""))
+        .unwrap_or_else(|| panic!("no {name} in {tag}"))
+        + name.len()
+        + 2;
+    let end = tag[start..].find('"').expect("a closing quote");
+    &tag[start..start + end]
+}
+
+/// The value of the option selected in the `<select>` named `name` of a form; `None` when no
+/// option is marked, which shows the first one.
+fn selected<'a>(form: &'a str, name: &str) -> Option<&'a str> {
+    element(form, &format!("name=\"{name}\""), "</select>")
+        .split("<option")
+        .skip(1)
+        .map(|option| option.split('>').next().unwrap_or(option))
+        .find(|tag| tag.contains("selected"))
+        .map(|tag| attribute(tag, "value"))
+}
+
+/// The findings table of a project page: the first table of the page.
+fn findings_table(html: &str) -> &str {
+    element(html, "<table", "</table>")
+}
+
+/// The legend of the summary of a project page, as text.
+fn legend(html: &str, label: &str) -> String {
+    text(element(
+        html,
+        &format!("<ul aria-label=\"{label}\""),
+        "</ul>",
+    ))
+}
+
+/// The severity bar of a project page, up to the count that follows it: it is decorative and
+/// holds nothing but its segments.
+fn severity_bar(html: &str) -> &str {
+    element(html, "<div aria-hidden=\"true\"", "<p")
+}
+
+/// The opening tags of the cells of a table row.
+fn cells(row: &str) -> Vec<&str> {
+    row.split("<td")
+        .skip(1)
+        .map(|cell| cell.split('>').next().unwrap_or(cell))
+        .collect()
+}
+
 #[tokio::test]
 async fn exploitation_signals_are_shown_and_filtered() {
     let server = server(&[]).await;
@@ -909,6 +995,24 @@ async fn exploitation_signals_are_shown_and_filtered() {
     let exploited = table_row(&html, "GHSA-35jh-r3h4-6jhm");
     assert!(exploited.contains("Known exploited"));
     assert!(exploited.contains("CISA due date: 2022-03-22"));
+    // The row shows a short tag; the full text is its accessible name and its tooltip.
+    assert!(
+        exploited.contains("<span aria-hidden=\"true\">KEV</span>"),
+        "{exploited}"
+    );
+    assert!(
+        exploited
+            .contains("<span class=\"sr-only\">Known exploited · CISA due date: 2022-03-22</span>"),
+        "{exploited}"
+    );
+    assert!(
+        exploited.contains("title=\"Known exploited · CISA due date: 2022-03-22\""),
+        "{exploited}"
+    );
+    assert_eq!(
+        legend(&html, "Open findings by severity"),
+        "1 Critical 1 High 0 Medium 0 Low 0 Unknown 1 known exploited"
+    );
     assert!(exploited.contains("97%"));
     let sibling = table_row(&html, "GHSA-xvch-5gv4-984h");
     assert!(!sibling.contains("Known exploited"), "{sibling}");
@@ -943,7 +1047,8 @@ async fn exploitation_signals_are_shown_and_filtered() {
     .await
     .unwrap();
     let html = alice.page(project_page).await;
-    assert!(html.contains("Known exploited"));
+    assert!(html.contains("<span class=\"sr-only\">Known exploited</span>"));
+    assert!(html.contains("title=\"Known exploited\""));
     assert!(!html.contains("CISA due date"));
     assert!(
         !html.contains("title=\"\""),
@@ -1531,12 +1636,29 @@ async fn the_project_page_shows_one_version_at_a_time() {
     let html = alice.page("/organizations/acme/projects/api").await;
     assert!(!html.contains("name=\"version\""));
 
-    // The latest version by default: 2.0 has no lodash.
+    // Its filters keep a version named in the address, which they could not choose otherwise.
+    let html = alice
+        .page("/organizations/acme/projects/api?version=")
+        .await;
+    let filters = form(&html, "Filter findings");
+    assert!(filters.contains("<input type=\"hidden\" name=\"version\" value=\"\""));
+    assert!(!filters.contains("<select id=\"version\""));
+
+    // The latest version by default: 2.0 has no lodash. One form chooses the version and the
+    // filters, with one button.
     let html = alice.page("/organizations/acme/projects/web").await;
+    let filters = form(&html, "Filter findings");
     assert!(
-        html.contains("<select id=\"version\" name=\"version\""),
+        filters.contains("<select id=\"version\" name=\"version\""),
         "{html}"
     );
+    assert_eq!(html.matches("<select id=\"version\"").count(), 1);
+    assert!(!html.contains("aria-label=\"Project version\""), "{html}");
+    assert!(!html.contains(">Show<"), "{html}");
+    assert_eq!(filters.matches("<button").count(), 1, "{filters}");
+    assert!(!filters.contains("type=\"hidden\""), "{filters}");
+    assert_eq!(selected(filters, "version"), Some("2.0"));
+    assert_eq!(selected(filters, "severity"), None);
     assert!(html.contains("2.0 (latest)"));
     assert!(html.contains("Unnamed version"));
     assert!(!html.contains("GHSA-35jh-r3h4-6jhm"));
@@ -1551,7 +1673,45 @@ async fn the_project_page_shows_one_version_at_a_time() {
         .await;
     assert!(html.contains("GHSA-35jh-r3h4-6jhm"));
     assert!(html.contains("href=\"/api/organizations/acme/projects/web/vex?version=\""));
-    assert!(html.contains("<input type=\"hidden\" name=\"version\" value=\"\""));
+    assert_eq!(
+        selected(form(&html, "Filter findings"), "version"),
+        Some("")
+    );
+    // The legend counts the version shown.
+    assert_eq!(
+        legend(&html, "Open findings by severity"),
+        "0 Critical 1 High 0 Medium 0 Low 0 Unknown 0 known exploited"
+    );
+
+    // A version and filters are chosen in the same submit, and both hold in the page it shows.
+    let html = alice
+        .page("/organizations/acme/projects/web?version=&severity=high&status=open")
+        .await;
+    assert!(html.contains("GHSA-35jh-r3h4-6jhm"));
+    let filters = form(&html, "Filter findings");
+    assert_eq!(selected(filters, "version"), Some(""));
+    assert_eq!(selected(filters, "severity"), Some("high"));
+    assert_eq!(selected(filters, "status"), Some("open"));
+    let html = alice
+        .page("/organizations/acme/projects/web?version=2.0&severity=high&status=open")
+        .await;
+    assert!(!html.contains("GHSA-35jh-r3h4-6jhm"));
+    let filters = form(&html, "Filter findings");
+    assert_eq!(selected(filters, "version"), Some("2.0"));
+    assert_eq!(selected(filters, "severity"), Some("high"));
+    assert_eq!(
+        legend(&html, "Open findings by severity"),
+        "0 Critical 0 High 0 Medium 0 Low 0 Unknown 0 known exploited"
+    );
+    // The ecosystem filter stays visible on a version that has no finding of it, instead of a
+    // select that reads "Any" over an empty table.
+    let html = alice
+        .page("/organizations/acme/projects/web?version=2.0&ecosystem=Cargo")
+        .await;
+    assert_eq!(
+        selected(form(&html, "Filter findings"), "ecosystem"),
+        Some("Cargo")
+    );
     let response = alice
         .get("/organizations/acme/projects/web?version=9.9")
         .await;
@@ -1754,5 +1914,373 @@ async fn versions_are_managed_from_the_project_page() {
             ("1.0".to_owned(), false, false),
             ("3.0".to_owned(), true, true)
         ]
+    );
+}
+
+/// A CycloneDX document holding one component.
+fn single_component_sbom(purl: &str) -> String {
+    json!({
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.6",
+        "version": 1,
+        "components": [{"type": "library", "name": "component", "purl": purl}]
+    })
+    .to_string()
+}
+
+#[tokio::test]
+async fn the_project_page_summarizes_open_findings() {
+    let server = server(&[]).await;
+    server.source.publish(
+        json!({
+            "id": "GHSA-35jh-r3h4-6jhm",
+            "modified": "2024-01-01T00:00:00Z",
+            "aliases": ["CVE-2021-23337"],
+            "summary": "Command Injection in lodash",
+            "database_specific": {"severity": "HIGH"}
+        }),
+        &["pkg:npm/lodash@4.17.20"],
+    );
+    server.source.publish(
+        json!({
+            "id": "GHSA-xvch-5gv4-984h",
+            "modified": "2024-01-01T00:00:00Z",
+            "summary": "Prototype Pollution in minimist",
+            "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H"}]
+        }),
+        &["pkg:npm/minimist@1.2.5"],
+    );
+    // An advisory that gives no severity.
+    server.source.publish(
+        json!({
+            "id": "OSV-2024-1",
+            "modified": "2024-01-01T00:00:00Z",
+            "summary": "Heap overflow in left-pad"
+        }),
+        &["pkg:npm/left-pad@1.0.0"],
+    );
+    let owner = local_user(&server.database, "alice", PASSWORD).await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let secret = tokens::create(&server.database, &owner, organization.id, None, "CI")
+        .await
+        .unwrap()
+        .secret;
+    let upload = |project: &str, document: Vec<u8>| {
+        Request::put(format!("/api/organizations/acme/projects/{project}/sbom"))
+            .header(header::AUTHORIZATION, format!("Bearer {secret}"))
+            .body(Body::from(document))
+            .unwrap()
+    };
+    server
+        .send(upload("web", sbom_document("cyclonedx-npm.json")))
+        .await;
+    server
+        .send(upload("quiet", sbom_document("cyclonedx-py.json")))
+        .await;
+    server
+        .send(upload(
+            "unscored",
+            single_component_sbom("pkg:npm/left-pad@1.0.0").into_bytes(),
+        ))
+        .await;
+    server.runner.wait_until_idle().await;
+    nanobom_entity::exploitation::ActiveModel {
+        cve_id: Set("CVE-2021-23337".to_owned()),
+        known_exploited: Set(true),
+        kev_ransomware: Set(false),
+        ..Default::default()
+    }
+    .insert(&server.database)
+    .await
+    .unwrap();
+    let alice = Browser::sign_in(&server, "alice").await;
+    let label = "Open findings by severity";
+    let page = "/organizations/acme/projects/web";
+
+    let html = alice.page(page).await;
+    assert!(html.contains(">2 open findings<"), "{html}");
+    assert_eq!(
+        legend(&html, label),
+        "1 Critical 1 High 0 Medium 0 Low 0 Unknown 1 known exploited"
+    );
+    // One segment per severity that has findings, as wide as its count.
+    let bar = severity_bar(&html);
+    assert_eq!(bar.matches("flex-grow:").count(), 2, "{bar}");
+    assert_eq!(bar.matches("style=\"flex-grow:1;\"").count(), 2, "{bar}");
+    assert!(bar.contains("bg-severity-critical") && bar.contains("bg-severity-high"));
+    assert!(!bar.contains("bg-severity-medium"), "{bar}");
+
+    // The summary is about the version, not about the rows the filters leave.
+    for filters in [
+        "?severity=critical",
+        "?severity=low",
+        "?status=fixed",
+        "?ecosystem=pypi",
+    ] {
+        let html = alice.page(&format!("{page}{filters}")).await;
+        assert_eq!(
+            legend(&html, label),
+            "1 Critical 1 High 0 Medium 0 Low 0 Unknown 1 known exploited",
+            "{filters}"
+        );
+        assert_eq!(severity_bar(&html), bar, "{filters}");
+    }
+    let html = alice.page(&format!("{page}?severity=critical")).await;
+    assert!(html.contains("GHSA-xvch-5gv4-984h"));
+    assert!(!html.contains("GHSA-35jh-r3h4-6jhm"));
+
+    // In French.
+    let response = server
+        .send(
+            Request::get(page)
+                .header(header::COOKIE, &alice.cookie)
+                .header(header::ACCEPT, "text/html")
+                .header(header::ACCEPT_LANGUAGE, "fr")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    let french = body_text(response).await;
+    assert!(french.contains(">2 vulnérabilités ouvertes<"), "{french}");
+    assert_eq!(
+        legend(&french, "Vulnérabilités ouvertes par gravité"),
+        "1 Critique 1 Élevée 0 Moyenne 0 Faible 0 Inconnue 1 exploitée connue"
+    );
+
+    // An ignored finding is no longer open, whatever the status filter shows.
+    let project = projects::find(&server.database, &owner, organization.id, "web")
+        .await
+        .unwrap();
+    let lodash = findings::list(&server.database, &owner, project.id, &Filter::default())
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|finding| finding.vulnerability_id == "GHSA-35jh-r3h4-6jhm")
+        .expect("the lodash finding")
+        .id;
+    findings::ignore(
+        &server.database,
+        &owner,
+        lodash,
+        "Not reachable",
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    let html = alice.page(&format!("{page}?status=all")).await;
+    assert!(html.contains("GHSA-35jh-r3h4-6jhm"));
+    assert!(html.contains(">1 open finding<"), "{html}");
+    assert_eq!(
+        legend(&html, label),
+        "1 Critical 0 High 0 Medium 0 Low 0 Unknown 0 known exploited"
+    );
+    assert_eq!(severity_bar(&html).matches("flex-grow:").count(), 1);
+
+    // A project without any finding: the track is empty and the legend reads zero.
+    let html = alice.page("/organizations/acme/projects/quiet").await;
+    assert!(html.contains("No finding matches"));
+    assert!(html.contains(">0 open findings<"), "{html}");
+    assert_eq!(
+        legend(&html, label),
+        "0 Critical 0 High 0 Medium 0 Low 0 Unknown 0 known exploited"
+    );
+    let bar = severity_bar(&html);
+    assert!(!bar.contains("flex-grow"), "{bar}");
+    assert!(!bar.contains("bg-severity"), "{bar}");
+    assert_eq!(bar.matches("bg-muted").count(), 1, "{bar}");
+
+    // Only findings of unknown severity: one neutral segment, counted in the legend.
+    let html = alice.page("/organizations/acme/projects/unscored").await;
+    assert!(html.contains("OSV-2024-1"));
+    assert_eq!(
+        legend(&html, label),
+        "0 Critical 0 High 0 Medium 0 Low 1 Unknown 0 known exploited"
+    );
+    let bar = severity_bar(&html);
+    assert_eq!(bar.matches("flex-grow:").count(), 1, "{bar}");
+    assert!(bar.contains("bg-muted-foreground/40"), "{bar}");
+    assert!(!bar.contains("bg-severity"), "{bar}");
+}
+
+#[tokio::test]
+async fn only_findings_that_are_not_open_say_their_status() {
+    let server = server(&[]).await;
+    server.source.publish(
+        json!({
+            "id": "GHSA-35jh-r3h4-6jhm",
+            "modified": "2024-01-01T00:00:00Z",
+            "summary": "Command Injection in lodash",
+            "database_specific": {"severity": "HIGH"}
+        }),
+        &["pkg:npm/lodash@4.17.20"],
+    );
+    server.source.publish(
+        json!({
+            "id": "GHSA-xvch-5gv4-984h",
+            "modified": "2024-01-01T00:00:00Z",
+            "summary": "Prototype Pollution in minimist",
+            "database_specific": {"severity": "CRITICAL"}
+        }),
+        &["pkg:npm/minimist@1.2.5"],
+    );
+    let owner = local_user(&server.database, "alice", PASSWORD).await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let secret = tokens::create(&server.database, &owner, organization.id, None, "CI")
+        .await
+        .unwrap()
+        .secret;
+    server
+        .send(
+            Request::put("/api/organizations/acme/projects/web/sbom")
+                .header(header::AUTHORIZATION, format!("Bearer {secret}"))
+                .body(Body::from(sbom_document("cyclonedx-npm.json")))
+                .unwrap(),
+        )
+        .await;
+    server.runner.wait_until_idle().await;
+    let alice = Browser::sign_in(&server, "alice").await;
+    let page = "/organizations/acme/projects/web";
+
+    // Every row is open: saying so on each would only add noise.
+    let html = alice.page(page).await;
+    let table = findings_table(&html);
+    assert!(table.contains(">Since<"), "{table}");
+    assert!(!table.contains(">Status<"), "{table}");
+    assert!(!table.contains(">Open<"), "{table}");
+    let columns = cells(table_row(table, "GHSA-35jh-r3h4-6jhm")).len();
+
+    let project = projects::find(&server.database, &owner, organization.id, "web")
+        .await
+        .unwrap();
+    let lodash = findings::list(&server.database, &owner, project.id, &Filter::default())
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|finding| finding.vulnerability_id == "GHSA-35jh-r3h4-6jhm")
+        .expect("the lodash finding")
+        .id;
+    findings::ignore(
+        &server.database,
+        &owner,
+        lodash,
+        "Not reachable",
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+
+    // One row is ignored: it says so next to its vulnerability, in no column of its own, and
+    // the open row still says nothing.
+    let html = alice.page(page).await;
+    let table = findings_table(&html);
+    assert!(!table.contains(">Status<"), "{table}");
+    let ignored = table_row(table, "GHSA-35jh-r3h4-6jhm");
+    assert!(ignored.contains(">Ignored<"), "{ignored}");
+    let vulnerability = element(ignored, "<th scope=\"row\"", "</th>");
+    assert!(vulnerability.contains(">Ignored<"), "{vulnerability}");
+    assert_eq!(cells(ignored).len(), columns, "the rows stay aligned");
+    let open = table_row(table, "GHSA-xvch-5gv4-984h");
+    assert_eq!(cells(open).len(), columns);
+    assert!(!open.contains(">Open<"), "{open}");
+    assert!(!open.contains(">Ignored<"), "{open}");
+
+    // Each status filter keeps its rows.
+    let html = alice.page(&format!("{page}?status=open")).await;
+    let table = findings_table(&html);
+    assert!(!table.contains("GHSA-35jh-r3h4-6jhm"));
+    assert!(!table.contains(">Ignored<"), "{table}");
+    let html = alice.page(&format!("{page}?status=ignored")).await;
+    let table = findings_table(&html);
+    assert!(table.contains(">Ignored<"), "{table}");
+    assert!(!table.contains("GHSA-xvch-5gv4-984h"));
+}
+
+#[tokio::test]
+async fn long_names_stay_on_one_line() {
+    let server = server(&[]).await;
+    // A Maven component named `group/artifact`, 120 characters long.
+    let name = format!("org.{}/long-artifact-x", "a".repeat(100));
+    assert_eq!(name.len(), 120);
+    let purl = format!("pkg:maven/{name}@1.0.0");
+    let summary = "Deserialization of untrusted data ".repeat(10);
+    let summary = summary.trim();
+    server.source.publish(
+        json!({
+            "id": "GHSA-0000-0000-long",
+            "modified": "2024-01-01T00:00:00Z",
+            "summary": summary,
+            "database_specific": {"severity": "HIGH"}
+        }),
+        &[&purl],
+    );
+    let owner = local_user(&server.database, "alice", PASSWORD).await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let secret = tokens::create(&server.database, &owner, organization.id, None, "CI")
+        .await
+        .unwrap()
+        .secret;
+    // The longest project name an upload can create.
+    let project = "p".repeat(64);
+    let response = server
+        .send(
+            Request::put(format!("/api/organizations/acme/projects/{project}/sbom"))
+                .header(header::AUTHORIZATION, format!("Bearer {secret}"))
+                .body(Body::from(single_component_sbom(&purl)))
+                .unwrap(),
+        )
+        .await;
+    assert!(response.status().is_success(), "{}", response.status());
+    server.runner.wait_until_idle().await;
+    let alice = Browser::sign_in(&server, "alice").await;
+
+    let html = alice
+        .page(&format!("/organizations/acme/projects/{project}"))
+        .await;
+    // Columns have fixed widths, so a long cell is cut instead of widening the table, and the
+    // table scrolls inside its container when the page is narrower than its columns.
+    let table = findings_table(&html);
+    assert!(element(table, "<table", ">").contains("table-fixed"));
+    let container = html[..html.find("<table").unwrap()]
+        .rsplit("<div")
+        .next()
+        .unwrap();
+    assert!(container.contains("overflow-x-auto"), "{container}");
+
+    let row = table_row(table, "GHSA-0000-0000-long");
+    let component = cells(row)
+        .into_iter()
+        .find(|cell| cell.contains(&name))
+        .expect("the component's cell names it in full");
+    assert_eq!(
+        attribute(component, "title"),
+        format!("{name} 1.0.0 · maven")
+    );
+    // The namespace and the rest of the name are cut apart, so the namespace can go first.
+    let (namespace, artifact) = name.split_once('/').unwrap();
+    assert!(row.contains(&format!("truncate\">{namespace}<")), "{row}");
+    assert!(row.contains(&format!("truncate\">/{artifact}<")), "{row}");
+    // The summary is cut too, and keeps its full text.
+    let summary_tag = row
+        .split("<span")
+        .map(|span| span.split('>').next().unwrap_or(span))
+        .find(|tag| tag.contains(summary))
+        .expect("the summary's full text in a title");
+    assert!(summary_tag.contains("truncate"), "{summary_tag}");
+    assert_eq!(attribute(summary_tag, "title"), summary);
+    assert!(!row.contains("<br"), "{row}");
+
+    // A long project name wraps in the heading and the breadcrumb rather than widening the page.
+    assert!(element(&html, "<h1", ">").contains("wrap-anywhere"));
+    assert!(
+        element(&html, "<nav aria-label=\"Breadcrumb\"", ">").contains("wrap-anywhere"),
+        "{html}"
     );
 }

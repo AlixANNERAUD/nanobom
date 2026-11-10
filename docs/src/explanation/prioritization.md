@@ -42,10 +42,10 @@ On the project page, findings are listed:
 The upload response's `evaluation.findings` is ordered by severity first (its 100 entries keep
 the most severe), and within a severity in the order above.
 
-The project page's filter **Only known exploited vulnerabilities** keeps the known exploited
-ones; the organization page counts them per project, and the `nanobom_open_findings_known_exploited`
-metric counts them across the instance. A CI gate with `fail_on=exploited` fails on them whatever
-their severity.
+The project page tags them **KEV**, counts them in its summary of open findings, and its filter
+**Only known exploited vulnerabilities** keeps them alone; the organization page counts them per
+project, and the `nanobom_open_findings_known_exploited` metric counts them across the
+instance. A CI gate with `fail_on=exploited` fails on them whatever their severity.
 
 ## When the data is refreshed
 

@@ -77,10 +77,11 @@ every `v2.4.*` tag.
 
 ## Read one version
 
-- **On the project page**, the **Version** selector shows the latest version by default; choose
-  another and select **Show**. The findings, the license violations, the component count and the
-  **Export VEX** button follow the version shown. The upload history lists every upload of the
-  project, with its version.
+- **On the project page**, the **Version** field of the filters shows the latest version by
+  default; choose another and select **Filter**. The other filters are sent with it, so they
+  stay as they are. The findings, the summary of open findings, the license violations, the
+  component count and the **Export VEX** button follow the version shown. The upload history
+  lists every upload of the project, with its version.
 - **With the read API**, add `version` to the findings, components and license violations
   endpoints, and list the versions with `/versions`
   ([reference](../reference/read-api.md#versions)):
