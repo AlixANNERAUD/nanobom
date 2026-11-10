@@ -190,6 +190,38 @@ mod tests {
         assert_eq!(by_class, declarations(":root:not(.light) {"));
     }
 
+    /// `leptos_meta` writes a title's text into the document as it is, so every page sets its
+    /// title with `PageTitle`, which escapes it. A page using `<Title>` itself would let a name
+    /// holding `</title>` put markup in the page.
+    #[test]
+    fn page_titles_go_through_the_escaping_component() {
+        fn sources(directory: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(directory).expect("a source directory") {
+                let path = entry.expect("a directory entry").path();
+                if path.is_dir() {
+                    sources(&path, found);
+                } else if path.extension().is_some_and(|extension| extension == "rs") {
+                    found.push(path);
+                }
+            }
+        }
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut files = Vec::new();
+        sources(&root, &mut files);
+        assert!(files.len() > 5, "the sources of the interface");
+        // Written in two parts so that this file does not hold the text it looks for.
+        let element = concat!("<Tit", "le ");
+        let users: Vec<_> = files
+            .into_iter()
+            .filter(|path| {
+                std::fs::read_to_string(path)
+                    .expect("a readable source file")
+                    .contains(element)
+            })
+            .collect();
+        assert_eq!(users, [root.join("components/mod.rs")]);
+    }
+
     /// The stylesheet names its fonts by address. The build copies `public/` to the site root,
     /// so each address must be a file there, or the page silently falls back to system fonts.
     #[test]

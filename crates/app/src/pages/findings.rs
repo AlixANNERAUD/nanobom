@@ -3,13 +3,12 @@
 use std::collections::{HashMap, HashSet};
 
 use leptos::prelude::*;
-use leptos_meta::Title;
 use leptos_router::hooks::{use_params_map, use_query_map};
 
 use crate::{
     components::{
-        Empty, Heading, Loaded, Page, SeverityBadge, StatusBadge, action, format_date, format_time,
-        ui::*,
+        Empty, Heading, Loaded, Page, PageTitle, SeverityBadge, StatusBadge, action, format_date,
+        format_time, ui::*,
     },
     functions::{
         DeleteProject, DeleteVersion, IgnoreFinding, RestoreFinding, SetLatestVersion,
@@ -747,7 +746,7 @@ pub fn ProjectPage() -> impl IntoView {
                         }
                     });
                     view! {
-                        <Title text=format!("{} · nanobom", page.name) />
+                        <PageTitle text=page.name.clone() />
                         <nav aria-label=t!("common.breadcrumb") class="text-muted-foreground text-sm wrap-anywhere">
                             <a class="hover:underline" href=format!("/organizations/{organization_slug}")>
                                 {organization.name.clone()}
@@ -1162,7 +1161,7 @@ pub fn FindingPage() -> impl IntoView {
                     let known_exploited_badge = known_exploited
                         .then(|| view! { <Badge variant=BadgeVariant::Destructive>{t!("project.known_exploited")}</Badge> });
                     view! {
-                        <Title text=format!("{} · nanobom", finding.vulnerability_id) />
+                        <PageTitle text=finding.vulnerability_id.clone() />
                         <nav aria-label=t!("common.breadcrumb") class="text-muted-foreground text-sm wrap-anywhere">
                             <a class="hover:underline" href=format!("/organizations/{}", page.organization_slug)>
                                 {page.organization_slug.clone()}

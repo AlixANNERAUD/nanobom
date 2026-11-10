@@ -1,11 +1,12 @@
 //! Sign-in, the list of organizations and an organization's projects.
 
 use leptos::prelude::*;
-use leptos_meta::Title;
 use leptos_router::hooks::{use_params_map, use_query_map};
 
 use crate::{
-    components::{Empty, Heading, Loaded, Page, SeverityBadge, action, format_time, ui::*},
+    components::{
+        Empty, Heading, Loaded, Page, PageTitle, SeverityBadge, action, format_time, ui::*,
+    },
     functions::{
         CreateOrganization, TriggerRun, load_organization, load_organizations, load_sign_in_options,
     },
@@ -35,9 +36,8 @@ pub fn SignInPage() -> impl IntoView {
     };
     let error = move || query.read().get("error").map(|code| sign_in_error(&code));
     let options = Resource::new(|| (), |()| load_sign_in_options());
-    let title = format!("{} · nanobom", t!("sign_in.title"));
     view! {
-        <Title text=title />
+        <PageTitle text=t!("sign_in.title") />
         <main id="content" class="mx-auto grid max-w-sm gap-6 px-4 py-16">
             <div class="grid gap-1 text-center">
                 <h1 class="flex items-center justify-center gap-2 text-2xl font-semibold tracking-tight">
@@ -403,7 +403,7 @@ pub fn OrganizationPage() -> impl IntoView {
                     };
                     let subtitle = format!("{} · {}", organization.slug, organization.role.label());
                     view! {
-                        <Title text=format!("{} · nanobom", organization.name) />
+                        <PageTitle text=organization.name.clone() />
                         <Heading title=organization.name.clone() subtitle>
                             {check_now}
                             {settings}
