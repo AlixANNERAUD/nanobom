@@ -26,6 +26,36 @@ It is built for small teams, homelabs and anyone who wants software composition 
 running a Java stack, a database server and a vulnerability-database mirror: a lightweight,
 self-hosted alternative to heavier platforms such as OWASP Dependency-Track.
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/src/images/project-dark.png">
+    <img
+      src="docs/src/images/project-light.png"
+      width="900"
+      alt="A project in nanobom: a bar of its open findings by severity, then one line per finding with its severity and score, a tag on the known exploited ones, the component, the direct dependency that brings it in and its EPSS percentile."
+    >
+  </picture>
+</p>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/src/images/organization-dark.png">
+    <img
+      src="docs/src/images/organization-light.png"
+      width="49%"
+      alt="An organization in nanobom: each project with a bar of its open findings and their counts by severity, then the recent runs."
+    >
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/src/images/finding-dark.png">
+    <img
+      src="docs/src/images/finding-light.png"
+      width="49%"
+      alt="A finding in nanobom: the advisory text, the affected component with its version and CVSS vector, and the dependency that introduces it."
+    >
+  </picture>
+</p>
+
 ## Try it in two minutes
 
 ```sh
