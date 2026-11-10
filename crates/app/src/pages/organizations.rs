@@ -186,6 +186,15 @@ pub fn OrganizationsPage() -> impl IntoView {
     }
 }
 
+/// How much of its track a project's bar fills, as a percentage: its open findings against
+/// those of the project that has the most, so the bars of a page compare and the worst project
+/// stands out. Rounded up, so a project with any finding shows a bar.
+fn bar_share(total: u64, largest: u64) -> u64 {
+    (total.saturating_mul(100))
+        .div_ceil(largest.max(1))
+        .clamp(u64::from(total > 0), 100)
+}
+
 pub(crate) fn severity_cells(open: SeverityCounts) -> impl IntoView {
     Severity::DESCENDING
         .into_iter()
@@ -355,6 +364,12 @@ pub fn OrganizationPage() -> impl IntoView {
                             }
                         }
                     });
+                    let largest = page
+                        .projects
+                        .iter()
+                        .map(|project| project.open.total())
+                        .max()
+                        .unwrap_or_default();
                     let rows = page
                         .projects
                         .iter()
@@ -365,8 +380,9 @@ pub fn OrganizationPage() -> impl IntoView {
                             let known_exploited = project.known_exploited;
                             let name = project.name.clone();
                             let counts = project.open;
-                            // The day is enough to tell a project that stopped uploading; the
-                            // tooltip keeps the time, and the project page shows it.
+                            // The day is enough to tell a project that stopped uploading. The
+                            // tooltip gives the time to those with a pointer, the project page
+                            // to everyone.
                             let last_upload = project
                                 .last_upload_at
                                 .map_or_else(|| t!("organization.never").to_owned(), format_date);
@@ -401,14 +417,31 @@ pub fn OrganizationPage() -> impl IntoView {
                             } else {
                                 None
                             };
+                            // The bar fills its track as far as the project's findings go
+                            // against the largest project's. Its segments keep their minimum
+                            // width (`min-w-fit`), so a small project still shows each severity.
+                            let bar = if counts.total() == 0 {
+                                view! { <SeverityBar counts /> }.into_any()
+                            } else {
+                                let share = bar_share(counts.total(), largest);
+                                view! {
+                                    <div class="bg-muted-foreground/20 overflow-hidden rounded-full">
+                                        <div class="min-w-fit" style=format!("width:{share}%")>
+                                            <SeverityBar counts />
+                                        </div>
+                                    </div>
+                                }
+                                    .into_any()
+                            };
                             view! {
                                 <tr class=TABLE_ROW>
                                     <th scope="row" class=format!("{TABLE_CELL} text-left font-medium")>
-                                        // Only the name shrinks: it is cut to leave the badges
-                                        // their room, and its tooltip keeps all of it.
-                                        <div class="flex min-w-0 items-center gap-2">
+                                        // The name is cut when it does not fit, and its tooltip
+                                        // keeps all of it. Badges that do not fit next to it go
+                                        // under it: they never take the name's room.
+                                        <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                                             <a
-                                                class="min-w-0 truncate underline-offset-4 hover:underline"
+                                                class="max-w-full min-w-0 truncate underline-offset-4 hover:underline"
                                                 href=href
                                                 title=name.clone()
                                             >
@@ -418,9 +451,7 @@ pub fn OrganizationPage() -> impl IntoView {
                                             {license_badge}
                                         </div>
                                     </th>
-                                    <td class=TABLE_CELL>
-                                        <SeverityBar counts />
-                                    </td>
+                                    <td class=TABLE_CELL>{bar}</td>
                                     {cells}
                                     <td class=format!("{TABLE_CELL} text-right tabular-nums")>
                                         {known_exploited}
@@ -512,5 +543,24 @@ pub fn OrganizationPage() -> impl IntoView {
                 }}
             />
         </Page>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bar_share;
+
+    #[test]
+    fn a_bar_fills_its_track_as_its_project_compares_to_the_largest() {
+        assert_eq!(bar_share(142, 142), 100);
+        assert_eq!(bar_share(71, 142), 50);
+        // Rounded up: one finding among thousands still shows.
+        assert_eq!(bar_share(1, 3), 34);
+        assert_eq!(bar_share(1, 5000), 1);
+        assert_eq!(bar_share(0, 142), 0);
+        // Nothing to compare with, and counts that cannot be: never past the track.
+        assert_eq!(bar_share(0, 0), 0);
+        assert_eq!(bar_share(5, 0), 100);
+        assert_eq!(bar_share(u64::MAX, 1), 100);
     }
 }

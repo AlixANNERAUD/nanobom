@@ -2427,6 +2427,14 @@ async fn the_organization_page_draws_each_project_and_lists_runs() {
         .next()
         .unwrap();
     assert!(frame.contains("overflow-x-auto"), "{frame}");
+    // Positioned, so that text hidden from sight stays inside its scrolling.
+    assert!(frame.contains("relative"), "{frame}");
+    // Every row has a cell under each head, the unnamed one of the bar included.
+    let head = element(projects, "<thead", "</thead>");
+    assert_eq!(
+        head.matches("<th ").count() + head.matches("<td").count(),
+        10
+    );
 
     // Each project has a bar: one segment per severity that has findings, as wide as its count.
     let web = table_row(projects, "href=\"/organizations/acme/projects/web\"");
@@ -2435,6 +2443,9 @@ async fn the_organization_page_draws_each_project_and_lists_runs() {
     assert_eq!(bar.matches("style=\"flex-grow:1;\"").count(), 2, "{bar}");
     assert!(bar.contains("bg-severity-critical") && bar.contains("bg-severity-high"));
     assert!(!bar.contains("bg-severity-medium"), "{bar}");
+    // The project with the most findings fills its track; one row header and nine cells.
+    assert!(web.contains("style=\"width:100%;\""), "{web}");
+    assert_eq!(web.matches("<th ").count() + cells(web).len(), 10, "{web}");
     // The numbers stay next to it: the severities, known exploited and ignored findings, and
     // the day of the last upload, whose tooltip keeps the time.
     assert!(text(web).contains("web 1 1 0 0 0 1 0 "), "{web}");
@@ -2454,6 +2465,9 @@ async fn the_organization_page_draws_each_project_and_lists_runs() {
     assert_eq!(bar.matches("flex-grow:").count(), 1, "{bar}");
     assert!(bar.contains("bg-muted-foreground/40"), "{bar}");
     assert!(!bar.contains("bg-severity"), "{bar}");
+    // One finding against the two of the largest project: half the track.
+    assert!(unscored.contains("style=\"width:50%;\""), "{unscored}");
+    assert!(!quiet.contains("width:"), "{quiet}");
     // The long name stays on one line and keeps its full text.
     let long = table_row(projects, "href=\"/organizations/acme/projects/long\"");
     let link = element(long, "<a", ">");
