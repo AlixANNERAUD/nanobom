@@ -155,7 +155,8 @@
      break anywhere, and what cannot wrap (code blocks, tables) scrolls inside its own box: the
      text never widens the page. */
   .prose-advisory {
-    @apply text-sm leading-relaxed wrap-anywhere;
+    /* Quotes and lists nested by the dozen shift their text past the card: it scrolls here. */
+    @apply overflow-x-auto text-sm leading-relaxed wrap-anywhere;
   }
 
   .prose-advisory :where(p, ul, ol, pre, blockquote, table, hr, h3, h4, h5, h6):not(:first-child) {

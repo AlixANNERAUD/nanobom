@@ -2409,13 +2409,19 @@ async fn advisory_text_is_formatted_and_harmless() {
         .map(|rest| rest.split('"').next().unwrap_or(rest))
     {
         // Pages of nanobom, the skip link, and web addresses.
+        // `//host` is another site, not a page of this one.
         assert!(
-            target.starts_with('/') || target == "#content" || target.starts_with("https://"),
+            (target.starts_with('/') && !target.starts_with("//"))
+                || target == "#content"
+                || target.starts_with("https://"),
             "a link to {target}"
         );
     }
     for target in lowercase.split("src=\"").skip(1) {
-        assert!(target.starts_with('/'), "something loaded from {target}");
+        assert!(
+            target.starts_with('/') && !target.starts_with("//"),
+            "something loaded from {target}"
+        );
     }
 
     // The summary under the title is plain text.

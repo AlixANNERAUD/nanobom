@@ -114,11 +114,16 @@ page shows it formatted, and treats it as untrusted:
 - HTML in the description is shown as text, never interpreted.
 - A link is kept only when it leads to an `http`, `https` or `mailto` address, and carries
   `rel="noopener noreferrer nofollow"`. Any other link, relative ones included, is reduced to
-  its text.
-- An image is replaced by a link to its address, so opening a finding makes the browser request
-  nothing from a third party.
+  its text. So is an address made to mislead: a web address with user information before its
+  host, a `mailto` address that fills in a subject or a body, an address holding characters
+  that change the direction of text.
+- An image is never shown, so opening a finding makes the browser request nothing from a third
+  party: it is replaced by a link to its address when that address is allowed, by its
+  alternative text otherwise.
+- A description that is very long (over 256 KiB), or built to grow out of proportion once
+  formatted, is shown as plain text.
 
-The addresses listed under **References** follow the same rule: one that is not a web address is
+The addresses listed under **References** follow the same rule: one that is not allowed is
 shown without a link. The [read API](../reference/read-api.md) returns the description as
 published.
 

@@ -20,6 +20,11 @@
 //! The matches below name every event and element on purpose, without a catch-all arm: a
 //! pulldown-cmark release that adds one stops compiling here until someone decides what it may
 //! write.
+//!
+//! The text is also untrusted in size. A page is rendered on every load, so [`render`] bounds
+//! what a text can cost: its length, the cells of its tables, and how much it grows once
+//! rendered (the `MAX_*` constants below). Past a bound, the text is shown as it was written,
+//! which costs what it weighs.
 
 use pulldown_cmark::{
     CodeBlockKind, Event, HeadingLevel, LinkType, Options, Parser, Tag, TagEnd, html,
@@ -32,17 +37,88 @@ use crate::model::link_target;
 /// not count the link (`nofollow`).
 const REL: &str = "noopener noreferrer nofollow";
 
+/// The longest text read as Markdown, in bytes. Real advisories are a few kilobytes; the
+/// parser builds its whole tree before the first event, so the bound is on the source.
+const MAX_SOURCE: usize = 256 * 1024;
+
+/// The most table cells a text may hold for tables to be read. The parser fills short rows with
+/// empty cells up to the width of the header, so a few kilobytes (a header of hundreds of
+/// columns, then rows of one letter) would otherwise become megabytes of cells, in memory and
+/// in the page. Beyond the bound, tables are shown as the text they are.
+const MAX_TABLE_CELLS: usize = 20_000;
+
+/// How many times its source the result may weigh. Formatted text weighs two or three times its
+/// Markdown, a table of short cells five, a list of bare addresses seven; more than this is a
+/// text built to be expensive (levels of quotes nested by the thousand, one definition
+/// referenced by thousands of short links).
+const MAX_GROWTH: usize = 16;
+
+/// What a result may weigh on top of [`MAX_GROWTH`] times its source, in bytes.
+const GROWTH_ALLOWANCE: usize = 4096;
+
 /// Renders untrusted Markdown to HTML that is safe to insert into a page (see the module
 /// documentation). Headings are demoted by two levels, to nest under the title of the card that
 /// holds the text.
+///
+/// A text that is too long, grows too much once rendered, or makes the parser panic is shown
+/// as plain text instead: the page of its finding stays readable either way.
 pub fn render(source: &str) -> String {
+    if source.len() > MAX_SOURCE {
+        return plain(source);
+    }
     let mut options = Options::empty();
-    options.insert(Options::ENABLE_TABLES);
     options.insert(Options::ENABLE_STRIKETHROUGH);
-    let mut rewriter = Rewriter::default();
-    let events = Parser::new_ext(source, options).filter_map(|event| rewriter.rewrite(event));
-    let mut output = String::with_capacity(source.len() + source.len() / 4);
-    html::push_html(&mut output, events);
+    if table_cells_bound(source) <= MAX_TABLE_CELLS {
+        options.insert(Options::ENABLE_TABLES);
+    }
+    let rendered = std::panic::catch_unwind(|| {
+        let mut rewriter = Rewriter::default();
+        let events = Parser::new_ext(source, options).filter_map(|event| rewriter.rewrite(event));
+        let mut output = String::with_capacity(source.len() + source.len() / 4);
+        html::push_html(&mut output, events);
+        output
+    });
+    match rendered {
+        // The allowance on top lets a short text be all markup (`# a`, a rule, a small table).
+        Ok(output) if output.len() <= source.len() * MAX_GROWTH + GROWTH_ALLOWANCE => output,
+        _ => plain(source),
+    }
+}
+
+/// An upper bound on the cells of the tables of a text, padding included. A table cannot hold a
+/// blank line, and none of its rows has more cells than the line with the most `|` has, plus
+/// one. So no table of a run of lines holds more than its lines times that width; runs without
+/// a `|` hold no table.
+fn table_cells_bound(source: &str) -> usize {
+    let mut total = 0_usize;
+    let mut lines = 0_usize;
+    let mut width = 0_usize;
+    for line in source.lines().chain([""]) {
+        if line.trim().is_empty() {
+            if width > 0 {
+                total = total.saturating_add(lines.saturating_mul(width + 1));
+            }
+            lines = 0;
+            width = 0;
+        } else {
+            lines += 1;
+            width = width.max(line.bytes().filter(|byte| *byte == b'|').count());
+        }
+    }
+    total
+}
+
+/// A text as it was written: escaped, one paragraph, its line breaks kept.
+fn plain(source: &str) -> String {
+    let mut output = String::with_capacity(source.len() + source.len() / 8);
+    output.push_str("<p>");
+    for (index, line) in source.lines().enumerate() {
+        if index > 0 {
+            output.push_str("<br />\n");
+        }
+        output.push_str(&escape(line));
+    }
+    output.push_str("</p>\n");
     output
 }
 
@@ -239,7 +315,7 @@ fn escape(text: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::render;
+    use super::{GROWTH_ALLOWANCE, MAX_GROWTH, MAX_SOURCE, plain, render, table_cells_bound};
     use crate::model::link_target;
 
     /// Elements [`render`] may write. None takes an attribute, except `a` and `ol`.
@@ -281,6 +357,12 @@ mod tests {
     /// Returns the result for further assertions.
     fn harmless(source: &str) -> String {
         let html = render(source);
+        assert!(
+            html.len() <= source.len() * MAX_GROWTH + GROWTH_ALLOWANCE,
+            "{} bytes rendered from {} bytes",
+            html.len(),
+            source.len()
+        );
         let mut links = 0_i64;
         for (position, _) in html.match_indices('<') {
             let rest = &html[position + 1..];
@@ -809,5 +891,153 @@ mod tests {
         }
         assert_eq!(render(""), "");
         assert_eq!(render(" \n\t\n"), "");
+    }
+
+    /// The parser fills short rows up to the width of the header: 362 columns and 720 rows of
+    /// one letter are 260,000 cells and megabytes of HTML from 3 KB of text.
+    #[test]
+    fn padded_tables_do_not_multiply_the_text() {
+        let columns = 362;
+        let table = format!(
+            "{}\n{}\n{}\n",
+            vec!["a"; columns].join("|"),
+            vec!["-"; columns].join("|"),
+            "a\n".repeat(720)
+        );
+        assert!(table.len() < 3 * 1024);
+        for source in [table.clone(), format!("{table}\n").repeat(20)] {
+            let html = harmless(&source);
+            assert!(!html.contains("<td>"), "tables are not read");
+            assert!(html.len() < source.len() * 4, "{} bytes", html.len());
+        }
+        // An ordinary table next to it is lost with it, and stays readable as text.
+        let html = harmless(&format!("{table}\n| a | b |\n| - | - |\n| 1 | 2 |\n"));
+        assert!(html.contains("| 1 | 2 |"), "{html}");
+
+        // Rows as wide as the header are not padded: a real table is read whatever its size.
+        let row = "| value | value | value | value |\n";
+        let wide = format!("{row}| - | - | - | - |\n{}", row.repeat(500));
+        assert_eq!(harmless(&wide).matches("<td>").count(), 2000);
+    }
+
+    #[test]
+    fn the_bound_on_table_cells_counts_runs_of_lines_holding_a_bar() {
+        assert_eq!(table_cells_bound(""), 0);
+        assert_eq!(table_cells_bound("no table\nhere\n\nnor here"), 0);
+        // Two columns need one bar at least: three lines of two cells.
+        assert_eq!(table_cells_bound("a|b\n-|-\n1|2"), 6);
+        // The widest line sets the width of its run, and a blank line ends the run.
+        assert_eq!(table_cells_bound("a|b|c\n-|-|-\nx\n\ny\n\n| z |\n"), 9 + 3);
+        assert_eq!(table_cells_bound("> a|b\n> -|-\n \t\nc"), 4);
+    }
+
+    #[test]
+    fn a_text_past_the_bounds_is_shown_as_written() {
+        assert_eq!(
+            plain("# <b>title</b>\n\n[x](javascript:alert(1)) & \"quotes\"\r\nend"),
+            "<p># &lt;b&gt;title&lt;/b&gt;<br />\n<br />\n[x](javascript:alert(1)) &amp; \
+             &quot;quotes&quot;<br />\nend</p>\n"
+        );
+        // Too long to be read as Markdown.
+        let long = format!("# title\n\n{}", "word ".repeat(MAX_SOURCE / 5 + 1));
+        let html = harmless(&long);
+        assert!(html.starts_with("<p># title<br />"), "{}", &html[..40]);
+        // Built to grow: each `>` opens a quote in the one before.
+        let html = harmless(&">".repeat(5000));
+        assert!(!html.contains("<blockquote>"));
+        // One definition, thousands of links to it.
+        let html = harmless(&format!(
+            "[a]: https://example.org\n\n{}",
+            "[a] ".repeat(5000)
+        ));
+        assert!(!html.contains("<a "));
+    }
+
+    #[test]
+    fn html_stays_text_in_blocks_the_parser_reads_differently() {
+        for source in [
+            // Line endings other than a line feed.
+            "<script>\r\nalert(1)\r\n</script>",
+            "<script>\ralert(1)\r</script>",
+            // HTML blocks inside containers.
+            "- <script>\n\n  alert(1)\n\n  </script>",
+            "> <div>\n> <img src=x onerror=alert(1)>",
+            "1. <iframe src=https://example.org></iframe>\n   text",
+            // A reference label holding HTML.
+            "[<img src=x>]: https://example.org\n\n[<img src=x>]",
+            // Autolinks inside the text of a link.
+            "[a <https://example.org/1> b](https://example.org/2)",
+            "[<b@example.org>](https://example.org)",
+        ] {
+            let html = harmless(source).to_lowercase();
+            for tag in ["<script", "<img", "<div", "<iframe"] {
+                assert!(!html.contains(tag), "{html}");
+            }
+        }
+    }
+
+    /// Lists of hostile inputs cover what their author thought of. This feeds the renderer
+    /// thousands of texts assembled from the pieces attacks are made of, in an order no one
+    /// chose, and checks the invariant on each. The sequence is fixed, so a failure names a
+    /// text that fails again.
+    #[test]
+    fn texts_assembled_at_random_are_harmless() {
+        const PIECES: [&str; 40] = [
+            "<",
+            ">",
+            "\"",
+            "'",
+            "&",
+            "[",
+            "]",
+            "(",
+            ")",
+            "!",
+            "|",
+            "`",
+            "*",
+            "_",
+            "~",
+            "#",
+            "-",
+            "=",
+            ":",
+            "/",
+            "\\",
+            " ",
+            "\n",
+            "\n\n",
+            "\t",
+            "\r\n",
+            "a",
+            "1.",
+            "x]: ",
+            "javascript:",
+            "https://example.org",
+            "mailto:a@b.example",
+            "data:text/html,",
+            "<script>",
+            "</script>",
+            "<img src=x onerror=alert(1)>",
+            "<!--",
+            "]]>",
+            "&#x3c;",
+            "onclick=alert(1)",
+        ];
+        // A linear congruential generator: reproducible, and no dependency.
+        let mut state = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = |bound: usize| {
+            state = state
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(1_442_695_040_888_963_407);
+            usize::try_from(state >> 33).unwrap() % bound
+        };
+        for _ in 0..4000 {
+            let mut source = String::new();
+            for _ in 0..1 + next(40) {
+                source.push_str(PIECES[next(PIECES.len())]);
+            }
+            harmless(&source);
+        }
     }
 }

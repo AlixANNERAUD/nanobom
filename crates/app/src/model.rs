@@ -478,17 +478,32 @@ impl Reference {
 /// address. A browser removes tabs and line breaks from an address, and control characters
 /// before it, prior to reading its scheme; an address holding any control character is refused
 /// rather than interpreted the same way.
+///
+/// Three kinds of allowed addresses are refused because they mislead rather than run anything:
+/// a web address with user information (`https://github.com@evil.example` leads to
+/// `evil.example`), a `mailto:` address with a query (it fills in recipients, a subject and a
+/// body), and an address with characters that change the direction of text (they make an
+/// address read as another one).
 pub fn link_target(address: &str) -> Option<&str> {
     let address = address.trim();
-    let starts_with = |prefix: &str| {
+    let after = |prefix: &str| {
         address
             .get(..prefix.len())
-            .is_some_and(|start| start.eq_ignore_ascii_case(prefix))
+            .filter(|start| start.eq_ignore_ascii_case(prefix))
+            .map(|_| &address[prefix.len()..])
     };
-    let allowed = ["http://", "https://", "mailto:"]
-        .into_iter()
-        .any(starts_with);
-    (allowed && !address.chars().any(char::is_control)).then_some(address)
+    let misleading = if let Some(rest) = after("http://").or_else(|| after("https://")) {
+        // A browser also ends the host at a backslash.
+        let host = rest.split(['/', '?', '#', '\\']).next().unwrap_or(rest);
+        host.contains('@')
+    } else {
+        after("mailto:")?.contains('?')
+    };
+    let hidden = |character: char| {
+        character.is_control()
+            || matches!(character, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+    };
+    (!misleading && !address.chars().any(hidden)).then_some(address)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -712,7 +727,13 @@ mod tests {
             "https://example.org/a b",
             "https://example.org/é",
             "mailto:security@example.org",
-            "MAILTO:security@example.org?subject=x",
+            "MAILTO:security@example.org",
+            // An `@` after the host is part of a path or a query.
+            "https://example.org/@user",
+            "https://example.org?contact=a@b.example",
+            "https://example.org#a@b",
+            // A browser reads a backslash as a slash: the host is `example.org`.
+            "https://example.org\\@evil.example",
         ] {
             assert_eq!(link_target(address), Some(address), "{address}");
         }
@@ -763,6 +784,14 @@ mod tests {
             "https:\\\\example.org",
             "http:javascript:alert(1)",
             "mailto",
+            // Allowed schemes, misleading addresses.
+            "https://github.com@evil.example",
+            "https://github.com@evil.example/advisories",
+            "http://user:password@example.org/",
+            "mailto:security@example.org?subject=x",
+            "MAILTO:a@example.org?cc=b@example.org&body=hi",
+            "https://example.org/\u{202e}gpj.exe",
+            "https://example.org/\u{2066}x\u{2069}",
             // A browser drops tabs and line breaks from an address before reading its scheme, and
             // control characters before it.
             "ht\ttps://example.org",

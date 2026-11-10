@@ -1228,14 +1228,14 @@ pub fn FindingPage() -> impl IntoView {
                                         {exploitation_body}
                                         <p class="flex flex-wrap gap-x-4 text-sm">
                                             <a
-                                                class="underline-offset-4 hover:underline"
+                                                class="text-primary underline underline-offset-4"
                                                 href="https://www.cisa.gov/known-exploited-vulnerabilities-catalog"
                                                 rel="noreferrer"
                                             >
                                                 {t!("finding.kev_link")}
                                             </a>
                                             <a
-                                                class="underline-offset-4 hover:underline"
+                                                class="text-primary underline underline-offset-4"
                                                 href="https://www.first.org/epss/"
                                                 rel="noreferrer"
                                             >
@@ -1351,7 +1351,7 @@ pub fn FindingPage() -> impl IntoView {
                                                 .collect_view()}
                                             <li>
                                                 <a
-                                                    class="text-sm underline-offset-4 hover:underline"
+                                                    class="text-primary text-sm underline underline-offset-4"
                                                     href=format!("https://osv.dev/vulnerability/{}", finding.vulnerability_id)
                                                     rel="noreferrer"
                                                 >
@@ -1424,7 +1424,7 @@ pub fn FindingPage() -> impl IntoView {
                                                     let address = match reference.target() {
                                                         Some(target) => view! {
                                                             <a
-                                                                class="underline-offset-4 hover:underline"
+                                                                class="text-primary underline underline-offset-4"
                                                                 href=target.to_owned()
                                                                 rel="noopener noreferrer nofollow"
                                                             >
