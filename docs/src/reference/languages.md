@@ -2,7 +2,7 @@
 
 The web interface is available in **English** and **French**. Each request is answered in:
 
-1. the language chosen with the language switch in the page header, remembered in the
+1. the language chosen in the account menu of the page header, remembered in the
    `nanobom_locale` cookie of that browser (it holds only the chosen language);
 2. otherwise, the best match among the browser's preferred languages (`Accept-Language`);
 3. otherwise, English.

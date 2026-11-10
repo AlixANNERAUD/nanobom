@@ -1,8 +1,7 @@
 {
   "language": {
     "name": "Français",
-    "label": "Langue",
-    "apply": "Appliquer"
+    "label": "Langue"
   },
   "common": {
     "loading": "Chargement…",

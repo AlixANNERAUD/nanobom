@@ -11,7 +11,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use crate::{
     functions::{SetLanguage, load_current_user},
     i18n,
-    model::{CurrentUser, Severity, Status},
+    model::{CurrentUser, Organization, Severity, Status},
     t,
 };
 use ui::*;
@@ -129,8 +129,25 @@ pub fn Empty(#[prop(into)] title: String, children: Children) -> impl IntoView {
     }
 }
 
+/// A row of a header menu: a link or a button as wide as the menu. Its focus ring is drawn
+/// inside the row, where the menu's border cannot hide it.
+const MENU_ITEM: &str = "hover:bg-accent hover:text-accent-foreground flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring";
+
+/// The panel of a header menu, opening under its `<details>` button and above the page. Each menu
+/// adds its own position and width.
+const MENU_PANEL: &str =
+    "bg-popover text-popover-foreground absolute z-20 mt-1 rounded-md border p-1 shadow-md";
+
+/// A language of the account menu. The focus ring keeps a gap from the button: on the current
+/// language, both are the accent color and would merge.
+const LANGUAGE_BUTTON: &str = "h-8 flex-1 rounded-md px-3 text-sm font-medium hover:cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+
+/// The `name` shared by the header's menus: browsers that support it close one when the other
+/// opens, the others let both stay open.
+const HEADER_MENUS: &str = "header-menu";
+
 /// Switches between the light and dark themes, remembering the choice in the browser. Without
-/// JavaScript, the theme follows the system preference.
+/// JavaScript, the theme follows the system preference. Shown as a row of the account menu.
 #[island]
 pub fn ThemeToggle() -> impl IntoView {
     let toggle = move |_| {
@@ -155,94 +172,205 @@ pub fn ThemeToggle() -> impl IntoView {
         }
     };
     view! {
-        <button
-            type="button"
-            on:click=toggle
-            class=button_class(ButtonVariant::Ghost, ButtonSize::Small)
-            aria-label=t!("theme.label")
-            title=t!("theme.title")
-        >
+        <button type="button" on:click=toggle class=MENU_ITEM aria-label=t!("theme.label")>
             <span aria-hidden="true">"◐"</span>
+            {t!("theme.title")}
         </button>
     }
 }
 
-/// Chooses the interface's language, remembered in a cookie. A plain form, so it works without
-/// JavaScript.
+/// Chooses the interface's language, remembered in a cookie: one submit button per language in
+/// a plain form, so it works without JavaScript.
 #[component]
 pub fn LanguageSwitch() -> impl IntoView {
     let current = i18n::locale();
     let target = action::<SetLanguage>();
     view! {
-        <form method="post" action=target class="flex items-center gap-1">
-            <label for="language" class="sr-only">
+        <form method="post" action=target class="grid gap-1.5 px-2 py-1.5">
+            <span id="language-label" class="text-muted-foreground text-xs">
                 {t!("language.label")}
-            </label>
-            <select id="language" name="locale" class=format!("{SELECT} h-8 w-auto")>
+            </span>
+            <div role="group" aria-labelledby="language-label" class="flex gap-1">
                 {i18n::languages()
                     .map(|(locale, tag, name)| {
                         let selected = locale == current;
+                        let state = if selected {
+                            "bg-primary text-primary-foreground"
+                        } else {
+                            "border-input hover:bg-accent hover:text-accent-foreground border"
+                        };
                         view! {
-                            <option value=tag selected=selected lang=tag>
+                            <button
+                                type="submit"
+                                name="locale"
+                                value=tag
+                                lang=tag
+                                aria-current=selected.then_some("true")
+                                class=format!("{LANGUAGE_BUTTON} {state}")
+                            >
                                 {name}
-                            </option>
+                            </button>
                         }
                     })
                     .collect_view()}
-            </select>
-            <Button variant=ButtonVariant::Ghost size=ButtonSize::Small>
-                {t!("language.apply")}
-            </Button>
+            </div>
         </form>
     }
 }
 
-/// The header: home link, organization switcher, search, administration and the account.
+/// The character shown in the account button: the first visible character of the display name,
+/// else of the username, in upper case; `?` when neither has one. Only the first character of
+/// the upper case form is kept (`S` for `ß`), so the button never holds more than one.
+fn initial(display_name: &str, username: &str) -> String {
+    [display_name, username]
+        .into_iter()
+        .find_map(|name| name.chars().find(|&character| is_visible(character)))
+        .and_then(|character| character.to_uppercase().next())
+        .map_or_else(|| "?".to_owned(), String::from)
+}
+
+/// Whether a character draws something. Besides spaces and control characters, this leaves out
+/// the format characters that names pick up when pasted (soft hyphen, zero-width spaces and
+/// joiners, direction marks, byte order mark): `char` has no test for them.
+fn is_visible(character: char) -> bool {
+    !(character.is_whitespace()
+        || character.is_control()
+        || matches!(
+            character,
+            '\u{ad}'
+                | '\u{34f}'
+                | '\u{61c}'
+                | '\u{180e}'
+                | '\u{200b}'..='\u{200f}'
+                | '\u{202a}'..='\u{202e}'
+                | '\u{2060}'..='\u{206f}'
+                | '\u{feff}'
+        ))
+}
+
+/// The organization switcher of the header: the user's organizations, then the list of all.
+#[component]
+fn OrganizationSwitcher(organizations: Vec<Organization>) -> impl IntoView {
+    view! {
+        <details name=HEADER_MENUS class="md:relative">
+            <summary class=format!(
+                "{} list-none [&::-webkit-details-marker]:hidden",
+                button_class(ButtonVariant::Outline, ButtonSize::Small),
+            )>{t!("header.organizations")}" ▾"</summary>
+            // Below `md` the details is not positioned, so the list is placed against the header
+            // and spans the page: next to the wordmark, a list starting at its button would run
+            // off a phone's screen.
+            <ul class=format!("{MENU_PANEL} inset-x-4 md:inset-x-auto md:min-w-56")>
+                {organizations
+                    .into_iter()
+                    .map(|organization| {
+                        view! {
+                            <li>
+                                <a
+                                    href=format!("/organizations/{}", organization.slug)
+                                    class="hover:bg-accent block rounded-sm px-2 py-1.5 text-sm break-words"
+                                >
+                                    {organization.name}
+                                    <span class="text-muted-foreground ml-2 text-xs">
+                                        {organization.role.label()}
+                                    </span>
+                                </a>
+                            </li>
+                        }
+                    })
+                    .collect_view()}
+                <li class="mt-1 border-t pt-1">
+                    <a href="/organizations" class="hover:bg-accent block rounded-sm px-2 py-1.5 text-sm">
+                        {t!("header.all_organizations")}
+                    </a>
+                </li>
+            </ul>
+        </details>
+    }
+}
+
+/// The account menu of the header, opened from a round button showing the user's initial: who
+/// is signed in, the administration for instance administrators, the language, the theme and
+/// signing out.
+#[component]
+fn UserMenu(user: CurrentUser) -> impl IntoView {
+    let initial = initial(&user.display_name, &user.username);
+    let name = if user.display_name.trim().is_empty() {
+        user.username.clone()
+    } else {
+        user.display_name
+    };
+    // Accounts created without a display name are named after their username: once is enough.
+    let username = (name != user.username).then_some(user.username);
+    view! {
+        // On phones the button sits at the end of the first line, the search below it.
+        <details name=HEADER_MENUS class="relative ml-auto md:ml-0">
+            <summary
+                class="bg-primary text-primary-foreground flex size-8 list-none items-center justify-center rounded-full text-sm font-semibold select-none hover:cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring [&::-webkit-details-marker]:hidden"
+                aria-label=t!("header.account")
+                title=t!("header.account")
+            >
+                <span aria-hidden="true">{initial}</span>
+            </summary>
+            // The button ends the header's first line at every width, so a panel aligned on its
+            // right edge and no wider than the page stays on screen.
+            <div class=format!("{MENU_PANEL} right-0 w-64 max-w-[calc(100vw-2rem)]")>
+                <div class="px-2 py-1.5">
+                    <p class="truncate text-sm font-medium">{name}</p>
+                    {username
+                        .map(|username| {
+                            view! { <p class="text-muted-foreground truncate text-xs">{username}</p> }
+                        })}
+                </div>
+                <div class="mt-1 border-t pt-1">
+                    {user
+                        .is_instance_administrator
+                        .then(|| {
+                            view! {
+                                <a href="/administration" class=MENU_ITEM>
+                                    {t!("header.administration")}
+                                </a>
+                            }
+                        })}
+                    <LanguageSwitch />
+                    <ThemeToggle />
+                </div>
+                <form method="post" action="/auth/logout" class="mt-1 border-t pt-1">
+                    <button type="submit" class=MENU_ITEM>
+                        {t!("header.sign_out")}
+                    </button>
+                </form>
+            </div>
+        </details>
+    }
+    // Erased: nested in the header and the page, the menu's full type is deeper than the
+    // compiler accepts when it lays out the page's future.
+    .into_any()
+}
+
+/// The header: home link, organization switcher, search and the account menu. One line from the
+/// `md` breakpoint; below it, the search takes a second line.
 #[component]
 fn Header(user: CurrentUser) -> impl IntoView {
     let organizations = user.organizations.clone();
     view! {
         <header class="border-b bg-background">
-            <div class="mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3">
-                <a href="/organizations" class="flex items-center gap-2 font-semibold tracking-tight">
+            // `relative`: on phones the organization menu is placed against the header.
+            <div class="relative mx-auto flex max-w-6xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 md:flex-nowrap">
+                <a
+                    href="/organizations"
+                    class="flex shrink-0 items-center gap-2 font-semibold tracking-tight"
+                >
                     <Mark />
                     "nanobom"
                 </a>
-                <details class="relative">
-                    <summary class=format!(
-                        "{} list-none",
-                        button_class(ButtonVariant::Outline, ButtonSize::Small),
-                    )>{t!("header.organizations")}" ▾"</summary>
-                    <ul class="bg-popover text-popover-foreground absolute z-20 mt-1 min-w-56 rounded-md border p-1 shadow-md">
-                        {organizations
-                            .into_iter()
-                            .map(|organization| {
-                                view! {
-                                    <li>
-                                        <a
-                                            href=format!("/organizations/{}", organization.slug)
-                                            class="hover:bg-accent block rounded-sm px-2 py-1.5 text-sm"
-                                        >
-                                            {organization.name}
-                                            <span class="text-muted-foreground ml-2 text-xs">
-                                                {organization.role.label()}
-                                            </span>
-                                        </a>
-                                    </li>
-                                }
-                            })
-                            .collect_view()}
-                        <li class="mt-1 border-t pt-1">
-                            <a
-                                href="/organizations"
-                                class="hover:bg-accent block rounded-sm px-2 py-1.5 text-sm"
-                            >
-                                {t!("header.all_organizations")}
-                            </a>
-                        </li>
-                    </ul>
-                </details>
-                <form action="/search" method="get" role="search" class="flex min-w-48 flex-1 gap-2">
+                <OrganizationSwitcher organizations />
+                <form
+                    action="/search"
+                    method="get"
+                    role="search"
+                    class="order-last min-w-0 basis-full md:order-none md:flex-1"
+                >
                     <label for="header-search" class="sr-only">
                         {t!("header.search_label")}
                     </label>
@@ -254,31 +382,7 @@ fn Header(user: CurrentUser) -> impl IntoView {
                         class=INPUT
                     />
                 </form>
-                <nav aria-label=t!("header.account") class="flex items-center gap-2">
-                    {user
-                        .is_instance_administrator
-                        .then(|| {
-                            view! {
-                                <LinkButton
-                                    href="/administration"
-                                    variant=ButtonVariant::Ghost
-                                    size=ButtonSize::Small
-                                >
-                                    {t!("header.administration")}
-                                </LinkButton>
-                            }
-                        })}
-                    <span class="text-muted-foreground text-sm" title=user.username.clone()>
-                        {user.display_name}
-                    </span>
-                    <LanguageSwitch />
-                    <ThemeToggle />
-                    <form method="post" action="/auth/logout">
-                        <Button variant=ButtonVariant::Outline size=ButtonSize::Small>
-                            {t!("header.sign_out")}
-                        </Button>
-                    </form>
-                </nav>
+                <UserMenu user />
             </div>
         </header>
     }
@@ -345,5 +449,49 @@ pub fn Heading(
             </div>
             <div class="flex flex-wrap items-center gap-2">{children.map(|children| children())}</div>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::initial;
+
+    #[test]
+    fn the_initial_is_the_first_letter_of_the_display_name() {
+        assert_eq!(initial("Alice", "alice"), "A");
+        assert_eq!(initial("alice", "x"), "A");
+        assert_eq!(initial("éric", "x"), "É");
+    }
+
+    #[test]
+    fn the_initial_falls_back_to_the_username() {
+        assert_eq!(initial("", "bob"), "B");
+        assert_eq!(initial("  ", "bob"), "B");
+        assert_eq!(initial("", ""), "?");
+        assert_eq!(initial(" ", "\t"), "?");
+    }
+
+    /// One character is shown even when the upper case form has several.
+    #[test]
+    fn the_initial_is_a_single_character() {
+        assert_eq!(initial("ß", "x"), "S");
+        assert_eq!(initial("ǆ", "x"), "Ǆ");
+    }
+
+    #[test]
+    fn the_initial_keeps_characters_without_case() {
+        assert_eq!(initial("李雷", "x"), "李");
+        assert_eq!(initial("🦀 Ferris", "x"), "🦀");
+        assert_eq!(initial("42", "x"), "4");
+    }
+
+    /// A name pasted with a byte order mark or a zero-width space would otherwise give an empty
+    /// button.
+    #[test]
+    fn the_initial_skips_invisible_characters() {
+        assert_eq!(initial("\u{feff}Alice", "x"), "A");
+        assert_eq!(initial("\u{200b}\u{200d} zoé", "x"), "Z");
+        assert_eq!(initial("\u{200b}", "bob"), "B");
+        assert_eq!(initial("\u{0007}", "\u{00ad}"), "?");
     }
 }

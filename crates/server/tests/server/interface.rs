@@ -9,9 +9,10 @@ use nanobom_domain::{
     deliveries::{self, Attempt},
     email::{self, Language},
     findings::{self, Filter, Status},
-    notifications, organizations, projects,
+    notifications, organizations, passwords, projects,
     testing::SmtpSink,
     tokens,
+    users::{self, NewUser},
 };
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use serde_json::json;
@@ -146,6 +147,139 @@ async fn the_header_shows_the_mark_before_the_wordmark() {
     let html = alice.page("/organizations").await;
     let header = element(&html, "<header", "</header>");
     assert_mark_before_wordmark(element(header, "<a href=\"/organizations\"", "</a>"));
+}
+
+/// The `<details>` of `html` whose `<summary>` has `label` as its accessible name.
+fn menu<'a>(html: &'a str, label: &str) -> &'a str {
+    let name = format!("aria-label=\"{label}\"");
+    html.split("<details")
+        .skip(1)
+        .map(|rest| rest.split("</details>").next().unwrap_or(rest))
+        .find(|details| {
+            details
+                .split("</summary>")
+                .next()
+                .is_some_and(|summary| summary.contains(&name))
+        })
+        .unwrap_or_else(|| panic!("no menu labelled {label}"))
+}
+
+/// The opening tags of the language buttons of a menu.
+fn language_buttons(menu: &str) -> Vec<&str> {
+    menu.split("<button")
+        .skip(1)
+        .map(|button| button.split('>').next().unwrap_or(button))
+        .filter(|button| button.contains("name=\"locale\""))
+        .collect()
+}
+
+#[tokio::test]
+async fn the_user_menu_holds_language_theme_and_sign_out() {
+    let server = server(&[]).await;
+    users::create(
+        &server.database,
+        NewUser {
+            username: "alice".to_owned(),
+            display_name: Some("Émilie Dupont".to_owned()),
+            password_hash: Some(passwords::hash(PASSWORD.to_owned()).await),
+            is_instance_administrator: true,
+            ..NewUser::default()
+        },
+        true,
+    )
+    .await
+    .unwrap();
+    let alice = Browser::sign_in(&server, "alice").await;
+    let html = alice.page("/organizations").await;
+    assert!(
+        !html.contains("<select id=\"language\""),
+        "no language list"
+    );
+    let header = element(&html, "<header", "</header>");
+    let account = menu(header, "Account");
+
+    // The button shows the initial; the name is spelled out inside.
+    let summary = element(account, "<summary", "</summary>");
+    assert!(summary.contains("title=\"Account\""), "{summary}");
+    assert!(summary.contains('É'), "{summary}");
+    assert!(account.contains("Émilie Dupont"), "{account}");
+    assert!(account.contains("alice"), "the username, since it differs");
+    assert!(account.contains("href=\"/administration\""));
+
+    // One submit button per language, in one form, so the choice works without JavaScript.
+    assert_eq!(account.matches("action=\"/api/set_language\"").count(), 1);
+    let buttons = language_buttons(account);
+    assert_eq!(buttons.len(), 2, "{account}");
+    for button in &buttons {
+        assert!(button.contains("type=\"submit\""), "{button}");
+    }
+    let english = buttons
+        .iter()
+        .find(|button| button.contains("value=\"en\""))
+        .expect("an English button");
+    assert!(english.contains("lang=\"en\""), "{english}");
+    assert!(english.contains("aria-current=\"true\""), "{english}");
+    let french = buttons
+        .iter()
+        .find(|button| button.contains("value=\"fr\""))
+        .expect("a French button");
+    assert!(french.contains("lang=\"fr\""), "{french}");
+    assert!(!french.contains("aria-current"), "{french}");
+    assert!(account.contains(">English<") && account.contains(">Français<"));
+
+    // The theme switch keeps its accessible name and gains a visible label.
+    let theme = account
+        .split("<button")
+        .find(|button| button.contains("aria-label=\"Switch between the light and dark themes\""))
+        .expect("the theme switch");
+    let theme = theme.split("</button>").next().unwrap();
+    assert!(theme.contains("Switch theme"), "{theme}");
+
+    let sign_out = element(
+        account,
+        "<form method=\"post\" action=\"/auth/logout\"",
+        "</form>",
+    );
+    assert!(sign_out.contains("Sign out"), "{sign_out}");
+    assert_eq!(
+        html.matches("action=\"/auth/logout\"").count(),
+        1,
+        "signing out is offered in the menu only"
+    );
+
+    // The same menu in French.
+    let french = Browser {
+        server: &server,
+        cookie: format!("{}; nanobom_locale=fr", alice.cookie),
+    };
+    let html = french.page("/organizations").await;
+    let account = menu(element(&html, "<header", "</header>"), "Compte");
+    let buttons = language_buttons(account);
+    assert_eq!(buttons.len(), 2, "{account}");
+    for button in buttons {
+        assert_eq!(
+            button.contains("aria-current=\"true\""),
+            button.contains("value=\"fr\""),
+            "{button}"
+        );
+    }
+    assert!(account.contains("Se déconnecter"));
+    assert!(account.contains("Changer de thème"));
+}
+
+/// A user without a display name of their own is named once, and a user who is not an instance
+/// administrator gets no link to the administration.
+#[tokio::test]
+async fn the_user_menu_names_the_user_once_without_a_display_name() {
+    let server = server(&[]).await;
+    local_user(&server.database, "bob", PASSWORD).await;
+    let bob = Browser::sign_in(&server, "bob").await;
+    let html = bob.page("/organizations").await;
+    let account = menu(element(&html, "<header", "</header>"), "Account");
+    let summary = element(account, "<summary", "</summary>");
+    assert!(summary.contains(">B<"), "{summary}");
+    assert_eq!(account.matches("bob").count(), 1, "{account}");
+    assert!(!account.contains("/administration"));
 }
 
 /// The stylesheet loads its fonts from the site root, where the build copies `public/`: the
