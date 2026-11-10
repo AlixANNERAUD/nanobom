@@ -2315,6 +2315,223 @@ async fn long_names_stay_on_one_line() {
     );
 }
 
+/// The table of a page whose caption is `caption`.
+fn table<'a>(html: &'a str, caption: &str) -> &'a str {
+    let caption = format!(">{caption}</caption>");
+    html.split("<table")
+        .skip(1)
+        .map(|table| table.split("</table>").next().unwrap_or(table))
+        .find(|table| table.contains(&caption))
+        .unwrap_or_else(|| panic!("no table captioned {caption}"))
+}
+
+/// The severity bar of a row of the projects table.
+fn row_bar(row: &str) -> &str {
+    element(row, "<div aria-hidden=\"true\"", "</td>")
+}
+
+#[tokio::test]
+async fn the_organization_page_draws_each_project_and_lists_runs() {
+    let server = server(&[]).await;
+    server.source.publish(
+        json!({
+            "id": "GHSA-35jh-r3h4-6jhm",
+            "modified": "2024-01-01T00:00:00Z",
+            "aliases": ["CVE-2021-23337"],
+            "summary": "Command Injection in lodash",
+            "database_specific": {"severity": "HIGH"}
+        }),
+        &["pkg:npm/lodash@4.17.20"],
+    );
+    server.source.publish(
+        json!({
+            "id": "GHSA-xvch-5gv4-984h",
+            "modified": "2024-01-01T00:00:00Z",
+            "summary": "Prototype Pollution in minimist",
+            "database_specific": {"severity": "CRITICAL"}
+        }),
+        &["pkg:npm/minimist@1.2.5"],
+    );
+    // An advisory that gives no severity.
+    server.source.publish(
+        json!({
+            "id": "OSV-2024-1",
+            "modified": "2024-01-01T00:00:00Z",
+            "summary": "Heap overflow in left-pad"
+        }),
+        &["pkg:npm/left-pad@1.0.0"],
+    );
+    let owner = local_user(&server.database, "alice", PASSWORD).await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let secret = tokens::create(&server.database, &owner, organization.id, None, "CI")
+        .await
+        .unwrap()
+        .secret;
+    // One run per upload, in this order.
+    for (project, document) in [
+        ("web", sbom_document("cyclonedx-npm.json")),
+        ("quiet", sbom_document("cyclonedx-py.json")),
+        (
+            "unscored",
+            single_component_sbom("pkg:npm/left-pad@1.0.0").into_bytes(),
+        ),
+    ] {
+        let response = server
+            .send(
+                Request::put(format!("/api/organizations/acme/projects/{project}/sbom"))
+                    .header(header::AUTHORIZATION, format!("Bearer {secret}"))
+                    .body(Body::from(document))
+                    .unwrap(),
+            )
+            .await;
+        assert!(response.status().is_success(), "{}", response.status());
+        server.runner.wait_until_idle().await;
+    }
+    nanobom_entity::exploitation::ActiveModel {
+        cve_id: Set("CVE-2021-23337".to_owned()),
+        known_exploited: Set(true),
+        kev_ransomware: Set(false),
+        ..Default::default()
+    }
+    .insert(&server.database)
+    .await
+    .unwrap();
+    // A project that never received an SBOM, with a name far longer than its column.
+    let long_name = "Payments reconciliation service ".repeat(6);
+    let long_name = long_name.trim();
+    projects::create(&server.database, &owner, organization.id, "long", long_name)
+        .await
+        .unwrap();
+    let alice = Browser::sign_in(&server, "alice").await;
+    let page = "/organizations/acme";
+
+    // "Check now" is a plain form; here the run it starts fails.
+    let html = alice.page(page).await;
+    assert!(html.contains("action=\"/api/trigger_run\""), "{html}");
+    server.source.set_failing(true);
+    let response = alice.submit(page, "trigger_run", "organization=acme").await;
+    assert_eq!(response.status(), StatusCode::FOUND);
+    server.runner.wait_until_idle().await;
+    server.source.set_failing(false);
+
+    let html = alice.page(page).await;
+    let projects = table(&html, "Projects with their open findings by severity");
+    // Columns have fixed widths, so a long name is cut instead of widening the table, and the
+    // table scrolls inside its frame when the page is narrower than its columns.
+    let table_tag = projects.split('>').next().unwrap();
+    assert!(table_tag.contains("table-fixed"), "{table_tag}");
+    let frame = html[..html.find("<table").unwrap()]
+        .rsplit("<div")
+        .next()
+        .unwrap();
+    assert!(frame.contains("overflow-x-auto"), "{frame}");
+    // Positioned, so that text hidden from sight stays inside its scrolling.
+    assert!(frame.contains("relative"), "{frame}");
+    // Every row has a cell under each head, the unnamed one of the bar included.
+    let head = element(projects, "<thead", "</thead>");
+    assert_eq!(
+        head.matches("<th ").count() + head.matches("<td").count(),
+        10
+    );
+
+    // Each project has a bar: one segment per severity that has findings, as wide as its count.
+    let web = table_row(projects, "href=\"/organizations/acme/projects/web\"");
+    let bar = row_bar(web);
+    assert_eq!(bar.matches("flex-grow:").count(), 2, "{bar}");
+    assert_eq!(bar.matches("style=\"flex-grow:1;\"").count(), 2, "{bar}");
+    assert!(bar.contains("bg-severity-critical") && bar.contains("bg-severity-high"));
+    assert!(!bar.contains("bg-severity-medium"), "{bar}");
+    // The project with the most findings fills its track; one row header and nine cells.
+    assert!(web.contains("style=\"width:100%;\""), "{web}");
+    assert_eq!(web.matches("<th ").count() + cells(web).len(), 10, "{web}");
+    // The numbers stay next to it: the severities, known exploited and ignored findings, and
+    // the day of the last upload, whose tooltip keeps the time.
+    assert!(text(web).contains("web 1 1 0 0 0 1 0 "), "{web}");
+    assert!(!text(web).ends_with("UTC"), "{web}");
+    let last_upload = cells(web).pop().expect("the last cell");
+    assert!(attribute(last_upload, "title").ends_with(" UTC"));
+    // No finding: an empty track, not a blank.
+    let quiet = table_row(projects, "href=\"/organizations/acme/projects/quiet\"");
+    let bar = row_bar(quiet);
+    assert!(!bar.contains("flex-grow"), "{bar}");
+    assert!(!bar.contains("bg-severity"), "{bar}");
+    assert_eq!(bar.matches("bg-muted").count(), 1, "{bar}");
+    assert!(text(quiet).contains("quiet 0 0 0 0 0 0 0 "), "{quiet}");
+    // Only findings of unknown severity: one neutral segment.
+    let unscored = table_row(projects, "href=\"/organizations/acme/projects/unscored\"");
+    let bar = row_bar(unscored);
+    assert_eq!(bar.matches("flex-grow:").count(), 1, "{bar}");
+    assert!(bar.contains("bg-muted-foreground/40"), "{bar}");
+    assert!(!bar.contains("bg-severity"), "{bar}");
+    // One finding against the two of the largest project: half the track.
+    assert!(unscored.contains("style=\"width:50%;\""), "{unscored}");
+    assert!(!quiet.contains("width:"), "{quiet}");
+    // The long name stays on one line and keeps its full text.
+    let long = table_row(projects, "href=\"/organizations/acme/projects/long\"");
+    let link = element(long, "<a", ">");
+    assert!(attribute(link, "class").contains("truncate"), "{link}");
+    assert_eq!(attribute(link, "title"), long_name);
+    assert!(long.contains(&format!(">{long_name}<")), "{long}");
+    assert!(!long.contains("<br"), "{long}");
+    assert!(!row_bar(long).contains("flex-grow"), "{long}");
+    assert!(text(long).ends_with(" never"), "{long}");
+    // The short column head still says what it counts.
+    assert!(projects.contains(">Known exploited<"), "{projects}");
+
+    // The runs are a table, newest first.
+    let runs = table(&html, "Recent runs");
+    for head in ["Status", "Started", "Trigger", "Scope", "New", "Fixed"] {
+        assert!(runs.contains(&format!(">{head}</th>")), "{head}: {runs}");
+    }
+    assert_eq!(runs.matches("<th scope=\"row\"").count(), 4, "{runs}");
+    let runs: Vec<&str> = runs.split("<tbody").skip(1).collect();
+    assert_eq!(runs.len(), 4, "one group of rows per run");
+    // A failed run counts nothing and says why in a row of its own.
+    let failed = text(runs[0]);
+    assert!(runs[0].contains(">Failed<"), "{failed}");
+    assert!(failed.contains(" UTC manual organization "), "{failed}");
+    assert_eq!(runs[0].matches("<tr").count(), 2, "{failed}");
+    let error = element(runs[0], "<td colspan=\"6\"", "</td>");
+    assert!(error.contains("the source is unreachable"), "{error}");
+    for (run, counts) in runs[1..].iter().zip(["1 0", "0 0", "2 0"]) {
+        let shown = text(run);
+        assert!(run.contains(">Succeeded<"), "{shown}");
+        assert!(
+            shown.ends_with(&format!(" UTC upload project {counts}")),
+            "{shown}"
+        );
+        assert_eq!(run.matches("<tr").count(), 1, "{shown}");
+    }
+
+    // In French.
+    let french = Browser {
+        server: &server,
+        cookie: format!("{}; nanobom_locale=fr", alice.cookie),
+    };
+    let html = french.page(page).await;
+    let projects = table(
+        &html,
+        "Projets et leurs vulnérabilités ouvertes par gravité",
+    );
+    assert!(projects.contains(">Exploitées connues<"), "{projects}");
+    let runs = table(&html, "Analyses récentes");
+    for head in [
+        "Statut",
+        "Début",
+        "Déclencheur",
+        "Périmètre",
+        "Nouvelles",
+        "Corrigées",
+    ] {
+        assert!(runs.contains(&format!(">{head}</th>")), "{head}: {runs}");
+    }
+    assert!(runs.contains(">Échouée<") && runs.contains(">Réussie<"));
+    assert!(text(runs).contains(" UTC manuelle organisation "), "{runs}");
+    assert!(text(runs).ends_with(" UTC envoi projet 2 0"), "{runs}");
+}
+
 /// Advisory text is written by strangers and reaches the finding page as HTML: its formatting is
 /// rendered, and whatever could run or load something is shown as text or loses its target.
 #[tokio::test]

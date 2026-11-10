@@ -5,7 +5,8 @@ use leptos_router::hooks::{use_params_map, use_query_map};
 
 use crate::{
     components::{
-        Empty, Heading, Loaded, Page, PageTitle, SeverityBadge, action, format_time, ui::*,
+        Empty, Heading, Loaded, Page, PageTitle, SeverityBadge, action, format_date, format_time,
+        ui::*,
     },
     functions::{
         CreateOrganization, TriggerRun, load_organization, load_organizations, load_sign_in_options,
@@ -185,6 +186,15 @@ pub fn OrganizationsPage() -> impl IntoView {
     }
 }
 
+/// How much of its track a project's bar fills, as a percentage: its open findings against
+/// those of the project that has the most, so the bars of a page compare and the worst project
+/// stands out. Rounded up, so a project with any finding shows a bar.
+fn bar_share(total: u64, largest: u64) -> u64 {
+    (total.saturating_mul(100))
+        .div_ceil(largest.max(1))
+        .clamp(u64::from(total > 0), 100)
+}
+
 pub(crate) fn severity_cells(open: SeverityCounts) -> impl IntoView {
     Severity::DESCENDING
         .into_iter()
@@ -221,6 +231,25 @@ fn scope_label(scope: &str) -> String {
     }
 }
 
+/// A count of the runs table; the cell is empty when the run has nothing to count.
+fn run_count(count: Option<i64>) -> impl IntoView {
+    view! {
+        <td class=format!("{TABLE_CELL} text-right tabular-nums")>
+            {count
+                .map(|count| {
+                    if count == 0 {
+                        view! { <span class="text-muted-foreground">"0"</span> }.into_any()
+                    } else {
+                        view! { <span class="font-semibold">{count}</span> }.into_any()
+                    }
+                })}
+        </td>
+    }
+}
+
+/// The runs of an organization as a table, newest first. Each run is a group of rows
+/// (`<tbody>`): its own, and under it the error message of a failed run across the whole width,
+/// so the message has room to wrap and the line between runs stays under the pair.
 #[component]
 fn RunHistory(runs: Vec<Run>) -> impl IntoView {
     if runs.is_empty() {
@@ -229,45 +258,78 @@ fn RunHistory(runs: Vec<Run>) -> impl IntoView {
         }
         .into_any();
     }
+    let groups = runs
+        .into_iter()
+        .map(|run| {
+            let (variant, status) = match run.status.as_str() {
+                "succeeded" => (BadgeVariant::Outline, t!("organization.run_succeeded")),
+                "failed" => (BadgeVariant::Destructive, t!("organization.run_failed")),
+                _ => (BadgeVariant::Muted, t!("organization.run_running")),
+            };
+            // Only a run that succeeded has counts to show: a failed run changed nothing, and a
+            // running one has not counted yet.
+            let (new, fixed) = if run.status == "succeeded" {
+                (run.new_findings, run.fixed_findings)
+            } else {
+                (None, None)
+            };
+            let error = run.error.map(|error| {
+                view! {
+                    <tr>
+                        <td colspan="6" class="text-destructive px-3 pb-2 wrap-anywhere">
+                            {error}
+                        </td>
+                    </tr>
+                }
+            });
+            view! {
+                <tbody class=TABLE_ROW>
+                    <tr>
+                        <td class=TABLE_CELL>
+                            <Badge variant>{status}</Badge>
+                        </td>
+                        <th
+                            scope="row"
+                            class=format!("{TABLE_CELL} text-left font-normal whitespace-nowrap tabular-nums")
+                        >
+                            {format_time(run.started_at)}
+                        </th>
+                        <td class=TABLE_CELL>{trigger_label(&run.trigger)}</td>
+                        <td class=TABLE_CELL>{scope_label(&run.scope)}</td>
+                        {run_count(new)}
+                        {run_count(fixed)}
+                    </tr>
+                    {error}
+                </tbody>
+            }
+        })
+        .collect_view();
     view! {
-        <ul class="grid gap-2 text-sm">
-            {runs
-                .into_iter()
-                .map(|run| {
-                    let failed = run.status == "failed";
-                    view! {
-                        <li class="flex flex-wrap items-baseline gap-x-2">
-                            <span class=if failed { "text-destructive font-medium" } else { "font-medium" }>
-                                {match run.status.as_str() {
-                                    "succeeded" => t!("organization.run_succeeded"),
-                                    "failed" => t!("organization.run_failed"),
-                                    _ => t!("organization.run_running"),
-                                }}
-                            </span>
-                            <span class="text-muted-foreground">
-                                {format_time(run.started_at)} " · " {trigger_label(&run.trigger)} " · "
-                                {scope_label(&run.scope)}
-                            </span>
-                            {match (run.new_findings, run.fixed_findings) {
-                                (Some(new), Some(fixed)) if !failed && run.status == "succeeded" => {
-                                    Some(view! {
-                                        <span>
-                                            {tp!("organization.run_new", new)} ", "
-                                            {tp!("organization.run_fixed", fixed)}
-                                        </span>
-                                    })
-                                }
-                                _ => None,
-                            }}
-                            {run.error.map(|error| view! { <span class="text-destructive">{error}</span> })}
-                        </li>
-                    }
-                })
-                .collect_view()}
-        </ul>
+        // A fixed layout, like the projects table: every column but the scope has a width that
+        // fits its longest label in English and in French, and the scope takes what is left.
+        // The minimum width keeps the scope readable on a narrow page, where the table scrolls
+        // inside its frame.
+        <Table caption=t!("organization.runs_title") class="min-w-[55rem] table-fixed">
+            <thead>
+                <tr class=TABLE_HEAD_ROW>
+                    <th scope="col" class=format!("{TABLE_HEAD} w-32")>{t!("organization.run_status")}</th>
+                    <th scope="col" class=format!("{TABLE_HEAD} w-[12.5rem]")>{t!("organization.run_started")}</th>
+                    <th scope="col" class=format!("{TABLE_HEAD} w-32")>{t!("organization.run_trigger")}</th>
+                    <th scope="col" class=TABLE_HEAD>{t!("organization.run_scope")}</th>
+                    <th scope="col" class=format!("{TABLE_HEAD} w-28 text-right")>{t!("organization.run_new")}</th>
+                    <th scope="col" class=format!("{TABLE_HEAD} w-28 text-right")>{t!("organization.run_fixed")}</th>
+                </tr>
+            </thead>
+            {groups}
+        </Table>
     }
     .into_any()
 }
+
+/// The head of a severity column of the projects table. Its padding is narrower than
+/// `TABLE_HEAD`'s, so the badge fits a column hardly wider than a count needs; the count below
+/// then ends where the text of the badge does.
+const SEVERITY_HEAD: &str = "h-9 w-[5.5rem] px-1 text-right align-middle whitespace-nowrap";
 
 #[component]
 pub fn OrganizationPage() -> impl IntoView {
@@ -302,6 +364,12 @@ pub fn OrganizationPage() -> impl IntoView {
                             }
                         }
                     });
+                    let largest = page
+                        .projects
+                        .iter()
+                        .map(|project| project.open.total())
+                        .max()
+                        .unwrap_or_default();
                     let rows = page
                         .projects
                         .iter()
@@ -311,9 +379,14 @@ pub fn OrganizationPage() -> impl IntoView {
                             let ignored = project.ignored;
                             let known_exploited = project.known_exploited;
                             let name = project.name.clone();
+                            let counts = project.open;
+                            // The day is enough to tell a project that stopped uploading. The
+                            // tooltip gives the time to those with a pointer, the project page
+                            // to everyone.
                             let last_upload = project
                                 .last_upload_at
-                                .map_or_else(|| t!("organization.never").to_owned(), format_time);
+                                .map_or_else(|| t!("organization.never").to_owned(), format_date);
+                            let last_upload_time = project.last_upload_at.map(format_time);
                             let stale_badge = project.stale.then(|| {
                                 let title = match project.last_upload_at {
                                     Some(time) => {
@@ -344,15 +417,41 @@ pub fn OrganizationPage() -> impl IntoView {
                             } else {
                                 None
                             };
+                            // The bar fills its track as far as the project's findings go
+                            // against the largest project's. Its segments keep their minimum
+                            // width (`min-w-fit`), so a small project still shows each severity.
+                            let bar = if counts.total() == 0 {
+                                view! { <SeverityBar counts /> }.into_any()
+                            } else {
+                                let share = bar_share(counts.total(), largest);
+                                view! {
+                                    <div class="bg-muted-foreground/20 overflow-hidden rounded-full">
+                                        <div class="min-w-fit" style=format!("width:{share}%")>
+                                            <SeverityBar counts />
+                                        </div>
+                                    </div>
+                                }
+                                    .into_any()
+                            };
                             view! {
                                 <tr class=TABLE_ROW>
                                     <th scope="row" class=format!("{TABLE_CELL} text-left font-medium")>
-                                        <a class="underline-offset-4 hover:underline" href=href>
-                                            {name}
-                                        </a>
-                                        {stale_badge}
-                                        {license_badge}
+                                        // The name is cut when it does not fit, and its tooltip
+                                        // keeps all of it. Badges that do not fit next to it go
+                                        // under it: they never take the name's room.
+                                        <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                                            <a
+                                                class="max-w-full min-w-0 truncate underline-offset-4 hover:underline"
+                                                href=href
+                                                title=name.clone()
+                                            >
+                                                {name.clone()}
+                                            </a>
+                                            {stale_badge}
+                                            {license_badge}
+                                        </div>
                                     </th>
+                                    <td class=TABLE_CELL>{bar}</td>
                                     {cells}
                                     <td class=format!("{TABLE_CELL} text-right tabular-nums")>
                                         {known_exploited}
@@ -360,7 +459,10 @@ pub fn OrganizationPage() -> impl IntoView {
                                     <td class=format!("{TABLE_CELL} text-right tabular-nums text-muted-foreground")>
                                         {ignored}
                                     </td>
-                                    <td class=format!("{TABLE_CELL} whitespace-nowrap text-muted-foreground")>
+                                    <td
+                                        class=format!("{TABLE_CELL} whitespace-nowrap text-muted-foreground")
+                                        title=last_upload_time
+                                    >
                                         {last_upload}
                                     </td>
                                 </tr>
@@ -379,21 +481,40 @@ pub fn OrganizationPage() -> impl IntoView {
                             .into_iter()
                             .map(|severity| {
                                 view! {
-                                    <th scope="col" class=format!("{TABLE_HEAD} text-right")>
+                                    <th scope="col" class=SEVERITY_HEAD>
                                         <SeverityBadge severity />
                                     </th>
                                 }
                             })
                             .collect_view();
                         view! {
-                            <Table caption=t!("organization.projects_caption")>
+                            // A fixed layout: every column but the project has a width that fits
+                            // its longest label in English and in French, and the project takes
+                            // what is left, so the table fits a 1280 px page without scrolling
+                            // and a long name is cut instead of widening it. The minimum width
+                            // leaves the project as much room as the bar: on a phone the table
+                            // scrolls inside its frame, with the name and the bar in view first.
+                            <Table caption=t!("organization.projects_caption") class="min-w-[65.5rem] table-fixed">
                                 <thead>
                                     <tr class=TABLE_HEAD_ROW>
                                         <th scope="col" class=TABLE_HEAD>{t!("organization.project")}</th>
+                                        // The bar is decorative and has no heading: the counts
+                                        // after it say the same to everyone.
+                                        <td class="w-40"></td>
                                         {headers}
-                                        <th scope="col" class=format!("{TABLE_HEAD} text-right")>{t!("organization.known_exploited")}</th>
-                                        <th scope="col" class=format!("{TABLE_HEAD} text-right")>{t!("organization.ignored")}</th>
-                                        <th scope="col" class=TABLE_HEAD>{t!("organization.last_upload")}</th>
+                                        // Short, as on the project page, since the column holds
+                                        // a count: the full words are what is read aloud and
+                                        // what the tooltip says.
+                                        <th
+                                            scope="col"
+                                            class=format!("{TABLE_HEAD} w-16 text-right")
+                                            title=t!("organization.known_exploited")
+                                        >
+                                            <span class="sr-only">{t!("organization.known_exploited")}</span>
+                                            <span aria-hidden="true">{t!("project.known_exploited_tag")}</span>
+                                        </th>
+                                        <th scope="col" class=format!("{TABLE_HEAD} w-24 text-right")>{t!("organization.ignored")}</th>
+                                        <th scope="col" class=format!("{TABLE_HEAD} w-32")>{t!("organization.last_upload")}</th>
                                     </tr>
                                 </thead>
                                 <tbody>{rows}</tbody>
@@ -422,5 +543,24 @@ pub fn OrganizationPage() -> impl IntoView {
                 }}
             />
         </Page>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bar_share;
+
+    #[test]
+    fn a_bar_fills_its_track_as_its_project_compares_to_the_largest() {
+        assert_eq!(bar_share(142, 142), 100);
+        assert_eq!(bar_share(71, 142), 50);
+        // Rounded up: one finding among thousands still shows.
+        assert_eq!(bar_share(1, 3), 34);
+        assert_eq!(bar_share(1, 5000), 1);
+        assert_eq!(bar_share(0, 142), 0);
+        // Nothing to compare with, and counts that cannot be: never past the track.
+        assert_eq!(bar_share(0, 0), 0);
+        assert_eq!(bar_share(5, 0), 100);
+        assert_eq!(bar_share(u64::MAX, 1), 100);
     }
 }

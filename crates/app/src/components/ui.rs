@@ -179,7 +179,10 @@ pub fn Table(
     children: Children,
 ) -> impl IntoView {
     view! {
-        <div class="w-full overflow-x-auto rounded-md border">
+        // `relative`: text hidden from sight (`sr-only`) is positioned, and without a positioned
+        // frame it would sit outside the frame's scrolling, at its place in a table wider than
+        // the page, and make the whole page scroll sideways.
+        <div class="relative w-full overflow-x-auto rounded-md border">
             <table class=format!("w-full text-sm caption-bottom {class}")>
                 <caption class="sr-only">{caption}</caption>
                 {children()}

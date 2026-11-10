@@ -116,14 +116,12 @@
     "run_succeeded": "Succeeded",
     "run_failed": "Failed",
     "run_running": "Running",
-    "run_new": {
-      "one": "{count} new",
-      "other": "{count} new"
-    },
-    "run_fixed": {
-      "one": "{count} fixed",
-      "other": "{count} fixed"
-    },
+    "run_status": "Status",
+    "run_started": "Started",
+    "run_trigger": "Trigger",
+    "run_scope": "Scope",
+    "run_new": "New",
+    "run_fixed": "Fixed",
     "trigger_scheduled": "scheduled",
     "trigger_manual": "manual",
     "trigger_upload": "upload",
