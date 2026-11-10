@@ -42,6 +42,8 @@ embedded_i18n::i18n!(
 pub mod components;
 pub mod functions;
 pub mod i18n;
+#[cfg(feature = "ssr")]
+pub mod markdown;
 pub mod model;
 pub mod pages;
 #[cfg(feature = "ssr")]

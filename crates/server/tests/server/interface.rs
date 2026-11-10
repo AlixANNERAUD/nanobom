@@ -2314,3 +2314,199 @@ async fn long_names_stay_on_one_line() {
         "{html}"
     );
 }
+
+/// Advisory text is written by strangers and reaches the finding page as HTML: its formatting is
+/// rendered, and whatever could run or load something is shown as text or loses its target.
+#[tokio::test]
+async fn advisory_text_is_formatted_and_harmless() {
+    let server = server(&[]).await;
+    // An address without any place to break it, as advisories quote them.
+    let long_address = format!("https://example.org/{}", "a".repeat(200));
+    let details = [
+        "### Impact",
+        // A line starting with `<script>` is an HTML block up to its end: all of it is text.
+        "<script>alert(1)</script> [x](javascript:alert(1)) **bold**",
+        "",
+        "Inline <img src=x onerror=alert(2)> then [y](JaVaScRiPt:alert(3)), \
+         [z](&#106;avascript:alert(4)), [w]( data:text/html,hi) and **strong** text.",
+        "",
+        "![logo](https://example.org/logo.png) and [the advisory](https://example.org/a?b=1&c=2).",
+        "",
+        &long_address,
+        "",
+        "```html",
+        "<b>code</b>",
+        "```",
+    ]
+    .join("\n");
+    server.source.publish(
+        json!({
+            "id": "GHSA-35jh-r3h4-6jhm",
+            "modified": "2024-01-01T00:00:00Z",
+            "aliases": ["CVE-2021-23337"],
+            "summary": "<b>Command</b> *Injection* in lodash",
+            "details": details,
+            "references": [
+                {"type": "WEB", "url": "https://example.org/advisory"},
+                {"type": "WEB", "url": "javascript:alert(5)"},
+                {"type": "WEB", "url": " JavaScript:alert(6)"},
+                {"type": "WEB", "url": "data:text/html,<script>alert(7)</script>"}
+            ],
+            "affected": [{"package": {"ecosystem": "npm", "name": "lodash"},
+                "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "4.17.21"}]}]}]
+        }),
+        &["pkg:npm/lodash@4.17.20"],
+    );
+    // An advisory without text.
+    server.source.publish(
+        json!({
+            "id": "GHSA-xvch-5gv4-984h",
+            "modified": "2024-01-01T00:00:00Z",
+            "summary": "Prototype Pollution in minimist",
+            "details": " \n"
+        }),
+        &["pkg:npm/minimist@1.2.5"],
+    );
+    let owner = local_user(&server.database, "alice", PASSWORD).await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let secret = tokens::create(&server.database, &owner, organization.id, None, "CI")
+        .await
+        .unwrap()
+        .secret;
+    server
+        .send(
+            Request::put("/api/organizations/acme/projects/web/sbom")
+                .header(header::AUTHORIZATION, format!("Bearer {secret}"))
+                .body(Body::from(sbom_document("cyclonedx-npm.json")))
+                .unwrap(),
+        )
+        .await;
+    server.runner.wait_until_idle().await;
+    let project = projects::find(&server.database, &owner, organization.id, "web")
+        .await
+        .unwrap();
+    let listed = findings::list(&server.database, &owner, project.id, &Filter::default())
+        .await
+        .unwrap();
+    let finding = |vulnerability: &str| {
+        let finding = listed
+            .iter()
+            .find(|finding| finding.vulnerability_id == vulnerability)
+            .unwrap_or_else(|| panic!("no finding for {vulnerability}"));
+        format!("/findings/{}", finding.id)
+    };
+    let alice = Browser::sign_in(&server, "alice").await;
+
+    let html = alice.page(&finding("GHSA-35jh-r3h4-6jhm")).await;
+    // The text ends at the first `</div>`: the renderer writes no `div`.
+    let prose = element(&html, "<div class=\"prose-advisory\"", "</div>");
+    assert!(prose.contains("<h5>Impact</h5>"), "{prose}");
+    assert!(prose.contains("<strong>strong</strong>"), "{prose}");
+    assert!(
+        prose.contains("&lt;script&gt;alert(1)&lt;/script&gt; [x](javascript:alert(1)) **bold**"),
+        "{prose}"
+    );
+    assert!(
+        prose.contains("&lt;img src=x onerror=alert(2)&gt; then y, z, w and"),
+        "{prose}"
+    );
+    assert!(
+        prose.contains(
+            "<a href=\"https://example.org/logo.png\" rel=\"noopener noreferrer nofollow\">logo</a>"
+        ),
+        "{prose}"
+    );
+    assert!(
+        prose.contains(
+            "<a href=\"https://example.org/a?b=1&amp;c=2\" rel=\"noopener noreferrer nofollow\">the advisory</a>"
+        ),
+        "{prose}"
+    );
+    assert!(
+        prose.contains("<pre><code>&lt;b&gt;code&lt;/b&gt;\n</code></pre>"),
+        "{prose}"
+    );
+    // Nothing of the page runs or loads what the advisory names.
+    let lowercase = html.to_lowercase();
+    assert!(!lowercase.contains("<script>alert"), "{html}");
+    assert!(!lowercase.contains("<img"), "{html}");
+    assert!(!lowercase.contains("onerror=alert(2)>"), "{html}");
+    for target in lowercase
+        .split("href=\"")
+        .skip(1)
+        .map(|rest| rest.split('"').next().unwrap_or(rest))
+    {
+        // Pages of nanobom, the skip link, and web addresses.
+        // `//host` is another site, not a page of this one.
+        assert!(
+            (target.starts_with('/') && !target.starts_with("//"))
+                || target == "#content"
+                || target.starts_with("https://"),
+            "a link to {target}"
+        );
+    }
+    for target in lowercase.split("src=\"").skip(1) {
+        assert!(
+            target.starts_with('/') && !target.starts_with("//"),
+            "something loaded from {target}"
+        );
+    }
+
+    // The summary under the title is plain text.
+    assert!(
+        html.contains("&lt;b&gt;Command&lt;/b&gt; *Injection* in lodash"),
+        "{html}"
+    );
+    // A reference is a link only when it is a web address; the others are still listed.
+    assert!(
+        html.contains("href=\"https://example.org/advisory\" rel=\"noopener noreferrer nofollow\""),
+        "{html}"
+    );
+    let references = text(&html[html.find("References").expect("the references")..]);
+    assert!(
+        references.contains("https://example.org/advisory web javascript:alert(5) web"),
+        "{references}"
+    );
+    assert!(
+        references.contains("JavaScript:alert(6) web"),
+        "{references}"
+    );
+
+    // The long address wraps and the code block scrolls inside the text, which cannot widen its
+    // column: the page does not scroll sideways.
+    assert!(prose.contains(&format!(">{long_address}<")), "{prose}");
+    let stylesheet = include_str!("../../../../style/main.css");
+    let rule = |selector: &str| element(stylesheet, &format!("  {selector} {{"), "}");
+    assert!(rule(".prose-advisory").contains("wrap-anywhere"));
+    assert!(rule(".prose-advisory pre").contains("overflow-x-auto"));
+    assert!(rule(".prose-advisory table").contains("overflow-x-auto"));
+    let columns = &html[..html.find("prose-advisory").unwrap()];
+    let grids: Vec<&str> = columns.rsplit("<div class=\"grid ").take(2).collect();
+    assert!(
+        grids[0].starts_with("grid-cols-1 content-start"),
+        "{}",
+        grids[0]
+    );
+    assert!(
+        grids[1].starts_with("grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]"),
+        "{}",
+        grids[1]
+    );
+    // The component card is a definition list whose values wrap in the room the labels leave.
+    let component = element(
+        &html,
+        "<dl class=\"grid grid-cols-[auto_minmax(0,1fr)]",
+        "</dl>",
+    );
+    assert!(
+        component.contains("break-all\">pkg:npm/lodash@4.17.20</dd>"),
+        "{component}"
+    );
+    assert!(component.contains(">4.17.20</dd>"), "{component}");
+
+    let html = alice.page(&finding("GHSA-xvch-5gv4-984h")).await;
+    assert!(!html.contains("prose-advisory"), "{html}");
+    assert!(html.contains("No description."));
+}
