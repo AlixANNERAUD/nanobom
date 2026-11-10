@@ -82,27 +82,22 @@ fn introduced_via(finding: &FindingRow) -> impl IntoView + use<> {
     view! { <span title=title>{shown}</span> }.into_any()
 }
 
-/// The optional columns of the findings table: each is shown only when a row has something to
-/// put in it, so a project that needs neither keeps the room for the vulnerability.
-#[derive(Clone, Copy)]
-struct Columns {
-    /// A row says which direct dependencies lead to its component.
-    via: bool,
-    /// A row is not open. Open rows leave the cell empty: the default filter shows open
-    /// findings, and repeating the word on every row would hide the ones that differ.
-    status: bool,
+/// Whether the findings table shows its "Introduced via" column: only when a row says which
+/// direct dependencies lead to its component, so a project without a dependency graph keeps the
+/// room for the vulnerability.
+fn shows_via(findings: &[FindingRow]) -> bool {
+    findings
+        .iter()
+        .any(|finding| !finding.introduced_via.is_empty())
 }
 
-impl Columns {
-    fn of(findings: &[FindingRow]) -> Self {
-        Self {
-            via: findings
-                .iter()
-                .any(|finding| !finding.introduced_via.is_empty()),
-            status: findings
-                .iter()
-                .any(|finding| finding.status != Status::Open),
-        }
+/// A component's name as its namespace and the rest, which starts with the separator:
+/// `org.apache.logging.log4j` and `/log4j-core`. A narrow cell cuts the namespace first, the
+/// part that tells the least.
+fn split_namespace(name: &str) -> (&str, &str) {
+    match name.rfind('/') {
+        Some(separator) => name.split_at(separator),
+        None => ("", name),
     }
 }
 
@@ -140,7 +135,7 @@ fn known_exploited_tag(finding: &FindingRow) -> Option<impl IntoView + use<>> {
 /// The rows of the findings table, one line each. The table has a fixed layout (see
 /// [`ProjectPage`]), so a cell never grows with its text: long names are cut with an ellipsis
 /// and keep their full text in a tooltip.
-fn finding_rows(findings: Vec<FindingRow>, columns: Columns) -> impl IntoView {
+fn finding_rows(findings: Vec<FindingRow>, shows_via: bool) -> impl IntoView {
     findings
         .into_iter()
         .map(|finding| {
@@ -151,16 +146,24 @@ fn finding_rows(findings: Vec<FindingRow>, columns: Columns) -> impl IntoView {
                 .epss_percentile
                 .map(percent)
                 .unwrap_or_default();
-            let via = columns.via.then(|| {
+            let via = shows_via.then(|| {
                 view! { <td class=format!("{TABLE_CELL} truncate")>{introduced_via(&finding)}</td> }
             });
-            let status = columns.status.then(|| {
-                view! {
-                    <td class=TABLE_CELL>
-                        {(finding.status != Status::Open).then(|| view! { <StatusBadge status=finding.status /> })}
-                    </td>
-                }
+            // Only a finding that is not open says its status, at the end of its vulnerability
+            // cell: the default filter lists open findings, and the word on every row, or a
+            // column that is empty on most, would hide the rows that differ.
+            let open = finding.status == Status::Open;
+            let status = (!open).then(|| view! { <StatusBadge status=finding.status /> });
+            let vulnerability = if open {
+                "grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2"
+            } else {
+                "grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2"
+            };
+            let (namespace, name) = split_namespace(&finding.component_name);
+            let namespace = (!namespace.is_empty()).then(|| {
+                view! { <span class="min-w-0 truncate">{namespace.to_owned()}</span> }
             });
+            let name = name.to_owned();
             let summary = finding
                 .summary
                 .clone()
@@ -195,32 +198,47 @@ fn finding_rows(findings: Vec<FindingRow>, columns: Columns) -> impl IntoView {
                         // The tag and the identifier take the room they need and the summary what
                         // is left, so the summary is cut first. The identifier is cut only when
                         // it does not fit the column by itself.
-                        <div class="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-x-2">
+                        <div class=vulnerability>
                             <span class="flex min-w-0 items-center gap-2">
                                 {exploited}
                                 <a
                                     href=href
+                                    title=finding.vulnerability_id.clone()
                                     class=format!("{MONO} min-w-0 truncate font-medium underline-offset-4 hover:underline")
                                 >
                                     {finding.vulnerability_id.clone()}
                                 </a>
                             </span>
                             {summary}
+                            {status}
                         </div>
                     </th>
-                    <td class=format!("{TABLE_CELL} truncate") title=component>
-                        <span class="font-medium">{finding.component_name.clone()}</span>
-                        {finding
-                            .component_version
-                            .clone()
-                            .map(|version| {
-                                view! { <span class=format!("{MONO} text-muted-foreground ml-1.5")>{version}</span> }
-                            })}
-                        <span class="text-muted-foreground ml-1.5 text-xs">{finding.ecosystem.clone()}</span>
+                    // Only the namespace shrinks, so it is cut first; the name is cut when it
+                    // does not fit by itself, the version past a fixed width. The tooltip keeps
+                    // all of it.
+                    <td class=TABLE_CELL title=component>
+                        <div class="flex min-w-0 items-baseline gap-1.5">
+                            <span class="flex min-w-0 font-medium">
+                                {namespace}
+                                <span class="max-w-full flex-none truncate">{name}</span>
+                            </span>
+                            {finding
+                                .component_version
+                                .clone()
+                                .map(|version| {
+                                    view! {
+                                        <span class=format!("{MONO} text-muted-foreground max-w-24 flex-none truncate")>
+                                            {version}
+                                        </span>
+                                    }
+                                })}
+                            <span class="text-muted-foreground shrink-0 text-xs whitespace-nowrap">
+                                {finding.ecosystem.clone()}
+                            </span>
+                        </div>
                     </td>
                     {via}
                     <td class=format!("{TABLE_CELL} text-right tabular-nums")>{epss}</td>
-                    {status}
                     <td class=format!("{TABLE_CELL} text-muted-foreground whitespace-nowrap")>
                         {format_date(finding.first_seen_at)}
                     </td>
@@ -625,8 +643,16 @@ pub fn ProjectPage() -> impl IntoView {
                         view! { <Alert variant=AlertVariant::Warning>{message}</Alert> }
                     });
                     let count = page.findings.len();
-                    let columns = Columns::of(&page.findings);
-                    let rows = finding_rows(page.findings.clone(), columns);
+                    let shows_via = shows_via(&page.findings);
+                    let rows = finding_rows(page.findings.clone(), shows_via);
+                    // The minimum width keeps room for the vulnerability on a narrow page,
+                    // where the table scrolls inside its frame instead of squeezing it to
+                    // nothing; the optional column needs its own share of it.
+                    let layout = if shows_via {
+                        "min-w-[66rem] table-fixed"
+                    } else {
+                        "min-w-[60rem] table-fixed"
+                    };
                     let table = if page.findings.is_empty() {
                         view! {
                             <Empty title=t!("project.no_match_title")>
@@ -637,22 +663,17 @@ pub fn ProjectPage() -> impl IntoView {
                     } else {
                         view! {
                             // A fixed layout: every column but the vulnerability has a width, the
-                            // vulnerability takes what is left, and no text can widen a column. The
-                            // minimum width keeps room for the vulnerability on a narrow page, where
-                            // the table scrolls inside its frame instead of squeezing it to nothing.
-                            <Table caption=tp!("project.findings_caption", count) class="min-w-[60rem] table-fixed">
+                            // vulnerability takes what is left, and no text can widen a column.
+                            <Table caption=tp!("project.findings_caption", count) class=layout>
                                 <thead>
                                     <tr class=TABLE_HEAD_ROW>
                                         <th scope="col" class=format!("{TABLE_HEAD} w-32")>{t!("project.severity")}</th>
                                         <th scope="col" class=TABLE_HEAD>{t!("project.vulnerability")}</th>
-                                        <th scope="col" class=format!("{TABLE_HEAD} w-56")>{t!("project.component")}</th>
-                                        {columns.via.then(|| view! {
-                                            <th scope="col" class=format!("{TABLE_HEAD} w-36")>{t!("project.via")}</th>
+                                        <th scope="col" class=format!("{TABLE_HEAD} w-64")>{t!("project.component")}</th>
+                                        {shows_via.then(|| view! {
+                                            <th scope="col" class=format!("{TABLE_HEAD} w-40")>{t!("project.via")}</th>
                                         })}
                                         <th scope="col" class=format!("{TABLE_HEAD} w-[4.5rem] text-right")>{t!("project.epss")}</th>
-                                        {columns.status.then(|| view! {
-                                            <th scope="col" class=format!("{TABLE_HEAD} w-28")>{t!("project.status")}</th>
-                                        })}
                                         <th scope="col" class=format!("{TABLE_HEAD} w-28")>{t!("project.since")}</th>
                                     </tr>
                                 </thead>
@@ -1677,18 +1698,27 @@ mod tests {
     }
 
     #[test]
-    fn optional_columns_follow_the_rows() {
-        let columns = Columns::of(&[]);
-        assert!(!columns.via && !columns.status);
-        let columns = Columns::of(&[row(Status::Open, Vec::new())]);
-        assert!(!columns.via && !columns.status);
-        let columns = Columns::of(&[
+    fn the_via_column_follows_the_rows() {
+        assert!(!shows_via(&[]));
+        assert!(!shows_via(&[row(Status::Open, Vec::new())]));
+        assert!(shows_via(&[
             row(Status::Open, Vec::new()),
             row(Status::Ignored, vec![component("express", "4.0.0")]),
-        ]);
-        assert!(columns.via && columns.status);
-        let columns = Columns::of(&[row(Status::Fixed, Vec::new())]);
-        assert!(!columns.via && columns.status);
+        ]));
+    }
+
+    #[test]
+    fn a_name_gives_its_namespace_apart() {
+        assert_eq!(
+            split_namespace("org.apache.logging.log4j/log4j-core"),
+            ("org.apache.logging.log4j", "/log4j-core")
+        );
+        assert_eq!(
+            split_namespace("github.com/gin-gonic/gin"),
+            ("github.com/gin-gonic", "/gin")
+        );
+        assert_eq!(split_namespace("@types/node"), ("@types", "/node"));
+        assert_eq!(split_namespace("lodash"), ("", "lodash"));
     }
 
     #[test]

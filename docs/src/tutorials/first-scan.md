@@ -149,8 +149,8 @@ decision on the finding's page, under **Triage**:
 3. Select **Ignore finding**.
 
 The page says **Finding ignored.**, and **History** gains an **Ignored** entry with your name
-and the reason. Back on the project page, the summary counts one open finding less, and a
-**Status** column marks the finding as **Ignored**. The default filter, **Open and ignored**,
+and the reason. Back on the project page, the summary counts one open finding less, and the
+finding is marked **Ignored** next to its name. The default filter, **Open and ignored**,
 still lists it; set **Status** to **Open** and select **Filter** to hide it.
 
 Upload the same SBOM again:

@@ -35,7 +35,7 @@ pub fn button_class(variant: ButtonVariant, size: ButtonSize) -> String {
             "bg-primary text-primary-foreground shadow-xs hover:bg-primary/90"
         }
         ButtonVariant::Destructive => {
-            "bg-destructive text-white shadow-xs hover:bg-destructive/90 focus-visible:ring-destructive/20"
+            "bg-destructive text-destructive-foreground shadow-xs hover:bg-destructive/90 focus-visible:ring-destructive/20"
         }
         ButtonVariant::Outline => {
             "border border-input bg-background shadow-xs hover:bg-accent hover:text-accent-foreground"
@@ -212,7 +212,9 @@ pub fn Badge(
     let variant = match variant {
         BadgeVariant::Secondary => "border-transparent bg-secondary text-secondary-foreground",
         BadgeVariant::Outline => "text-foreground",
-        BadgeVariant::Destructive => "border-transparent bg-destructive text-white",
+        BadgeVariant::Destructive => {
+            "border-transparent bg-destructive text-destructive-foreground"
+        }
         BadgeVariant::Muted => "border-transparent bg-muted text-muted-foreground",
     };
     view! {
@@ -285,7 +287,7 @@ fn segments(counts: SeverityCounts) -> Vec<(Severity, u64)> {
 pub fn SeverityBar(counts: SeverityCounts, #[prop(optional, into)] class: String) -> impl IntoView {
     let segments = segments(counts);
     let segments = if segments.is_empty() {
-        view! { <div class="bg-muted flex-1"></div> }.into_any()
+        view! { <div class="bg-muted-foreground/20 flex-1"></div> }.into_any()
     } else {
         segments
             .into_iter()

@@ -9,7 +9,8 @@ use nanobom_domain::{
     users::{self, NewUser},
 };
 use nanobom_entity::{
-    components, exploitation, findings as findings_entity, upload_tokens, vulnerabilities,
+    components, exploitation, findings as findings_entity, project_versions, upload_tokens,
+    vulnerabilities,
 };
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, DatabaseConnection};
 
@@ -343,6 +344,55 @@ async fn the_open_summary_counts_only_open_findings_of_the_version() {
             .await
             .unwrap(),
         summary
+    );
+
+    // Another version of the project has its own summary and leaves the latest one alone.
+    let older = project_versions::ActiveModel {
+        project_id: Set(web),
+        name: Set("0.9".to_owned()),
+        latest: Set(false),
+        active: Set(true),
+        created_at: Set(Utc::now().fixed_offset()),
+        last_upload_at: Set(Some(Utc::now().fixed_offset())),
+        dependencies_partial: Set(false),
+        ..Default::default()
+    }
+    .insert(&database)
+    .await
+    .unwrap()
+    .id;
+    findings_entity::ActiveModel {
+        project_id: Set(web),
+        version_id: Set(Some(older)),
+        purl: Set("pkg:npm/older@0.9.0".to_owned()),
+        ecosystem: Set("npm".to_owned()),
+        vulnerability_id: Set("GHSA-0000-0000-0001".to_owned()),
+        status: Set("open".to_owned()),
+        severity: Set("critical".to_owned()),
+        first_seen_at: Set(Utc::now().fixed_offset()),
+        last_seen_at: Set(Utc::now().fixed_offset()),
+        ..Default::default()
+    }
+    .insert(&database)
+    .await
+    .unwrap();
+    assert_eq!(
+        findings::open_summary_in_version(&database, &owner, web, None)
+            .await
+            .unwrap(),
+        summary
+    );
+    assert_eq!(
+        findings::open_summary_in_version(&database, &owner, web, Some("0.9"))
+            .await
+            .unwrap(),
+        findings::OpenSummary {
+            counts: findings::SeverityCounts {
+                critical: 1,
+                ..findings::SeverityCounts::default()
+            },
+            known_exploited: 1,
+        }
     );
 
     assert!(matches!(

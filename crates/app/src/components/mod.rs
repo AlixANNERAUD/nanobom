@@ -413,7 +413,9 @@ pub fn Page(#[prop(into)] title: String, children: ChildrenFn) -> impl IntoView 
                     Some(user) => {
                         view! {
                             <Header user />
-                            <main id="content" class="mx-auto grid max-w-6xl gap-6 px-4 py-6">
+                            // One column that never grows with its content: a wide table scrolls inside its
+                            // frame instead of widening the page.
+                            <main id="content" class="mx-auto grid max-w-6xl grid-cols-1 gap-6 px-4 py-6">
                                 <Flash />
                                 {children()}
                             </main>

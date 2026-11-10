@@ -901,15 +901,6 @@ fn cells(row: &str) -> Vec<&str> {
         .collect()
 }
 
-/// How many cells of a table row show nothing.
-fn empty_cells(row: &str) -> usize {
-    row.split("<td")
-        .skip(1)
-        .map(|cell| cell.split("</td>").next().unwrap_or(cell))
-        .filter(|cell| text(&format!("<td{cell}")).is_empty())
-        .count()
-}
-
 #[tokio::test]
 async fn exploitation_signals_are_shown_and_filtered() {
     let server = server(&[]).await;
@@ -2115,7 +2106,7 @@ async fn the_project_page_summarizes_open_findings() {
 }
 
 #[tokio::test]
-async fn the_status_column_appears_only_when_needed() {
+async fn only_findings_that_are_not_open_say_their_status() {
     let server = server(&[]).await;
     server.source.publish(
         json!({
@@ -2162,7 +2153,6 @@ async fn the_status_column_appears_only_when_needed() {
     assert!(!table.contains(">Status<"), "{table}");
     assert!(!table.contains(">Open<"), "{table}");
     let columns = cells(table_row(table, "GHSA-35jh-r3h4-6jhm")).len();
-    let empty = empty_cells(table_row(table, "GHSA-xvch-5gv4-984h"));
 
     let project = projects::find(&server.database, &owner, organization.id, "web")
         .await
@@ -2185,25 +2175,30 @@ async fn the_status_column_appears_only_when_needed() {
     .await
     .unwrap();
 
-    // One row is ignored: the column appears, and open rows leave its cell empty.
+    // One row is ignored: it says so next to its vulnerability, in no column of its own, and
+    // the open row still says nothing.
     let html = alice.page(page).await;
     let table = findings_table(&html);
-    assert!(table.contains(">Status<"), "{table}");
+    assert!(!table.contains(">Status<"), "{table}");
     let ignored = table_row(table, "GHSA-35jh-r3h4-6jhm");
     assert!(ignored.contains(">Ignored<"), "{ignored}");
-    assert_eq!(cells(ignored).len(), columns + 1);
+    let vulnerability = element(ignored, "<th scope=\"row\"", "</th>");
+    assert!(vulnerability.contains(">Ignored<"), "{vulnerability}");
+    assert_eq!(cells(ignored).len(), columns, "the rows stay aligned");
     let open = table_row(table, "GHSA-xvch-5gv4-984h");
-    assert_eq!(cells(open).len(), columns + 1, "the rows stay aligned");
+    assert_eq!(cells(open).len(), columns);
     assert!(!open.contains(">Open<"), "{open}");
-    assert_eq!(empty_cells(open), empty + 1, "{open}");
+    assert!(!open.contains(">Ignored<"), "{open}");
 
-    // Filtered to open findings, no row needs it.
+    // Each status filter keeps its rows.
     let html = alice.page(&format!("{page}?status=open")).await;
     let table = findings_table(&html);
     assert!(!table.contains("GHSA-35jh-r3h4-6jhm"));
-    assert!(!table.contains(">Status<"), "{table}");
+    assert!(!table.contains(">Ignored<"), "{table}");
     let html = alice.page(&format!("{page}?status=ignored")).await;
-    assert!(findings_table(&html).contains(">Status<"));
+    let table = findings_table(&html);
+    assert!(table.contains(">Ignored<"), "{table}");
+    assert!(!table.contains("GHSA-xvch-5gv4-984h"));
 }
 
 #[tokio::test]
@@ -2264,12 +2259,14 @@ async fn long_names_stay_on_one_line() {
         .into_iter()
         .find(|cell| cell.contains(&name))
         .expect("the component's cell names it in full");
-    assert!(component.contains("truncate"), "{component}");
     assert_eq!(
         attribute(component, "title"),
         format!("{name} 1.0.0 · maven")
     );
-    assert!(row.contains(&format!(">{name}<")), "{row}");
+    // The namespace and the rest of the name are cut apart, so the namespace can go first.
+    let (namespace, artifact) = name.split_once('/').unwrap();
+    assert!(row.contains(&format!("truncate\">{namespace}<")), "{row}");
+    assert!(row.contains(&format!("truncate\">/{artifact}<")), "{row}");
     // The summary is cut too, and keeps its full text.
     let summary_tag = row
         .split("<span")
