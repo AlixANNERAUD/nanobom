@@ -83,7 +83,7 @@ Texts of the interface are in `crates/app/locales/en.json` and `fr.json`, used t
 `crates/domain/locales/`. Every key must exist in every language: a missing one fails the build.
 
 1. Copy `en.json` to `<tag>.json` in both locale directories, and translate every message
-   (`language.name` is the language's name in itself, shown in the language switch).
+   (`language.name` is the language's name in itself, shown in the account menu).
 2. Add the tag to `available_locales` in the `embedded_i18n::i18n!` call at the root of both
    crates, `crates/app/src/lib.rs` and `crates/domain/src/lib.rs`.
 

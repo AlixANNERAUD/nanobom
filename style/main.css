@@ -133,6 +133,17 @@
   summary::-webkit-details-marker {
     display: none;
   }
+
+  /* An open header menu closes on a click anywhere else, without JavaScript: its button gets an
+     invisible backdrop over the page, under the menu's panel (`z-20`), and a click on it is a
+     click on the button. */
+  details[name="header-menu"][open] > summary::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    cursor: default;
+  }
 }
 
 @theme inline {

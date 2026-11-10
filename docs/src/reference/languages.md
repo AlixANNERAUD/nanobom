@@ -2,13 +2,13 @@
 
 The web interface is available in **English** and **French**. Each request is answered in:
 
-1. the language chosen with the language switch in the page header, remembered in the
+1. the language chosen in the account menu of the page header, remembered in the
    `nanobom_locale` cookie of that browser (it holds only the chosen language);
 2. otherwise, the best match among the browser's preferred languages (`Accept-Language`);
 3. otherwise, English.
 
 The choice is per browser, not per account: signing in elsewhere starts from the browser's
-preferences again. The switch works without JavaScript, like the rest of the interface.
+preferences again. The choice works without JavaScript, like the rest of the interface.
 
 Error messages of the interface are translated too. Some texts stay in English whatever the
 language:

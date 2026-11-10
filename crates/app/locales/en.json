@@ -1,8 +1,7 @@
 {
   "language": {
     "name": "English",
-    "label": "Language",
-    "apply": "Apply"
+    "label": "Language"
   },
   "common": {
     "loading": "Loading…",
