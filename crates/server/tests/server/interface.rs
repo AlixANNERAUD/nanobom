@@ -125,6 +125,36 @@ fn element<'a>(html: &'a str, open: &str, close: &str) -> &'a str {
     &html[start..start + end]
 }
 
+/// Names are free text and a page title is written into the document without escaping by the
+/// library: a name holding `</title>` once ended the element, and the rest of the name became
+/// markup of the page, scripts included, for everyone opening it.
+#[tokio::test]
+async fn a_name_cannot_leave_the_page_title() {
+    let server = server(&[]).await;
+    let owner = local_user(&server.database, "alice", PASSWORD).await;
+    let name = "R&D </title><script>alert(1)</script>";
+    let escaped = "R&amp;D &lt;/title&gt;&lt;script&gt;alert(1)&lt;/script&gt;";
+    let organization = organizations::create(&server.database, &owner, "acme", name)
+        .await
+        .unwrap();
+    projects::create(&server.database, &owner, organization.id, "web", name)
+        .await
+        .unwrap();
+    let alice = Browser::sign_in(&server, "alice").await;
+    for page in [
+        "/organizations/acme",
+        "/organizations/acme/settings",
+        "/organizations/acme/projects/web",
+    ] {
+        let html = alice.page(page).await;
+        // The first `</title>` of the document is the one that ends the whole title.
+        let title = element(&html, "<title>", "</title>");
+        assert!(title.contains(escaped), "{page}: {title}");
+        assert!(title.ends_with(" · nanobom"), "{page}: {title}");
+        assert!(!html.contains("<script>alert(1)"), "{page}");
+    }
+}
+
 /// The mark is decorative (hidden from assistive technology) and sits before the name.
 fn assert_mark_before_wordmark(html: &str) {
     let mark = html.find("<svg").expect("the mark");

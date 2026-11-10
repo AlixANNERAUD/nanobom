@@ -393,12 +393,39 @@ fn Header(user: CurrentUser) -> impl IntoView {
     }
 }
 
+/// The title of a page in the browser's tab: `text`, then the product's name.
+///
+/// Every page title goes through here, because `leptos_meta` writes the text of a `<Title>`
+/// into the document as it is: a text holding `</title>` would end the element, and what
+/// follows would be markup of the page. Organization and project names are free text and
+/// vulnerability identifiers come from advisories, so the text is escaped. A browser decodes
+/// character references inside a title: names read as they were written.
+#[component]
+pub fn PageTitle(#[prop(into)] text: String) -> impl IntoView {
+    view! { <Title text=title_text(&text) /> }
+}
+
+/// The text of a page title, escaped for the `<title>` element.
+fn title_text(text: &str) -> String {
+    let mut title = String::with_capacity(text.len() + 16);
+    for character in text.chars() {
+        match character {
+            '&' => title.push_str("&amp;"),
+            '<' => title.push_str("&lt;"),
+            '>' => title.push_str("&gt;"),
+            _ => title.push(character),
+        }
+    }
+    title.push_str(" · nanobom");
+    title
+}
+
 /// A page of the signed-in interface: header, title, flash message and content.
 #[component]
 pub fn Page(#[prop(into)] title: String, children: ChildrenFn) -> impl IntoView {
     let user = Resource::new(|| (), |()| load_current_user());
     view! {
-        <Title text=format!("{title} · nanobom") />
+        <PageTitle text=title.clone() />
         <a
             href="#content"
             class="focus:bg-background sr-only focus:not-sr-only focus:absolute focus:p-2"
@@ -463,7 +490,18 @@ pub fn Heading(
 
 #[cfg(test)]
 mod tests {
-    use super::initial;
+    use super::{initial, title_text};
+
+    #[test]
+    fn a_page_title_cannot_end_its_element() {
+        assert_eq!(title_text("Acme"), "Acme · nanobom");
+        assert_eq!(
+            title_text("R&D </title><script>alert(1)</script>"),
+            "R&amp;D &lt;/title&gt;&lt;script&gt;alert(1)&lt;/script&gt; · nanobom"
+        );
+        // Already escaped text is text too: it is shown as it was written.
+        assert_eq!(title_text("&lt;b&gt;"), "&amp;lt;b&amp;gt; · nanobom");
+    }
 
     #[test]
     fn the_initial_is_the_first_letter_of_the_display_name() {

@@ -2,11 +2,10 @@
 //! and instance administration.
 
 use leptos::prelude::*;
-use leptos_meta::Title;
 use leptos_router::hooks::use_params_map;
 
 use crate::{
-    components::{Empty, Heading, Loaded, Page, action, format_time, ui::*},
+    components::{Empty, Heading, Loaded, Page, PageTitle, action, format_time, ui::*},
     functions::{
         AddMember, CreateToken, CreateUser, DeleteEmail, DeleteOrganization, DeleteWebhook,
         RemoveMember, RenameOrganization, ResetPassword, RevokeToken, SaveEmail, SaveLicensePolicy,
@@ -715,7 +714,7 @@ pub fn SettingsPage() -> impl IntoView {
                 render={|page: SettingsData| {
                     let organization = page.organization.clone();
                     view! {
-                        <Title text=format!("{} · nanobom", tf!("settings.page_title", name = organization.name.clone())) />
+                        <PageTitle text=tf!("settings.page_title", name = organization.name.clone()) />
                         <nav aria-label=t!("common.breadcrumb") class="text-muted-foreground text-sm">
                             <a class="hover:underline" href=format!("/organizations/{}", organization.slug)>
                                 {organization.name.clone()}
