@@ -12,7 +12,7 @@ Each member of an organization has one of four roles, each including the ones be
 
 | Permission | Viewer | Member | Admin | Owner |
 | --- | :---: | :---: | :---: | :---: |
-| See the organization, its projects, components, findings, license violations and runs; export VEX documents | ✓ | ✓ | ✓ | ✓ |
+| See the organization, its projects, components, findings, license violations and runs; export VEX documents and vulnerability reports | ✓ | ✓ | ✓ | ✓ |
 | Ignore and restore findings | | ✓ | ✓ | ✓ |
 | Start a run (**Check now**) | | ✓ | ✓ | ✓ |
 | Add, change and remove members other than owners | | | ✓ | ✓ |

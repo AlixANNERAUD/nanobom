@@ -7,6 +7,7 @@ mod dependency_track;
 mod interface;
 mod operations;
 mod read_api;
+mod report;
 mod upload;
 mod versions;
 mod vex;

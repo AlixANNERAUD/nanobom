@@ -74,7 +74,9 @@
 }
 
 /* The dark tokens stay outside any layer, like the light ones: unlayered rules always win over
-   layered ones, so dark tokens in a layer would never apply. The two dark blocks are identical. */
+   layered ones, so dark tokens in a layer would never apply. The two dark blocks are identical.
+   Both apply on screen only: paper gets the light colors, whatever the theme. */
+@media screen {
 :root.dark {
   --background: oklch(0.17 0.015 285);
   --foreground: oklch(0.96 0.005 285);
@@ -98,8 +100,9 @@
   --input: oklch(1 0 0 / 20%);
   --ring: oklch(0.74 0.15 293);
 }
+}
 
-@media (prefers-color-scheme: dark) {
+@media screen and (prefers-color-scheme: dark) {
   :root:not(.light) {
     --background: oklch(0.17 0.015 285);
     --foreground: oklch(0.96 0.005 285);
@@ -217,6 +220,43 @@
 
   .prose-advisory th {
     @apply bg-muted/50 font-medium;
+  }
+}
+
+/* Printing, for the vulnerability report above all: the interface around a page is left out
+   (its header is `print:hidden`), tables keep their rows whole and repeat their header on each
+   page, and frames that scroll on screen let wide content show instead of cutting it. Links
+   read as text: their addresses would clutter the page. */
+@media print {
+  [href="#content"] {
+    display: none !important;
+  }
+
+  .overflow-x-auto {
+    overflow: visible !important;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tr,
+  dl > div {
+    break-inside: avoid;
+  }
+
+  h1,
+  h2 {
+    break-after: avoid;
+  }
+
+  section {
+    box-shadow: none !important;
+  }
+
+  a {
+    color: inherit !important;
+    text-decoration: none !important;
   }
 }
 

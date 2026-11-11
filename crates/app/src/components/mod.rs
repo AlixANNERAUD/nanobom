@@ -358,7 +358,7 @@ fn UserMenu(user: CurrentUser) -> impl IntoView {
 fn Header(user: CurrentUser) -> impl IntoView {
     let organizations = user.organizations.clone();
     view! {
-        <header class="border-b bg-background">
+        <header class="border-b bg-background print:hidden">
             // `relative`: on phones the organization menu is placed against the header. The
             // narrower gap below `md` keeps the account button on the first line at 320 px.
             <div class="relative mx-auto flex max-w-6xl flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 md:flex-nowrap md:gap-x-4">
@@ -406,7 +406,7 @@ pub fn PageTitle(#[prop(into)] text: String) -> impl IntoView {
 }
 
 /// The text of a page title, escaped for the `<title>` element.
-fn title_text(text: &str) -> String {
+pub(crate) fn title_text(text: &str) -> String {
     let mut title = String::with_capacity(text.len() + 16);
     for character in text.chars() {
         match character {

@@ -24,7 +24,7 @@ use crate::{
 };
 
 /// A fraction (0 to 1) as a whole percentage, in the request's language.
-fn percent(fraction: f64) -> String {
+pub(crate) fn percent(fraction: f64) -> String {
     #[allow(clippy::cast_possible_truncation)]
     let value = (fraction * 100.0).round() as i64;
     tf!("finding.percent", value = value)
@@ -33,7 +33,7 @@ fn percent(fraction: f64) -> String {
 /// The direct dependencies that lead to a finding's component, for the project's table, by
 /// name. A name appears once; its versions are added only when several versions of it lead to
 /// the component, to tell them apart.
-fn introduced_via_labels(via: &[DependencyComponent]) -> Vec<String> {
+pub(crate) fn introduced_via_labels(via: &[DependencyComponent]) -> Vec<String> {
     let mut versions_of: HashMap<&str, HashSet<Option<&str>>> = HashMap::new();
     for component in via {
         versions_of
@@ -248,7 +248,7 @@ fn finding_rows(findings: Vec<FindingRow>, shows_via: bool) -> impl IntoView {
 }
 
 /// How a version is named in the interface: the unnamed version gets a label.
-fn version_label(name: &str) -> String {
+pub(crate) fn version_label(name: &str) -> String {
     if name.is_empty() {
         t!("project.version_unnamed").to_owned()
     } else {
@@ -257,7 +257,7 @@ fn version_label(name: &str) -> String {
 }
 
 /// `version=…` for a link to a project version, encoded: version names may hold `+` and `/`.
-fn version_query(name: &str) -> String {
+pub(crate) fn version_query(name: &str) -> String {
     format!(
         "version={}",
         name.replace('%', "%25")
@@ -761,6 +761,12 @@ pub fn ProjectPage() -> impl IntoView {
                             >
                                 {t!("project.export_vex")}
                             </LinkButton>
+                            <LinkButton
+                                href=format!("/organizations/{organization_slug}/projects/{project_slug}/report{version_suffix}")
+                                variant=ButtonVariant::Outline
+                            >
+                                {t!("project.report")}
+                            </LinkButton>
                             {check_now}
                         </Heading>
                         // The open findings of the version shown, whatever the filters below.
@@ -904,7 +910,7 @@ const JUSTIFICATIONS: [&str; 10] = [
     "false_positive",
 ];
 
-fn justification_label(value: &str) -> &'static str {
+pub(crate) fn justification_label(value: &str) -> &'static str {
     match value {
         "code_not_present" => t!("finding.justification_code_not_present"),
         "code_not_reachable" => t!("finding.justification_code_not_reachable"),
@@ -923,7 +929,7 @@ fn justification_label(value: &str) -> &'static str {
 }
 
 /// Who made a change: a member, or an upload token importing a VEX document.
-fn changed_by(actor: Option<String>, token: Option<String>) -> Option<String> {
+pub(crate) fn changed_by(actor: Option<String>, token: Option<String>) -> Option<String> {
     match (actor, token) {
         (Some(actor), _) => Some(tf!("finding.by", actor = actor)),
         (None, Some(token)) => Some(tf!("finding.by_token", token = token)),
@@ -1639,7 +1645,7 @@ pub fn SearchPage() -> impl IntoView {
 
 /// An upload's format and version: SPDX versions are stored as SPDX documents spell them
 /// (`SPDX-2.3`), CycloneDX versions bare (`1.6`).
-fn sbom_format(specification_version: &str) -> String {
+pub(crate) fn sbom_format(specification_version: &str) -> String {
     match specification_version.strip_prefix("SPDX-") {
         Some(version) => format!("SPDX {version}"),
         None => format!("CycloneDX {specification_version}"),

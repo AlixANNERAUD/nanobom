@@ -713,6 +713,76 @@ pub struct AdministrationData {
     pub password_minimum_length: usize,
 }
 
+/// The vulnerability report of a project version: the printable page and the document served
+/// to tokens render it alike.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReportData {
+    pub generated_at: DateTime<FixedOffset>,
+    /// The nanobom release that generated it.
+    pub nanobom_version: String,
+    /// The host of the instance's public URL.
+    pub host: String,
+    /// The VEX export of the same version, as an absolute address.
+    pub vex_url: String,
+    pub organization_slug: String,
+    pub organization_name: String,
+    pub project_slug: String,
+    pub project_name: String,
+    /// Empty for the unnamed version.
+    pub version: String,
+    pub latest: bool,
+    pub active: bool,
+    /// The latest upload of the version.
+    pub upload: Option<Upload>,
+    pub component_count: u64,
+    pub stale: bool,
+    pub project_last_upload_at: Option<DateTime<FixedOffset>>,
+    pub project_created_at: DateTime<FixedOffset>,
+    pub last_evaluation: Option<DateTime<FixedOffset>>,
+    pub kev_checked_at: Option<DateTime<FixedOffset>>,
+    pub epss_checked_at: Option<DateTime<FixedOffset>>,
+    /// Open findings by severity, all of them.
+    pub counts: SeverityCounts,
+    pub known_exploited: u64,
+    pub ignored: u64,
+    pub fixed_recently: u64,
+    /// The first open findings, in the project page's order; `counts` has them all.
+    pub open: Vec<ReportFinding>,
+    /// The first ignored findings; `ignored` counts them all.
+    pub assessed: Vec<AssessedFinding>,
+    pub licenses: ReportLicenses,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReportFinding {
+    pub finding: FindingRow,
+    /// Versions of the package that fix the vulnerability, per its OSV record.
+    pub fixed_versions: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AssessedFinding {
+    pub finding: FindingRow,
+    pub ignored_at: Option<DateTime<FixedOffset>>,
+    /// The member's username.
+    pub ignored_by: Option<String>,
+    /// The upload token that imported a VEX statement.
+    pub ignored_by_token: Option<String>,
+}
+
+/// The licenses section of a report.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ReportLicenses {
+    /// The organization has a license policy: what it forbids or warns about.
+    Policy(LicenseViolations),
+    /// Without a policy: components by license expression, most common first.
+    Counts {
+        groups: Vec<(String, u64)>,
+        other: u64,
+        without: u64,
+    },
+}
+
 #[cfg(test)]
 mod tests {
     use super::link_target;

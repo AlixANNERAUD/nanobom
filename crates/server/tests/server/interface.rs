@@ -145,6 +145,7 @@ async fn a_name_cannot_leave_the_page_title() {
         "/organizations/acme",
         "/organizations/acme/settings",
         "/organizations/acme/projects/web",
+        "/organizations/acme/projects/web/report",
     ] {
         let html = alice.page(page).await;
         // The first `</title>` of the document is the one that ends the whole title.
@@ -703,6 +704,110 @@ async fn findings_are_shown_and_ignored_from_the_interface() {
     assert!(html.contains("pkg:npm/minimist@1.2.5"));
     let html = alice.page("/search?query=lodash&license=GPL").await;
     assert!(html.contains("No component found"));
+}
+
+/// The report is linked from the project page, opens for a viewer, and says what the project
+/// page and the finding page say, in the viewer's language.
+#[tokio::test]
+async fn the_report_page_describes_the_version() {
+    use nanobom_domain::{access::Role, findings::Justification, memberships};
+    let server = server(&[]).await;
+    server.source.publish(
+        json!({
+            "id": "GHSA-35jh-r3h4-6jhm",
+            "modified": "2024-01-01T00:00:00Z",
+            "aliases": ["CVE-2021-23337"],
+            "summary": "Command Injection in lodash",
+            "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H"}],
+            "affected": [{"package": {"ecosystem": "npm", "name": "lodash"},
+                "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "4.17.21"}]}]}]
+        }),
+        &["pkg:npm/lodash@4.17.20"],
+    );
+    let owner = local_user(&server.database, "alice", PASSWORD).await;
+    local_user(&server.database, "bob", PASSWORD).await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    memberships::add(
+        &server.database,
+        &owner,
+        organization.id,
+        "bob",
+        Role::Viewer,
+    )
+    .await
+    .unwrap();
+    let secret = tokens::create(&server.database, &owner, organization.id, None, "CI")
+        .await
+        .unwrap()
+        .secret;
+    server
+        .send(
+            Request::put("/api/organizations/acme/projects/web/sbom?version=1.0")
+                .header(header::AUTHORIZATION, format!("Bearer {secret}"))
+                .body(Body::from(sbom_document("cyclonedx-npm.json")))
+                .unwrap(),
+        )
+        .await;
+    server.runner.wait_until_idle().await;
+    let project = projects::find(&server.database, &owner, organization.id, "web")
+        .await
+        .unwrap();
+    let finding = findings::list(&server.database, &owner, project.id, &Filter::default())
+        .await
+        .unwrap()[0]
+        .id;
+    let bob = Browser::sign_in(&server, "bob").await;
+
+    let html = bob.page("/organizations/acme/projects/web").await;
+    assert!(html.contains("href=\"/organizations/acme/projects/web/report\""));
+    assert!(html.contains(">Report<"));
+
+    let page = "/organizations/acme/projects/web/report";
+    let html = bob.page(page).await;
+    assert!(html.contains("Vulnerability report"));
+    assert!(html.contains("Print it or save it as PDF from your browser."));
+    assert!(html.contains("Acme / web · version 1.0"));
+    assert!(html.contains("1 open vulnerability of high or critical severity."));
+    assert!(html.contains("GHSA-35jh-r3h4-6jhm"));
+    assert!(html.contains("4.17.21"));
+    assert!(html.contains("No finding was ignored."));
+    assert!(html.contains("Components checked"));
+
+    findings::ignore(
+        &server.database,
+        &owner,
+        finding,
+        "Template strings come from us",
+        Some(Justification::CodeNotReachable),
+        None,
+    )
+    .await
+    .unwrap();
+    let html = bob.page(&format!("{page}?version=1.0")).await;
+    assert!(html.contains("No open vulnerabilities."));
+    assert!(html.contains("Template strings come from us"));
+    assert!(html.contains("Vulnerable code not reachable"));
+    assert!(html.contains("by alice"));
+
+    let response = server
+        .send(
+            Request::get(page)
+                .header(header::COOKIE, &bob.cookie)
+                .header(header::ACCEPT, "text/html")
+                .header(header::ACCEPT_LANGUAGE, "fr")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    let html = body_text(response).await;
+    assert!(html.contains("Rapport de vulnérabilités"));
+    assert!(html.contains("Aucune vulnérabilité ouverte."));
+    assert!(html.contains("Imprimez-le ou enregistrez-le en PDF depuis votre navigateur."));
+
+    let response = bob.get(&format!("{page}?version=9.9")).await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 #[tokio::test]

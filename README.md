@@ -125,6 +125,9 @@ upload to nanobom with a new address and key: see [Dependency-Track clients](htt
   you want), with each project's violations and SPDX `AND`/`OR` expressions understood.
 - CycloneDX VEX: export which vulnerabilities do not affect a project, and why, for customers
   and auditors; import a vendor's statements or your own to ignore findings.
+- A printable vulnerability report of each version for customers, auditors and regulators:
+  provenance, open vulnerabilities, assessed ones with their reasons, licenses; save it as PDF
+  or archive it from CI with the API.
 - Notifications per organization for new and newly exploited vulnerabilities, and for projects
   whose SBOM stopped coming: webhooks as JSON or as messages posted straight to Slack and
   Microsoft Teams, and emails in English or French through your SMTP server; a Home Assistant

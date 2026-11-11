@@ -60,7 +60,8 @@ fn default_tag() -> &'static str {
     embedded_i18n::locale!()
 }
 
-fn default_locale() -> Locale {
+/// The `default_locale` of the crate, English.
+pub fn default_locale() -> Locale {
     Locale::new(default_tag())
 }
 

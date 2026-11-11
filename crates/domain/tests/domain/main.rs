@@ -12,6 +12,7 @@ mod licenses;
 mod lifecycle;
 mod notifications;
 mod project_versions;
+mod report;
 mod staleness;
 mod tokens;
 mod versions;
