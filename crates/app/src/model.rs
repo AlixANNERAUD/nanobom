@@ -452,6 +452,18 @@ pub struct ProjectData {
     pub counts: SeverityCounts,
     /// How many open findings of the version shown are known exploited, whatever the filters.
     pub known_exploited: i64,
+    /// The project's public badge while it is on; always `None` for those who cannot manage
+    /// the project, who do not see the badge's address.
+    pub badge: Option<ProjectBadge>,
+}
+
+/// A project's public badge, as its settings show it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectBadge {
+    /// The image's path on this server, for the preview.
+    pub image_path: String,
+    /// The Markdown to paste in a README, with addresses under the public URL.
+    pub markdown: String,
 }
 
 /// A reference of an advisory. Its address is written by the advisory's author: see

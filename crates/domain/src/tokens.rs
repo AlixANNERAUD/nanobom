@@ -113,7 +113,7 @@ fn generate_secret() -> String {
     format!("{PREFIX}{}", hexadecimal(&bytes))
 }
 
-fn hexadecimal(bytes: &[u8]) -> String {
+pub(crate) fn hexadecimal(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 

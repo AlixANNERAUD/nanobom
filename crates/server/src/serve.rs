@@ -22,7 +22,7 @@ use nanobom_osv::OsvClient;
 use sea_orm::DatabaseConnection;
 
 use crate::{
-    api, authentication,
+    api, authentication, badges,
     command_line::ServeOptions,
     deliveries, dependency_track, http, metrics, operations, read_api,
     runner::{self, NotificationSettings, RunRequest, Runner},
@@ -98,6 +98,7 @@ pub fn router(state: AppState) -> Router {
             .merge(api::router(&state))
             .merge(dependency_track::router(&state))
             .merge(operations::router())
+            .merge(badges::router())
             .merge(interface)
             .with_state(state),
     )

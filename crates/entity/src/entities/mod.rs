@@ -12,6 +12,7 @@ pub mod memberships;
 pub mod organization_emails;
 pub mod organization_webhooks;
 pub mod organizations;
+pub mod project_badges;
 pub mod project_versions;
 pub mod projects;
 pub mod runs;

@@ -136,6 +136,8 @@ upload to nanobom with a new address and key: see [Dependency-Track clients](htt
 - Organizations and roles, local accounts and OpenID Connect single sign-on (Keycloak, Zitadel,
   Authentik, …) with roles mapped from groups.
 - A read-only JSON API, described in OpenAPI, for dashboards and scripts, with read-only tokens.
+- A status badge per project for its README, off until an admin turns it on, behind an address
+  that can be replaced or revoked at any time.
 - Prometheus metrics, health check, JSON logs, online backups.
 - Server-rendered interface that works without JavaScript, in English and French, light and
   dark.

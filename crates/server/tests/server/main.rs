@@ -1,6 +1,7 @@
 //! Integration tests of the server crate, in one binary to keep linking cheap.
 
 mod authentication;
+mod badges;
 mod command_line;
 mod common;
 mod dependency_track;

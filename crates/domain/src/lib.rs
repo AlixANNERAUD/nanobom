@@ -14,7 +14,8 @@
 //! Functions without an actor fall in three groups:
 //!
 //! - the caller is authenticated by other means: an upload token ([`tokens::authenticate`],
-//!   then [`inventory::ingest`] and [`vex::import`], which also check its scope), a password or an
+//!   then [`inventory::ingest`] and [`vex::import`], which also check its scope), a badge key
+//!   ([`badges::summary`], which only reads a version's open counts), a password or an
 //!   identity provider at sign-in ([`users`], [`memberships::synchronize`]), or the operator on
 //!   the command line (the `*_from_command_line` functions of [`tokens`]);
 //! - background work of the server over the whole instance: runs ([`evaluation::Evaluator`],
@@ -41,6 +42,8 @@
 //!   about new findings through webhooks ([`notifications`]) and email ([`email`]), whose
 //!   deliveries are queued and retried ([`deliveries`]); webhooks can post to Slack and
 //!   Microsoft Teams ([`chat`]) instead of sending JSON.
+//! - A project can publish a **badge** ([`badges`]): the open findings of a version, at a
+//!   public address that only its random key authorizes.
 //! - An organization's **license policy** ([`licenses`]) allows, warns about or forbids the
 //!   licenses of its components; violations are computed when read.
 //!
@@ -73,6 +76,7 @@ embedded_i18n::i18n!(
 );
 
 pub mod access;
+pub mod badges;
 pub mod chat;
 pub mod database;
 pub mod deliveries;
