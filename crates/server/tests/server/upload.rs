@@ -126,6 +126,53 @@ async fn project_tokens_cannot_reach_other_projects_or_organizations() {
     assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
+/// A project's own token uploads like a project token, and stops working when renewed.
+#[tokio::test]
+async fn the_project_token_uploads_until_it_is_renewed() {
+    let server = server(&[]).await;
+    let owner = user(&server.database, "owner").await;
+    let acme = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    let web = projects::create(&server.database, &owner, acme.id, "web", "Web")
+        .await
+        .unwrap();
+    projects::create(&server.database, &owner, acme.id, "api", "API")
+        .await
+        .unwrap();
+    let old = tokens::project_token(&server.database, &owner, web.id)
+        .await
+        .unwrap()
+        .secret;
+    let attempt =
+        |path: &str, token: &str| upload(path, Some(token), sbom_document("cargo-cyclonedx.json"));
+
+    let response = server
+        .send(attempt("/api/organizations/acme/projects/web/sbom", &old))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = server
+        .send(attempt("/api/organizations/acme/projects/api/sbom", &old))
+        .await;
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let renewed = tokens::renew_project_token(&server.database, &owner, web.id)
+        .await
+        .unwrap()
+        .secret;
+    let response = server
+        .send(attempt("/api/organizations/acme/projects/web/sbom", &old))
+        .await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let response = server
+        .send(attempt(
+            "/api/organizations/acme/projects/web/sbom",
+            &renewed,
+        ))
+        .await;
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
 #[tokio::test]
 async fn invalid_and_oversized_documents_are_rejected() {
     let server = server(&["--maximum-sbom-size", "1"]).await;

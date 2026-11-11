@@ -9,13 +9,16 @@ the [logs reference](../reference/metrics.md#log-messages).
 ### Upload answers 401
 
 `a valid upload token is required in the Authorization header (Bearer)`: the request has no
-`Authorization: Bearer …` header, or the token is unknown or revoked.
+`Authorization: Bearer …` header, or the token is unknown, revoked, or a project's upload token
+that was renewed since.
 
 - Check that the CI secret is set and reaches the job. On GitHub, workflows triggered by pull
   requests from forks get no secrets, so the header is `Bearer ` with nothing after it.
 - Check the token in **Settings → API tokens**: its first characters, whether it is revoked,
   and when it was last used. A token that was never used never reached nanobom.
-- Tokens are shown once. If in doubt, create a new one and revoke the old one.
+- A project's upload token is shown on the project page under **Upload token**: compare it with
+  the CI secret, and update the secret after each **Renew**. Other tokens are shown once: if in
+  doubt, create a new one and revoke the old one.
 - A token revoked while its upload waited for the evaluation also gets this answer; the SBOM
   was stored anyway (see [waiting for the evaluation](../reference/upload-api.md#waiting-for-the-evaluation)).
 
@@ -34,9 +37,10 @@ the **Upload and read** scope for CI.
 
 - the organization slug in the URL is wrong, or the token belongs to another organization (nanobom
   does not say which, so as not to reveal which organizations exist);
-- the token is a project token and the project does not exist yet. Project tokens never create
-  projects: make the first upload with an organization token, or create the project that way
-  first.
+- the token is a project token and the project does not exist, or no longer does: the slug in
+  the URL differs from the token's project, or the project was deleted with its tokens. Project
+  tokens never create projects. Create the project on the organization page (**New project**)
+  and use its upload token, or upload with an organization token.
 
 ### Upload answers 413
 
@@ -118,7 +122,7 @@ genuinely your own code have no package URL, and need none.
 
 Organization tokens create a project for each new slug, so a typo or a renamed repository
 creates a new project. Delete the unwanted one from its page (admins), and switch the pipeline to
-a project token, which cannot create projects.
+the project's upload token, shown on the project page, which cannot create projects.
 
 ## Findings
 

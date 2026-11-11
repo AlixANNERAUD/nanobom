@@ -20,27 +20,49 @@ The body may be at most `NANOBOM_MAXIMUM_SBOM_SIZE` MiB (16 by default).
 
 ## Tokens
 
-Tokens are random 256-bit values prefixed with `nanobom_`. nanobom stores only their SHA-256
-digest: a token is shown once, at creation, and cannot be recovered, only revoked and replaced.
-Tokens authenticate on the upload API, the [VEX API](vex-api.md) and the
-[read API](read-api.md), never on the interface.
+Tokens are random 256-bit values prefixed with `nanobom_`. Tokens authenticate on the upload API,
+the [VEX API](vex-api.md) and the [read API](read-api.md), never on the interface.
 
 A token has a reach, its organization or one project, and a scope:
 
 | Reach | Created with | May |
 | --- | --- | --- |
 | **Organization token** | project **Whole organization** in **Settings → API tokens**, or `nanobom token create` without `--project` | reach any project of its organization; with the upload scope, create projects by uploading to a new slug |
-| **Project token** | a project chosen, or `--project web` | reach that project only; it never creates one, so it can only be created once the project exists |
+| **Project token** | a project chosen, or `--project web` | reach that project only; it never creates one |
 
 | Scope | Created with | May |
 | --- | --- | --- |
 | **`upload`** (default) | scope **Upload and read**, or `--scope upload` | upload SBOMs, import VEX documents, and read |
 | **`read`** | scope **Read only**, or `--scope read` | read only, through the [read API](read-api.md) and the VEX export; uploads and VEX imports answer `403` |
 
-Tokens are created and revoked by the organization's admins
-([roles](accounts.md#organization-roles)) in **Settings → API tokens**, which shows each
-token's project, scope and last use, or with [`nanobom token`](command-line.md#nanobom-token).
-Which token to give to what is discussed in [Tokens and scopes](../explanation/tokens.md).
+### The project's upload token
+
+Every project has one upload token of its own: a project token with the `upload` scope, created
+with the project, whether it was created in the interface, by `nanobom project create`, or by an
+upload with an organization token (Dependency-Track's `autoCreate` included). Projects created
+before nanobom had project upload tokens got one when the server was upgraded.
+
+| | The project's upload token | Other tokens |
+| --- | --- | --- |
+| Shown | on the project page, under **Upload token**, at any time, and by `nanobom project token` | once, at creation |
+| Stored | its SHA-256 digest, and its clear value | its SHA-256 digest only |
+| Replaced | **Renew** on the project page, or `nanobom project token --renew`: the old value stops working at once | create a new token, then revoke the old one |
+| Revoked | never, so a project always has one: the settings offer no **Revoke** for it, and `nanobom token revoke` refuses it | **Revoke** in **Settings → API tokens**, or `nanobom token revoke` |
+| Deleted | with its project | with their project or organization |
+
+**Settings → API tokens** lists it as **Project token**, without its value, with a link to the
+project instead of **Revoke**; a renewed token stays listed there, revoked. Its value is kept in
+clear so that it can be shown again: whoever can read the database can upload to the project
+([security model](../explanation/security.md#api-tokens)).
+
+### Who manages tokens
+
+Tokens, the project's upload token included, are created, renewed, revoked and seen by the
+organization's admins and owners ([roles](accounts.md#organization-roles)), in **Settings → API
+tokens**, which shows each token's project, scope and last use, on the project page, or with
+[`nanobom token`](command-line.md#nanobom-token) and
+[`nanobom project`](command-line.md#nanobom-project). Members and viewers never see a token's
+value. Which token to give to what is discussed in [Tokens and scopes](../explanation/tokens.md).
 
 ## The document
 
@@ -165,8 +187,9 @@ or SPDX `versionInfo`).
   that never names one.
 - The first upload naming a version creates it. A project created by an upload starts with the
   version the upload names, without an unnamed version next to it. A project created in the
-  interface starts with an unnamed version; if it has received nothing when the first upload
-  names a version, it is renamed to that version instead of staying next to it, empty.
+  interface or with `nanobom project create` starts with an unnamed version; if it has received
+  nothing when the first upload names a version, it is renamed to that version instead of
+  staying next to it, empty.
 - One version of each project is the **latest**: the one the project page, the
   [read API](read-api.md) and the [VEX export](vex-api.md) show unless they are asked for
   another. A version the upload creates becomes the latest, unless `latest=false`;
@@ -233,8 +256,8 @@ so nothing is stored and it can be sent again unchanged. The body is still recei
 `NANOBOM_MAXIMUM_SBOM_SIZE`. Uploads without `wait` or `fail_on` are
 not limited.
 
-The token is checked again when the wait ends. If it was revoked meanwhile, or deleted with its
-project or organization, the upload answers `401` with no evaluation, as an invalid token would,
+The token is checked again when the wait ends. If it was revoked or renewed meanwhile, or deleted
+with its project or organization, the upload answers `401` with no evaluation, as an invalid token would,
 and VEX statements in the SBOM are not imported. The SBOM, accepted while the token was valid,
 stays stored.
 
@@ -332,9 +355,9 @@ not of this SBOM.
 | --- | --- | --- |
 | `200` | The SBOM replaced the components of the version | |
 | `201` | The SBOM created the project | |
-| `401` | No `Authorization: Bearer` header, or a token that is unknown or revoked, including one revoked while the upload waited | Check the secret in CI; the response has a `WWW-Authenticate: Bearer` header |
+| `401` | No `Authorization: Bearer` header, or a token that is unknown or revoked, including one revoked while the upload waited and a project's upload token since renewed | Check the secret in CI; the response has a `WWW-Authenticate: Bearer` header |
 | `403` | A project token used for another existing project, or a read token | Use that project's slug, or an organization token; upload with a token of the upload scope |
-| `404` | The organization does not exist or is not the token's; or a project token used for a project that does not exist | Check the organization slug in the URL; create the project first (with an organization token) |
+| `404` | The organization does not exist or is not the token's; or a project token used for a project that does not exist | Check the organization slug in the URL; create the project first, in the interface or with an organization token |
 | `409` | With `fail_on`: the evaluation succeeded and open findings reach a threshold, or, with `license`, a component has a forbidden license | Fix or triage the findings listed in `evaluation.findings`; replace the components listed in `evaluation.licenses.violations`, or change the policy |
 | `413` | The body is larger than `NANOBOM_MAXIMUM_SBOM_SIZE` (16 MiB by default) | Raise the limit, or split the SBOM; this error's body is plain text, not JSON |
 | `422` | Invalid parameter, invalid project slug, or invalid document (not JSON, neither CycloneDX nor SPDX, unsupported version) | Read `error` |

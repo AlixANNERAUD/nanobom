@@ -42,11 +42,24 @@ a read token means a leak exposes the findings, which is serious, but cannot cha
 upload, VEX import and Dependency-Track routes refuse read tokens with `403`, and the check is
 made again in the domain layer, so a future route cannot forget it.
 
+## Every project comes with a token
+
+A project created in the interface could not receive anything until someone created a token for
+it, and a token shown once must be copied at once, or created again. So every project comes
+with an upload token of its own, shown on its page to admins and owners for as long as it is in
+use, next to a workflow step ready to paste: create the project, copy two lines into CI, done.
+This is how CI services such as Codecov enroll a repository.
+
+The price is that nanobom keeps that token's value, where other tokens keep only a digest
+([security model](security.md#api-tokens)). The token is renewed rather than revoked, so a
+project never lacks one; named tokens stay for everything else: a second pipeline that should
+be revoked on its own, a read-only integration, CI that creates projects.
+
 ## Choosing a token
 
 | Tool | Token |
 | --- | --- |
-| CI of one repository | `upload`, reaching that project |
+| CI of one repository | the project's upload token, or another `upload` token reaching that project |
 | CI that creates projects on the fly (a monorepo, a fleet of images) | `upload`, reaching the organization |
 | A dashboard or report over the organization | `read`, reaching the organization |
 | An integration about one project (its own issue tracker) | `read`, reaching that project |
@@ -57,6 +70,7 @@ Prefer the narrowest reach that works: a project token limits a leak to one proj
 
 Tokens are not user accounts. They do not sign in to the interface, belong to no user, and keep
 working when the admin who created them leaves; revoke them in **Settings → API tokens** or with
-`nanobom token revoke`. A person who wants to call the API from a browser does not need a token:
+`nanobom token revoke`, and renew a project's upload token on its page or with
+`nanobom project token --renew`. A person who wants to call the API from a browser does not need a token:
 pages of the instance can call the read API with the session, and then read what that person
 sees, with their role.

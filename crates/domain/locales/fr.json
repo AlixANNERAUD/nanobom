@@ -44,6 +44,7 @@
     "unknown_severity": "gravité inconnue",
     "unknown_justification": "justification « {justification} » inconnue",
     "unknown_token_scope": "portée de jeton « {scope} » inconnue ; portées possibles : upload ou read",
+    "project_token_revoke": "le jeton d’envoi propre à un projet ne peut pas être révoqué, seulement renouvelé depuis la page du projet",
     "reason_required": "une raison est requise pour ignorer une vulnérabilité",
     "reason_too_long": "la raison doit compter au plus {maximum} caractères",
     "expiry_not_in_future": "la date d’expiration doit être dans le futur",

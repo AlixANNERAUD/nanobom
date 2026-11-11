@@ -9,7 +9,8 @@ use crate::{
         ui::*,
     },
     functions::{
-        CreateOrganization, TriggerRun, load_organization, load_organizations, load_sign_in_options,
+        CreateOrganization, CreateProject, TriggerRun, load_organization, load_organizations,
+        load_sign_in_options,
     },
     model::{Organization, OrganizationData, Run, Severity, SeverityCounts, SignInOptions},
     t, tf, tp,
@@ -522,6 +523,10 @@ pub fn OrganizationPage() -> impl IntoView {
                         }
                             .into_any()
                     };
+                    let new_project = organization.role.can_manage().then({
+                        let slug = slug.clone();
+                        move || view! { <NewProject organization=slug /> }
+                    });
                     let subtitle = format!("{} · {}", organization.slug, organization.role.label());
                     view! {
                         <PageTitle text=organization.name.clone() />
@@ -530,6 +535,7 @@ pub fn OrganizationPage() -> impl IntoView {
                             {settings}
                         </Heading>
                         {projects}
+                        {new_project}
                         <Card>
                             <CardHeader>
                                 <CardTitle>{t!("organization.runs_title")}</CardTitle>
@@ -543,6 +549,55 @@ pub fn OrganizationPage() -> impl IntoView {
                 }}
             />
         </Page>
+    }
+}
+
+/// The form that creates a project, for those who manage projects. The project page it leads
+/// to shows the new project's upload token.
+#[component]
+fn NewProject(organization: String) -> impl IntoView {
+    view! {
+        <Card>
+            <CardHeader>
+                <CardTitle>{t!("organization.new_project_title")}</CardTitle>
+                <CardDescription>{t!("organization.new_project_description")}</CardDescription>
+            </CardHeader>
+            <CardContent>
+                <form
+                    method="post"
+                    action={action::<CreateProject>()}
+                    class="grid gap-4 sm:grid-cols-[1fr_1fr_auto] sm:items-start"
+                >
+                    <input type="hidden" name="organization" value=organization />
+                    <Field
+                        label=t!("organization.project_slug")
+                        input_id="project-slug"
+                        hint=t!("organization.project_slug_hint")
+                    >
+                        <input
+                            id="project-slug"
+                            name="slug"
+                            class=INPUT
+                            required
+                            pattern="[A-Za-z0-9][A-Za-z0-9._\\-]{0,63}"
+                            placeholder="web"
+                            autocomplete="off"
+                        />
+                    </Field>
+                    <Field
+                        label=t!("organization.project_name")
+                        input_id="project-name"
+                        hint=t!("organization.project_name_hint")
+                    >
+                        <input id="project-name" name="name" class=INPUT />
+                    </Field>
+                    // Level with the inputs, whose labels sit above them.
+                    <div class="sm:pt-[1.375rem]">
+                        <Button>{t!("organization.create_project")}</Button>
+                    </div>
+                </form>
+            </CardContent>
+        </Card>
     }
 }
 

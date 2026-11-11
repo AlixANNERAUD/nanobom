@@ -41,7 +41,7 @@ previous one of its version.
   than guessing.
 - **`autoCreate` keeps its meaning.** Without it, a missing project is a `404`, as in
   Dependency-Track. With it, an organization token creates the project; a project token never
-  does, whatever the request says ([Security model](security.md#upload-tokens)).
+  does, whatever the request says ([Security model](security.md#api-tokens)).
 - **The rest is ignored.** Tags and parent projects have no equivalent; they are accepted so that
   clients sending them still work. So is the active flag (`isActive`): nanobom versions can be
   [inactive](../reference/versions.md#states), but an upload always makes its version active, as

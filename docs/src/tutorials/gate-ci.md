@@ -8,8 +8,8 @@ You need:
 
 - a nanobom instance that GitHub's runners can reach over the internet (an instance on
   `localhost`, as in [Your first scan](first-scan.md), is not reachable from them);
-- an organization on it, here `acme`, and an upload token of that organization with the scope
-  **Whole organization** (see step 3 of [Your first scan](first-scan.md#3-create-an-organization-and-an-upload-token));
+- an organization on it, here `acme`, where you are an admin or an owner (see step 3 of
+  [Your first scan](first-scan.md#3-create-an-organization-and-a-project));
 - a GitHub account, git, and npm.
 
 ## 1. Create a small project
@@ -34,9 +34,13 @@ git push -u origin main
 
 ## 2. Give the repository the token and the address
 
+In nanobom, open `acme`, and under **New project** enter `nanobom-gate`, the repository's name,
+as the slug, then **Create project**. The project page that opens shows its **Upload token**.
+
 In the repository on GitHub, open **Settings → Secrets and variables → Actions**:
 
-1. On the **Secrets** tab, add a repository secret `NANOBOM_TOKEN` with the upload token.
+1. On the **Secrets** tab, add a repository secret `NANOBOM_TOKEN` with the project's upload
+   token.
 2. On the **Variables** tab, add a repository variable `NANOBOM_URL` with the instance's address,
    such as `https://nanobom.example.org`.
 
@@ -78,8 +82,8 @@ waited for nanobom to check it. The run's summary page shows the result: a link 
 the number of components uploaded, the evaluation's status, the open findings by severity, and a
 table of those findings, each linked to its page.
 
-In nanobom, the organization `acme` now has a project named `nanobom-gate`, after the
-repository, with the findings of `lodash` 4.17.20.
+In nanobom, the project `nanobom-gate`, which the action names after the repository, now has the
+findings of `lodash` 4.17.20.
 
 ## 4. Make the job fail
 

@@ -68,6 +68,9 @@ pub enum Command {
     /// Manage API tokens (upload and read).
     #[command(subcommand)]
     Token(TokenCommand),
+    /// Create projects and show their upload token.
+    #[command(subcommand)]
+    Project(ProjectCommand),
     /// Exit successfully when the running server reports itself healthy; for container health
     /// checks. Does not open the database.
     Healthcheck(HealthcheckOptions),
@@ -148,6 +151,34 @@ pub enum TokenCommand {
         /// Token identifier, as listed.
         #[arg(long)]
         id: i64,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ProjectCommand {
+    /// Create an empty project and print its upload token.
+    Create {
+        /// Organization slug.
+        #[arg(long)]
+        organization: String,
+        /// Project slug.
+        #[arg(long)]
+        project: String,
+        /// Display name; defaults to the slug.
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Print a project's upload token.
+    Token {
+        /// Organization slug.
+        #[arg(long)]
+        organization: String,
+        /// Project slug.
+        #[arg(long)]
+        project: String,
+        /// Replace the token first; the old value stops working at once.
+        #[arg(long)]
+        renew: bool,
     },
 }
 

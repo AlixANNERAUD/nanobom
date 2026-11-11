@@ -14,7 +14,8 @@
 //! A few choices are not visible from the signatures:
 //!
 //! - a new upload token's secret goes through the session (`NEW_TOKEN`), never through a URL,
-//!   and is shown once by the next settings page;
+//!   and is shown once by the next settings page; a project's own token is the exception, loaded
+//!   with the project page for those who manage tokens;
 //! - deleting an organization or a project requires typing its slug, checked here before the
 //!   domain is called;
 //! - starting a run only queues it, after [`nanobom_domain::evaluation::authorize`]: the page
@@ -269,6 +270,20 @@ pub async fn load_project(
     } else {
         None
     };
+    let upload_token = if organization.role.can_manage() {
+        let public_url = context()?.settings.public_url;
+        let token = nanobom_domain::tokens::project_token(database, &actor, model.id)
+            .await
+            .map_err(failure)?;
+        Some(project_upload_token(
+            &public_url,
+            &organization.slug,
+            &model.slug,
+            token,
+        ))
+    } else {
+        None
+    };
     Ok(ProjectData {
         last_upload_at: model.last_upload_at,
         created_at: model.created_at,
@@ -291,7 +306,43 @@ pub async fn load_project(
         counts: crate::server::counts(summary.counts),
         known_exploited: summary.known_exploited,
         badge,
+        upload_token,
     })
+}
+
+/// A project's upload token with ready-to-paste uploads: a GitHub Actions step and a `curl`
+/// command, both under the public URL and reading the token from `NANOBOM_TOKEN`, so the
+/// snippets themselves hold no secret.
+#[cfg(feature = "ssr")]
+fn project_upload_token(
+    public_url: &nanobom_domain::Url,
+    organization: &str,
+    project: &str,
+    token: nanobom_domain::tokens::CreatedToken,
+) -> ProjectUploadToken {
+    use nanobom_domain::notifications::link;
+    let base = public_url.as_str().trim_end_matches('/');
+    let github_actions = format!(
+        "- uses: AlixANNERAUD/nanobom-action@v1\n  with:\n    url: {base}\n    \
+         token: ${{{{ secrets.NANOBOM_TOKEN }}}}\n    organization: {organization}\n    \
+         project: {project}\n"
+    );
+    let endpoint = link(
+        public_url,
+        &format!("api/organizations/{organization}/projects/{project}/sbom"),
+    );
+    let curl = format!(
+        "curl --fail-with-body --request PUT \\\n  \
+         --header \"Authorization: Bearer $NANOBOM_TOKEN\" \\\n  \
+         --data-binary @sbom.json \\\n  \
+         {endpoint}\n"
+    );
+    ProjectUploadToken {
+        secret: token.secret,
+        last_used_at: token.token.last_used_at,
+        github_actions,
+        curl,
+    }
 }
 
 /// The badge of a project as its settings show it: the image on this server, and Markdown that
@@ -534,6 +585,7 @@ pub async fn load_settings(organization: String) -> Result<SettingsData, ServerF
                 created_at: token.created_at,
                 last_used_at: token.last_used_at,
                 revoked: token.revoked_at.is_some(),
+                project_token: token.project_token,
             })
             .collect(),
         projects: projects.into_iter().map(|project| project.slug).collect(),
@@ -636,6 +688,36 @@ pub async fn create_organization(slug: String, name: String) -> Result<(), Serve
             Ok(crate::t!("notices.organization_created")),
         ),
         Err(error) => back(Err(crate::server::message(error)), "/organizations"),
+    }
+    Ok(())
+}
+
+/// Creates a project, then lands on its upload token, which is what CI needs next.
+#[server(endpoint = "create_project")]
+pub async fn create_project(
+    organization: String,
+    slug: String,
+    name: String,
+) -> Result<(), ServerFnError> {
+    let actor = actor().await?;
+    let database = &context()?.database;
+    let result = async {
+        let id = organization_id(database, &actor, &organization).await?;
+        nanobom_domain::projects::create(database, &actor, id, &slug, &name).await
+    }
+    .await;
+    match result {
+        Ok(project) => redirect_with(
+            &format!(
+                "/organizations/{organization}/projects/{}#upload-token",
+                project.slug
+            ),
+            Ok(crate::t!("notices.project_created")),
+        ),
+        Err(error) => back(
+            Err(crate::server::message(error)),
+            &format!("/organizations/{organization}"),
+        ),
     }
     Ok(())
 }
@@ -1156,6 +1238,24 @@ pub async fn disable_badge(organization: String, project: String) -> Result<(), 
         let id = project_id(database, &actor, &organization, &project).await?;
         nanobom_domain::badges::disable(database, &actor, id).await?;
         Ok(crate::t!("notices.badge_disabled").to_owned())
+    }
+    .await;
+    finish(result, &version_page(&organization, &project));
+    Ok(())
+}
+
+/// Replaces a project's upload token; the old value stops working at once.
+#[server(endpoint = "renew_project_token")]
+pub async fn renew_project_token(
+    organization: String,
+    project: String,
+) -> Result<(), ServerFnError> {
+    let actor = actor().await?;
+    let database = &context()?.database;
+    let result = async {
+        let id = project_id(database, &actor, &organization, &project).await?;
+        nanobom_domain::tokens::renew_project_token(database, &actor, id).await?;
+        Ok(crate::t!("notices.project_token_renewed").to_owned())
     }
     .await;
     finish(result, &version_page(&organization, &project));

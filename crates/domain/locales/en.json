@@ -44,6 +44,7 @@
     "unknown_severity": "unknown severity",
     "unknown_justification": "unknown justification \"{justification}\"",
     "unknown_token_scope": "unknown token scope \"{scope}\"; expected upload or read",
+    "project_token_revoke": "a project's own upload token cannot be revoked, only renewed from the project page",
     "reason_required": "a reason is required to ignore a finding",
     "reason_too_long": "the reason must be at most {maximum} characters",
     "expiry_not_in_future": "the expiry date must be in the future",

@@ -40,15 +40,16 @@ Open <http://localhost:8080> and sign in as `admin` with that password. You land
 **Organizations**, which already lists one organization, `admin`: every new user gets a personal
 one.
 
-## 3. Create an organization and an upload token
+## 3. Create an organization and a project
 
-Your CI will send SBOMs to an organization, with an upload token of that organization.
+Your CI will send the SBOMs of a project, in an organization, with the project's upload token.
 
 1. Under **New organization**, enter `Acme` as the name and `acme` as the slug, then **Create**.
-2. Open **Acme**, then **Settings**.
-3. Under **API tokens**, enter `tutorial` as the token name, leave the project on **Whole
-   organization** and the scope on **Upload and read**, and **Create token**.
-4. Copy the token: it starts with `nanobom_`, and it will not be shown again.
+2. On the page of **Acme**, under **New project**, enter `demo` as the slug, leave the name
+   empty, and **Create project**.
+3. You land on the project `demo`, which says **No SBOM yet**. Under **Upload token**, copy the
+   token: it starts with `nanobom_`. It stays on this page, for admins and owners, and so do a
+   GitHub Actions step and a `curl` command that use it.
 
 In the terminal, keep it in a variable for the next steps:
 
@@ -87,8 +88,7 @@ EOF
 
 The `purl` of each component, its package URL, is what nanobom looks up in OSV.
 
-Send the file to a project named `demo`; the project does not exist yet, and this upload creates
-it:
+Send the file to the project `demo`:
 
 ```sh
 curl --fail-with-body -X PUT \
@@ -104,7 +104,7 @@ few seconds. The answer looks like this, shortened:
 {
   "organization": "acme",
   "project": "demo",
-  "project_created": true,
+  "project_created": false,
   "component_count": 2,
   "components_without_purl": 0,
   "evaluation": {
@@ -116,8 +116,9 @@ few seconds. The answer looks like this, shortened:
 }
 ```
 
-Check three things: `project_created` is `true`, `component_count` is `2`, and
-`evaluation.status` is `succeeded`. The counts in `open` depend on what OSV knows today; expect
+Check two things: `component_count` is `2`, and `evaluation.status` is `succeeded`.
+(`project_created` is `false`: the project existed already. An upload with an organization
+token to a new slug would have created it.) The counts in `open` depend on what OSV knows today; expect
 at least a critical finding (minimist) and a high one (lodash). Each entry of `findings` names a
 vulnerability, the component it affects, and the address of its page.
 
@@ -162,8 +163,7 @@ curl --fail-with-body -X PUT \
   "http://localhost:8080/api/organizations/acme/projects/demo/sbom?wait=true"
 ```
 
-This time `project_created` is `false`, and `evaluation.open.high` is one lower than before:
-ignored findings do not count. On the date you picked, the finding opens again by itself.
+This time `evaluation.open.high` is one lower than before: ignored findings do not count. On the date you picked, the finding opens again by itself.
 
 ## 7. Clean up
 
@@ -175,8 +175,8 @@ docker compose down --volumes
 
 ## What you learned
 
-You started nanobom, created an organization and a token, uploaded an SBOM that created a
-project, read its findings, and ignored one with a reason and an expiry date.
+You started nanobom, created an organization and a project, uploaded an SBOM with the project's
+upload token, read its findings, and ignored one with a reason and an expiry date.
 
 Next:
 

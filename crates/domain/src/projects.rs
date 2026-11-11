@@ -2,7 +2,8 @@
 //!
 //! A project belongs to one organization and is identified by its slug within it, as in
 //! `/api/organizations/{organization}/projects/{project}/sbom`. Its components are those of its
-//! latest upload ([`crate::inventory`]).
+//! latest upload ([`crate::inventory`]). Every project has an upload token of its own, issued
+//! when it is created ([`crate::tokens#project-tokens`]).
 
 use chrono::Utc;
 use nanobom_entity::projects;
@@ -92,18 +93,20 @@ pub(crate) async fn authorize(
     Ok(project)
 }
 
-/// Inserts a project with its first version (see [`crate::versions::insert_first`]), without
-/// checking any permission; the name defaults to the slug. Callers pass a transaction, or a
-/// project could be seen without its version.
+/// Inserts a project with its first version (see [`crate::versions::insert_first`]) and its
+/// upload token ([`crate::tokens::issue_project_token`]), without checking any permission; a
+/// missing or blank name defaults to the slug. Every path that creates a project goes through
+/// here. Callers pass a transaction, or a project could be seen without its version or token.
 pub(crate) async fn insert(
     database: &impl ConnectionTrait,
     organization_id: i64,
     slug: &str,
     name: Option<&str>,
     first_version: &str,
+    created_by: Option<i64>,
 ) -> Result<projects::Model> {
     let slug = names::slug(Field::ProjectSlug, slug)?;
-    let name = match name {
+    let name = match name.filter(|name| !name.trim().is_empty()) {
         Some(name) => names::display_name(Field::ProjectName, name)?,
         None => slug.clone(),
     };
@@ -125,12 +128,13 @@ pub(crate) async fn insert(
     .insert(database)
     .await?;
     crate::versions::insert_first(database, project.id, first_version, now).await?;
+    crate::tokens::issue_project_token(database, &project, created_by).await?;
     Ok(project)
 }
 
-/// Creates an empty project; projects are also created by the first upload of an
-/// organization-wide token. Requires [`Permission::ManageProjects`]; a taken slug is a
-/// [`Problem::ProjectExists`] conflict.
+/// Creates an empty project, with its upload token; projects are also created by the first
+/// upload of an organization-wide token. A blank name defaults to the slug. Requires
+/// [`Permission::ManageProjects`]; a taken slug is a [`Problem::ProjectExists`] conflict.
 pub async fn create(
     database: &(impl ConnectionTrait + TransactionTrait),
     actor: &Actor,
@@ -148,6 +152,31 @@ pub async fn create(
         slug,
         Some(name),
         crate::versions::UNNAMED,
+        Some(actor.user_id),
+    )
+    .await?;
+    transaction.commit().await?;
+    tracing::info!(project = %project.slug, user = actor.user_id, "project created");
+    Ok(project)
+}
+
+/// Creates an empty project from the command line, which has direct access to the database: no
+/// actor is checked. See [`create`].
+pub async fn create_from_command_line(
+    database: &(impl ConnectionTrait + TransactionTrait),
+    organization_slug: &str,
+    slug: &str,
+    name: Option<&str>,
+) -> Result<projects::Model> {
+    let organization = crate::tokens::organization_by_slug(database, organization_slug).await?;
+    let transaction = crate::database::begin_write(database).await?;
+    let project = insert(
+        &transaction,
+        organization.id,
+        slug,
+        name,
+        crate::versions::UNNAMED,
+        None,
     )
     .await?;
     transaction.commit().await?;
@@ -169,7 +198,8 @@ pub async fn rename(
 }
 
 /// Deletes a project with its components, upload history and findings. Requires
-/// [`Permission::ManageProjects`]. Upload tokens limited to the project are deleted with it;
+/// [`Permission::ManageProjects`]. Upload tokens limited to the project, its own included, are
+/// deleted with it;
 /// an organization-wide token that uploads to the same slug again recreates it, empty.
 pub async fn delete(database: &impl ConnectionTrait, actor: &Actor, project_id: i64) -> Result<()> {
     let project = authorize(database, actor, project_id, Permission::ManageProjects).await?;

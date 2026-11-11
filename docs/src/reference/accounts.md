@@ -16,8 +16,8 @@ Each member of an organization has one of four roles, each including the ones be
 | Ignore and restore findings | | ✓ | ✓ | ✓ |
 | Start a run (**Check now**) | | ✓ | ✓ | ✓ |
 | Add, change and remove members other than owners | | | ✓ | ✓ |
-| Delete projects; make their [versions](versions.md) inactive or active, mark one latest, delete them; turn their [badge](badges.md) on or off and give it a new address | | | ✓ | ✓ |
-| Create and revoke API tokens, upload or read | | | ✓ | ✓ |
+| Create and delete projects; make their [versions](versions.md) inactive or active, mark one latest, delete them; turn their [badge](badges.md) on or off and give it a new address | | | ✓ | ✓ |
+| Create and revoke API tokens, upload or read; see and renew each project's [upload token](upload-api.md#the-projects-upload-token) | | | ✓ | ✓ |
 | Configure the webhook and email notifications, send a test email | | | ✓ | ✓ |
 | Change the [license policy](license-policy.md) | | | ✓ | ✓ |
 | Rename the organization | | | ✓ | ✓ |
@@ -27,8 +27,8 @@ Each member of an organization has one of four roles, each including the ones be
 - Any signed-in user can create an organization and becomes its owner.
 - Any member can leave an organization, unless they are its last owner. An organization always
   keeps at least one owner: removing or demoting the last one is refused.
-- Projects are created by uploads, not in the interface, so creating one only needs an
-  organization-wide upload token.
+- Projects are created on the organization page (**New project**), or by the first upload of an
+  organization-wide upload token, which therefore creates projects without any role.
 - A user who is not a member of an organization gets "not found" for its pages, projects and
   findings. Search results and a finding's **Also affected** list only cover organizations the
   user belongs to (every organization, for instance administrators).

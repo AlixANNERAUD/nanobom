@@ -11,14 +11,14 @@ use crate::{
         format_time, ui::*,
     },
     functions::{
-        DeleteProject, DeleteVersion, DisableBadge, EnableBadge, IgnoreFinding, RestoreFinding,
-        SetLatestVersion, SetVersionActive, TriggerRun, load_finding, load_project,
+        DeleteProject, DeleteVersion, DisableBadge, EnableBadge, IgnoreFinding, RenewProjectToken,
+        RestoreFinding, SetLatestVersion, SetVersionActive, TriggerRun, load_finding, load_project,
         search_components,
     },
     model::{
         ComponentMatch, DependencyComponent, DependencyPaths, FindingData, FindingFilter,
-        FindingRow, LicenseAction, LicenseViolations, ProjectBadge, ProjectData, Severity, Status,
-        VersionFinding, VersionOption,
+        FindingRow, LicenseAction, LicenseViolations, ProjectBadge, ProjectData,
+        ProjectUploadToken, Severity, Status, VersionFinding, VersionOption,
     },
     pages::organizations::severity_cells,
     t, tf, tp,
@@ -709,6 +709,46 @@ pub fn ProjectPage() -> impl IntoView {
                             }
                         })
                         .collect_view();
+                    // A project that never received an SBOM has nothing to filter: say so, and
+                    // point those who can set CI up at the token.
+                    let never_uploaded = page.uploads.is_empty();
+                    let findings = if never_uploaded {
+                        let setup = page.upload_token.is_some().then(|| {
+                            view! {
+                                <p class="mt-3">
+                                    <a class="text-foreground font-medium underline underline-offset-4" href="#upload-token">
+                                        {t!("project.no_upload_setup")}
+                                    </a>
+                                </p>
+                            }
+                        });
+                        view! {
+                            <Empty title=t!("project.no_upload_title")>
+                                {t!("project.no_upload_text")}
+                                {setup}
+                            </Empty>
+                        }
+                            .into_any()
+                    } else {
+                        view! {
+                            <Filters page=page.clone() filter />
+                            {table}
+                        }
+                            .into_any()
+                    };
+                    let upload_token = page.upload_token.clone().map({
+                        let organization_slug = organization_slug.clone();
+                        let project_slug = project_slug.clone();
+                        move |token| {
+                            view! {
+                                <UploadTokenSettings
+                                    organization=organization_slug
+                                    project=project_slug
+                                    token
+                                />
+                            }
+                        }
+                    });
                     let badge = organization.role.can_manage().then({
                         let organization_slug = organization_slug.clone();
                         let project_slug = project_slug.clone();
@@ -789,24 +829,97 @@ pub fn ProjectPage() -> impl IntoView {
                         {stale}
                         {inactive}
                         {without_purl}
-                        <Filters page=page.clone() filter />
-                        {table}
+                        {findings}
                         {page.licenses.clone().map(|licenses| view! { <Licenses licenses /> })}
-                        <Card>
-                            <CardHeader>
-                                <CardTitle>{t!("project.uploads_title")}</CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                                <ul class="grid gap-2 text-sm">{uploads}</ul>
-                            </CardContent>
-                        </Card>
+                        {(!never_uploaded).then(|| view! {
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>{t!("project.uploads_title")}</CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    <ul class="grid gap-2 text-sm">{uploads}</ul>
+                                </CardContent>
+                            </Card>
+                        })}
                         {versions}
+                        {upload_token}
                         {badge}
                         {delete}
                     }
                 }}
             />
         </Page>
+    }
+}
+
+/// The project's upload token, for those who manage tokens: its value, the uploads to paste in
+/// CI, and a button to renew it. The anchor is where a new project lands.
+#[component]
+fn UploadTokenSettings(
+    organization: String,
+    project: String,
+    token: ProjectUploadToken,
+) -> impl IntoView {
+    let last_used = token.last_used_at.map_or_else(
+        || t!("project.token_never_used").to_owned(),
+        |time| tf!("project.token_last_used", time = format_time(time)),
+    );
+    view! {
+        <div id="upload-token" class="scroll-mt-20">
+            <Card>
+                <CardHeader>
+                    <CardTitle>{t!("project.token_title")}</CardTitle>
+                    <CardDescription>{t!("project.token_description")}</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <div class="grid gap-4">
+                        <Field label=t!("project.token_label") input_id="upload-token-value" hint=last_used>
+                            <input
+                                id="upload-token-value"
+                                class=format!("{INPUT} {MONO}")
+                                readonly
+                                autocomplete="off"
+                                value=token.secret
+                            />
+                        </Field>
+                        <Field
+                            label=t!("project.token_github")
+                            input_id="upload-token-github"
+                            hint=t!("project.token_github_hint")
+                        >
+                            <textarea
+                                id="upload-token-github"
+                                class=format!("{TEXTAREA} {MONO} min-h-36")
+                                readonly
+                                rows="7"
+                            >
+                                {token.github_actions}
+                            </textarea>
+                        </Field>
+                        <Field
+                            label=t!("project.token_curl")
+                            input_id="upload-token-curl"
+                            hint=t!("project.token_curl_hint")
+                        >
+                            <textarea
+                                id="upload-token-curl"
+                                class=format!("{TEXTAREA} {MONO} min-h-28")
+                                readonly
+                                rows="5"
+                            >
+                                {token.curl}
+                            </textarea>
+                        </Field>
+                        <form method="post" action={action::<RenewProjectToken>()} class="grid justify-items-start gap-2">
+                            <input type="hidden" name="organization" value=organization />
+                            <input type="hidden" name="project" value=project />
+                            <p class="text-muted-foreground text-sm">{t!("project.token_renew_warning")}</p>
+                            <Button variant=ButtonVariant::Outline>{t!("project.token_renew")}</Button>
+                        </form>
+                    </div>
+                </CardContent>
+            </Card>
+        </div>
     }
 }
 

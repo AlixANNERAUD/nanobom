@@ -11,8 +11,10 @@ is explained in [Dependency-Track compatibility](../explanation/dependency-track
 - **Generate the SBOM in JSON.** Many Dependency-Track setups upload `bom.xml`; nanobom reads
   CycloneDX JSON and SPDX JSON only, so switch the generator's output format (see [Generate an
   SBOM](generate-sbom.md)).
-- **Create an upload token** as in [Upload from CI](upload-from-ci.md#create-an-upload-token). Use
-  an organization token for clients that create projects (`autoCreate`).
+- **Get an upload token** as in [Upload from CI](upload-from-ci.md#get-an-upload-token). A
+  client that uploads to one project uses that project's upload token; `autoCreate` is accepted
+  with it but never creates the project, which must exist. Use an organization token for clients
+  that create projects (`autoCreate`).
 - **Name projects with a slug.** The project name becomes the project's slug, folded to lower
   case: `Web-App` uploads to `web-app`, but `Web App` is refused, since a slug cannot contain a
   space.

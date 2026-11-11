@@ -15,27 +15,39 @@ request without replacing anything, use a separate project (`web-pr`), or none a
 Maintenance branches that ship next to the default one upload to their own version of the
 project: see [Track several versions of a product](track-versions.md).
 
-## Create an upload token
+## Get an upload token
 
-An organization's admins create tokens in **Settings → API tokens**: a name, a project, either
-**Whole organization** or one project, and the scope **Upload and read** (a **Read only** token
-cannot upload). Copy the token when it is shown: it is shown once.
+Every project has an upload token of its own, which uploads to that project only and never
+creates one: a typo in the URL fails instead of creating a project.
 
-- Use an **organization token** for the first upload of a project: it creates the project.
-- Then prefer a **project token** when a repository builds one project: a leaked token reaches
-  one project only, and a typo in the URL fails instead of creating a new project. It can only be
-  created once the project exists.
+1. On the organization page, under **New project**, enter the project's slug (the name is
+   optional), and **Create project**. This needs the admin or owner role.
+2. The project page opens on **Upload token**: the token, a GitHub Actions step and a `curl`
+   command, ready to paste. Admins and owners find them there again at any time.
 
-With access to the database, the command line does the same and prints the token alone, so a
-script can capture it (see the [command-line reference](../reference/command-line.md#nanobom-token)):
+A project that already exists has its token there too. With access to the database, the command
+line does the same and prints the token alone, so a script can capture it (see the
+[command-line reference](../reference/command-line.md#nanobom-project)):
 
 ```sh
-TOKEN=$(nanobom token create --organization acme --name "web CI" --project web)
+TOKEN=$(nanobom project create --organization acme --project web)
+TOKEN=$(nanobom project token --organization acme --project web)
 ```
 
 Store the token as a **secret** of the CI system, and the instance's address as a plain variable.
-To replace a token, create a new one, update the secret, then revoke the old one; the settings
-page shows when each token was last used.
+To replace it, select **Renew** on the project page (or `nanobom project token --renew`): the old
+value stops working at once, so update the secret right after. The page shows when the token was
+last used.
+
+Other tokens are created in **Settings → API tokens** and shown once
+([tokens](../reference/upload-api.md#tokens)):
+
+- an **organization token** for a pipeline that creates projects as it goes, such as a monorepo
+  or a fleet of images: its first upload to a new slug creates the project;
+- a second **project token**, for a pipeline you want to revoke on its own;
+- a **Read only** token for tools that only read.
+
+To replace one of those, create a new one, update the secret, then revoke the old one.
 
 ## GitHub Actions
 

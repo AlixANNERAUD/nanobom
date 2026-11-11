@@ -8,15 +8,32 @@
 //! Whatever the scope, a token reads like a viewer of what it reaches
 //! ([`crate::access::Reader`]). The table keeps its historical name, `upload_tokens`.
 //!
-//! Tokens are 256-bit random values shown once at creation. Only their SHA-256 digest is stored:
-//! a slow password hash is unnecessary for random secrets of this length and would slow every
-//! upload down.
+//! Tokens are 256-bit random values shown once at creation, except [project
+//! tokens](#project-tokens). Their SHA-256 digest is what authenticates: a slow password hash is
+//! unnecessary for random secrets of this length and would slow every upload down.
+//!
+//! # Project tokens
+//!
+//! Every project comes with one upload token of its own, created with the project by every path
+//! that creates one ([`crate::projects`]), so a project created in the interface can be uploaded
+//! to at once. It is an ordinary project token of scope [`Scope::Upload`] (same row, same
+//! authentication, same reach), with two differences:
+//!
+//! - its clear value is kept, in `project_tokens.secret`, so the project's settings show it again
+//!   to those who manage tokens ([`project_token`]). This is the trade-off a CI service such as
+//!   Codecov makes, and the one nanobom already makes for webhook URLs (which may embed a secret)
+//!   and badge keys: whoever reads the database can upload SBOMs to the project. Named tokens
+//!   keep only their digest.
+//! - it cannot be revoked, only renewed ([`renew_project_token`]): the old row is revoked and a
+//!   new one takes its place, so a project always has exactly one.
+
+use std::collections::HashSet;
 
 use chrono::Utc;
-use nanobom_entity::{organizations, projects, upload_tokens};
+use nanobom_entity::{organizations, project_tokens, projects, upload_tokens};
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
-    QueryOrder,
+    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, DbErr, EntityTrait,
+    QueryFilter, QueryOrder, TransactionSession, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -83,7 +100,7 @@ pub(crate) fn require_upload_scope(token: &upload_tokens::Model) -> Result<()> {
     }
 }
 
-/// A token as shown in the interface; the secret itself is never stored.
+/// A token as shown in lists. It never carries the secret, not even a project token's.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UploadToken {
     pub id: i64,
@@ -97,15 +114,21 @@ pub struct UploadToken {
     pub created_at: chrono::DateTime<chrono::FixedOffset>,
     pub last_used_at: Option<chrono::DateTime<chrono::FixedOffset>>,
     pub revoked_at: Option<chrono::DateTime<chrono::FixedOffset>>,
+    /// Whether this is the current upload token of its project (see [Project
+    /// tokens](self#project-tokens)), which is renewed from the project rather than revoked.
+    pub project_token: bool,
 }
 
-/// A token that was just created, with its secret value.
+/// A token with its secret value: a token just created, shown once, or a project's own token.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CreatedToken {
     pub token: UploadToken,
-    /// The full token, to show once: it cannot be recovered later.
+    /// The full token. Only a project token's can be read again later.
     pub secret: String,
 }
+
+/// The name of every project token, in lists and in the history of what a token changed.
+pub const PROJECT_TOKEN_NAME: &str = "Project token";
 
 fn generate_secret() -> String {
     let mut bytes = [0_u8; 32];
@@ -122,8 +145,13 @@ pub(crate) fn digest(secret: &str) -> String {
     hexadecimal(&Sha256::digest(secret.as_bytes()))
 }
 
-fn view(model: upload_tokens::Model, project_slug: Option<String>) -> UploadToken {
+fn view(
+    model: upload_tokens::Model,
+    project_slug: Option<String>,
+    project_token: bool,
+) -> UploadToken {
     UploadToken {
+        project_token,
         id: model.id,
         scope: Scope::of(&model),
         name: model.name,
@@ -200,10 +228,33 @@ async fn insert(
         ),
         None => None,
     };
+    let (model, secret) = insert_row(
+        database,
+        organization_id,
+        project.as_ref().map(|project| project.id),
+        name,
+        scope,
+        created_by,
+    )
+    .await?;
+    Ok(CreatedToken {
+        token: view(model, project.map(|project| project.slug), false),
+        secret,
+    })
+}
+
+async fn insert_row(
+    database: &impl ConnectionTrait,
+    organization_id: i64,
+    project_id: Option<i64>,
+    name: String,
+    scope: Scope,
+    created_by: Option<i64>,
+) -> std::result::Result<(upload_tokens::Model, String), DbErr> {
     let secret = generate_secret();
     let model = upload_tokens::ActiveModel {
         organization_id: Set(organization_id),
-        project_id: Set(project.as_ref().map(|project| project.id)),
+        project_id: Set(project_id),
         name: Set(name),
         scope: Set(scope.as_str().to_owned()),
         token_hash: Set(digest(&secret)),
@@ -216,13 +267,195 @@ async fn insert(
     }
     .insert(database)
     .await?;
+    Ok((model, secret))
+}
+
+/// Gives a new project its upload token. Called by [`crate::projects::insert`], inside the
+/// transaction that creates the project, so no project is ever seen without one.
+pub(crate) async fn issue_project_token(
+    database: &impl ConnectionTrait,
+    project: &projects::Model,
+    created_by: Option<i64>,
+) -> std::result::Result<(), DbErr> {
+    let (token, secret) = insert_row(
+        database,
+        project.organization_id,
+        Some(project.id),
+        PROJECT_TOKEN_NAME.to_owned(),
+        Scope::Upload,
+        created_by,
+    )
+    .await?;
+    project_tokens::Entity::insert(project_tokens::ActiveModel {
+        project_id: Set(project.id),
+        upload_token_id: Set(token.id),
+        secret: Set(secret),
+    })
+    .exec(database)
+    .await?;
+    Ok(())
+}
+
+/// Gives every project that has no upload token of its own one; returns how many it issued.
+/// [`crate::database::migrate`] calls it after the migrations, for projects created before
+/// project tokens existed (a migration cannot draw random values or hash them). It does nothing
+/// once every project has its token.
+pub async fn issue_missing_project_tokens(
+    database: &(impl ConnectionTrait + TransactionTrait),
+) -> std::result::Result<u64, DbErr> {
+    let with_token: HashSet<i64> = project_tokens::Entity::find()
+        .all(database)
+        .await?
+        .into_iter()
+        .map(|row| row.project_id)
+        .collect();
+    let missing: Vec<projects::Model> = projects::Entity::find()
+        .order_by_asc(projects::Column::Id)
+        .all(database)
+        .await?
+        .into_iter()
+        .filter(|project| !with_token.contains(&project.id))
+        .collect();
+    if missing.is_empty() {
+        return Ok(0);
+    }
+    let transaction = crate::database::begin_write(database).await?;
+    for project in &missing {
+        issue_project_token(&transaction, project, None).await?;
+    }
+    transaction.commit().await?;
+    tracing::info!(
+        projects = missing.len(),
+        "upload tokens issued to existing projects"
+    );
+    Ok(missing.len() as u64)
+}
+
+/// The upload token of a project, with its value: what the project's settings show. Requires
+/// [`Permission::ManageUploadTokens`]; another organization's project is [`Error::NotFound`].
+pub async fn project_token(
+    database: &impl ConnectionTrait,
+    actor: &Actor,
+    project_id: i64,
+) -> Result<CreatedToken> {
+    let project =
+        crate::projects::authorize(database, actor, project_id, Permission::ManageUploadTokens)
+            .await?;
+    load_project_token(database, project).await
+}
+
+async fn load_project_token(
+    database: &impl ConnectionTrait,
+    project: projects::Model,
+) -> Result<CreatedToken> {
+    let (row, token) = project_tokens::Entity::find_by_id(project.id)
+        .find_also_related(upload_tokens::Entity)
+        .one(database)
+        .await?
+        .ok_or(Error::NotFound)?;
+    let token = token.ok_or(Error::NotFound)?;
     Ok(CreatedToken {
-        token: view(model, project.map(|project| project.slug)),
+        token: view(token, Some(project.slug), true),
+        secret: row.secret,
+    })
+}
+
+/// Replaces a project's upload token and returns the new one: the old value stops working at
+/// once (its row is revoked and stays listed, for the record). Requires
+/// [`Permission::ManageUploadTokens`]; another organization's project is [`Error::NotFound`].
+pub async fn renew_project_token(
+    database: &(impl ConnectionTrait + TransactionTrait),
+    actor: &Actor,
+    project_id: i64,
+) -> Result<CreatedToken> {
+    let project =
+        crate::projects::authorize(database, actor, project_id, Permission::ManageUploadTokens)
+            .await?;
+    let renewed = renew(database, project, Some(actor.user_id)).await?;
+    tracing::info!(
+        project = %renewed.token.project_slug.as_deref().unwrap_or_default(),
+        user = actor.user_id,
+        id = renewed.token.id,
+        "project token renewed"
+    );
+    Ok(renewed)
+}
+
+/// Swaps the project's token for a new one in one transaction. The swap only applies if the
+/// project still points at the token read first: on PostgreSQL, a renewal running at the same
+/// time holds the row until it commits, after which this one matches nothing, rolls back, and
+/// returns the token the other one issued, so a project never ends up with two active tokens.
+async fn renew(
+    database: &(impl ConnectionTrait + TransactionTrait),
+    project: projects::Model,
+    created_by: Option<i64>,
+) -> Result<CreatedToken> {
+    use sea_orm::sea_query::Expr;
+    let transaction = crate::database::begin_write(database).await?;
+    let current = project_tokens::Entity::find_by_id(project.id)
+        .one(&transaction)
+        .await?
+        .ok_or(Error::NotFound)?;
+    let (token, secret) = insert_row(
+        &transaction,
+        project.organization_id,
+        Some(project.id),
+        PROJECT_TOKEN_NAME.to_owned(),
+        Scope::Upload,
+        created_by,
+    )
+    .await?;
+    let swapped = project_tokens::Entity::update_many()
+        .col_expr(project_tokens::Column::UploadTokenId, Expr::value(token.id))
+        .col_expr(project_tokens::Column::Secret, Expr::value(secret.clone()))
+        .filter(project_tokens::Column::ProjectId.eq(project.id))
+        .filter(project_tokens::Column::UploadTokenId.eq(current.upload_token_id))
+        .exec(&transaction)
+        .await?;
+    if swapped.rows_affected == 0 {
+        transaction.rollback().await?;
+        return load_project_token(database, project).await;
+    }
+    upload_tokens::Entity::update_many()
+        .col_expr(
+            upload_tokens::Column::RevokedAt,
+            Expr::value(Utc::now().fixed_offset()),
+        )
+        .filter(upload_tokens::Column::Id.eq(current.upload_token_id))
+        .filter(upload_tokens::Column::RevokedAt.is_null())
+        .exec(&transaction)
+        .await?;
+    transaction.commit().await?;
+    Ok(CreatedToken {
+        token: view(token, Some(project.slug), true),
         secret,
     })
 }
 
-async fn organization_by_slug(
+/// Shows a project's upload token from the command line, after renewing it when `renew` is
+/// set. Like the other command line functions, it checks no actor.
+pub async fn project_token_from_command_line(
+    database: &(impl ConnectionTrait + TransactionTrait),
+    organization_slug: &str,
+    project_slug: &str,
+    renew: bool,
+) -> Result<CreatedToken> {
+    let organization = organization_by_slug(database, organization_slug).await?;
+    let project = crate::projects::find_model(database, organization.id, project_slug)
+        .await?
+        .ok_or_else(|| {
+            Error::invalid(Problem::UnknownProject {
+                slug: project_slug.to_owned(),
+            })
+        })?;
+    if renew {
+        self::renew(database, project, None).await
+    } else {
+        load_project_token(database, project).await
+    }
+}
+
+pub(crate) async fn organization_by_slug(
     database: &impl ConnectionTrait,
     slug: &str,
 ) -> Result<organizations::Model> {
@@ -295,15 +528,29 @@ async fn list_models(
         .order_by_desc(upload_tokens::Column::Id)
         .all(database)
         .await?;
+    let project_tokens: HashSet<i64> = project_tokens::Entity::find()
+        .filter(
+            project_tokens::Column::UploadTokenId
+                .is_in(rows.iter().map(|(token, _)| token.id).collect::<Vec<_>>()),
+        )
+        .all(database)
+        .await?
+        .into_iter()
+        .map(|row| row.upload_token_id)
+        .collect();
     Ok(rows
         .into_iter()
-        .map(|(token, project)| view(token, project.map(|project| project.slug)))
+        .map(|(token, project)| {
+            let project_token = project_tokens.contains(&token.id);
+            view(token, project.map(|project| project.slug), project_token)
+        })
         .collect())
 }
 
 /// Revokes a token; it stops working immediately and stays listed for the record. Revoking a
 /// revoked token does nothing. Requires [`Permission::ManageUploadTokens`] in the token's
-/// organization.
+/// organization. A project's own token is [`Problem::ProjectTokenRevoke`]: it is renewed
+/// instead, so the project keeps one.
 pub async fn revoke(database: &impl ConnectionTrait, actor: &Actor, token_id: i64) -> Result<()> {
     let token = upload_tokens::Entity::find_by_id(token_id)
         .one(database)
@@ -322,6 +569,14 @@ pub async fn revoke(database: &impl ConnectionTrait, actor: &Actor, token_id: i6
 async fn mark_revoked(database: &impl ConnectionTrait, token: upload_tokens::Model) -> Result<()> {
     if token.revoked_at.is_some() {
         return Ok(());
+    }
+    let is_project_token = project_tokens::Entity::find()
+        .filter(project_tokens::Column::UploadTokenId.eq(token.id))
+        .one(database)
+        .await?
+        .is_some();
+    if is_project_token {
+        return Err(Error::conflict(Problem::ProjectTokenRevoke));
     }
     let mut token: upload_tokens::ActiveModel = token.into();
     token.revoked_at = Set(Some(Utc::now().fixed_offset()));
