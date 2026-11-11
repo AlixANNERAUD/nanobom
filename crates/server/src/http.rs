@@ -33,6 +33,7 @@ pub fn layers(router: Router) -> Router {
             header::CONTENT_SECURITY_POLICY,
             "frame-ancestors 'none'",
         ))
+        .layer(middleware::from_fn(no_store_pages))
         .layer(
             CompressionLayer::new().compress_when(DefaultPredicate::new().and(without_strong_tag)),
         )
@@ -45,6 +46,23 @@ fn without_strong_tag(_: StatusCode, _: Version, headers: &HeaderMap, _: &Extens
     headers
         .get(header::ETAG)
         .is_none_or(|tag| tag.as_bytes().starts_with(b"W/"))
+}
+
+/// Interface pages carry what only their viewer may see, such as a project's upload token for its
+/// admins: no browser or proxy cache keeps them after sign-out, unless the route set its own
+/// caching (the report, badges).
+async fn no_store_pages(request: Request, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    let html = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .is_some_and(|value| value.as_bytes().starts_with(b"text/html"));
+    if html && !response.headers().contains_key(header::CACHE_CONTROL) {
+        response
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    }
+    response
 }
 
 fn security_header(name: HeaderName, value: &'static str) -> SetResponseHeaderLayer<HeaderValue> {

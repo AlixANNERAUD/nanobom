@@ -300,26 +300,35 @@ pub(crate) async fn issue_project_token(
 /// [`crate::database::migrate`] calls it after the migrations, for projects created before
 /// project tokens existed (a migration cannot draw random values or hash them). It does nothing
 /// once every project has its token.
+///
+/// Several processes may migrate at once (replicas, or `serve` next to a command). The missing
+/// projects are read inside the write transaction, which serializes them on SQLite; on PostgreSQL
+/// two of them can still race, and the loser's insert fails on the primary key (or on the foreign
+/// key of a project deleted meanwhile). A failure after which no project lacks a token is that
+/// race, lost to a process that did the work: it is not an error.
 pub async fn issue_missing_project_tokens(
     database: &(impl ConnectionTrait + TransactionTrait),
 ) -> std::result::Result<u64, DbErr> {
-    let with_token: HashSet<i64> = project_tokens::Entity::find()
-        .all(database)
-        .await?
-        .into_iter()
-        .map(|row| row.project_id)
-        .collect();
-    let missing: Vec<projects::Model> = projects::Entity::find()
-        .order_by_asc(projects::Column::Id)
-        .all(database)
-        .await?
-        .into_iter()
-        .filter(|project| !with_token.contains(&project.id))
-        .collect();
+    match issue_missing(database).await {
+        Ok(issued) => Ok(issued),
+        Err(error) => {
+            if missing_project_tokens(database).await?.is_empty() {
+                Ok(0)
+            } else {
+                Err(error)
+            }
+        }
+    }
+}
+
+async fn issue_missing(
+    database: &(impl ConnectionTrait + TransactionTrait),
+) -> std::result::Result<u64, DbErr> {
+    let transaction = crate::database::begin_write(database).await?;
+    let missing = missing_project_tokens(&transaction).await?;
     if missing.is_empty() {
         return Ok(0);
     }
-    let transaction = crate::database::begin_write(database).await?;
     for project in &missing {
         issue_project_token(&transaction, project, None).await?;
     }
@@ -329,6 +338,25 @@ pub async fn issue_missing_project_tokens(
         "upload tokens issued to existing projects"
     );
     Ok(missing.len() as u64)
+}
+
+/// The projects without a row in `project_tokens`, by an anti-join so that the tokens' secrets
+/// are never read.
+async fn missing_project_tokens(
+    database: &impl ConnectionTrait,
+) -> std::result::Result<Vec<projects::Model>, DbErr> {
+    projects::Entity::find()
+        .filter(
+            projects::Column::Id.not_in_subquery(
+                sea_orm::sea_query::Query::select()
+                    .column(project_tokens::Column::ProjectId)
+                    .from(project_tokens::Entity)
+                    .to_owned(),
+            ),
+        )
+        .order_by_asc(projects::Column::Id)
+        .all(database)
+        .await
 }
 
 /// The upload token of a project, with its value: what the project's settings show. Requires

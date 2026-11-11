@@ -272,15 +272,14 @@ pub async fn load_project(
     };
     let upload_token = if organization.role.can_manage() {
         let public_url = context()?.settings.public_url;
-        let token = nanobom_domain::tokens::project_token(database, &actor, model.id)
-            .await
-            .map_err(failure)?;
-        Some(project_upload_token(
-            &public_url,
-            &organization.slug,
-            &model.slug,
-            token,
-        ))
+        // A project created by an older server during a rolling upgrade has no token until the
+        // next start issues it: the page shows without the section rather than failing.
+        match nanobom_domain::tokens::project_token(database, &actor, model.id).await {
+            Ok(token) => Some(token),
+            Err(nanobom_domain::Error::NotFound) => None,
+            Err(error) => return Err(failure(error)),
+        }
+        .map(|token| project_upload_token(&public_url, &organization.slug, &model.slug, token))
     } else {
         None
     };
@@ -324,8 +323,8 @@ fn project_upload_token(
     let base = public_url.as_str().trim_end_matches('/');
     let github_actions = format!(
         "- uses: AlixANNERAUD/nanobom-action@v1\n  with:\n    url: {base}\n    \
-         token: ${{{{ secrets.NANOBOM_TOKEN }}}}\n    organization: {organization}\n    \
-         project: {project}\n"
+         token: ${{{{ secrets.NANOBOM_TOKEN }}}}\n    organization: '{organization}'\n    \
+         project: '{project}'\n"
     );
     let endpoint = link(
         public_url,

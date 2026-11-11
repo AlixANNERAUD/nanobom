@@ -2942,6 +2942,9 @@ async fn the_upload_token_is_shown_and_renewed_on_the_project_page() {
     let page = "/organizations/acme/projects/web";
     let form = "organization=acme&project=web";
 
+    // The page carries the token: no cache may keep it after sign-out.
+    let response = alice.get(page).await;
+    assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
     let html = alice.page(page).await;
     assert!(html.contains("id=\"upload-token\""), "{html}");
     assert!(html.contains(&format!("value=\"{secret}\"")), "{html}");
@@ -2954,8 +2957,9 @@ async fn the_upload_token_is_shown_and_renewed_on_the_project_page() {
         html.contains("token: ${{ secrets.NANOBOM_TOKEN }}"),
         "{html}"
     );
-    assert!(html.contains("organization: acme\n"), "{html}");
-    assert!(html.contains("project: web"), "{html}");
+    // Quoted, so a slug such as `1.10` stays a string in YAML.
+    assert!(html.contains("organization: 'acme'\n"), "{html}");
+    assert!(html.contains("project: 'web'"), "{html}");
     assert!(
         html.contains("http://localhost:8080/api/organizations/acme/projects/web/sbom"),
         "{html}"
