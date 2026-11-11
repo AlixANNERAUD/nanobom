@@ -95,5 +95,10 @@ pub async fn run(command_line: CommandLine) -> Result<(), Failure> {
             database::migrate(&connection).await?;
             administration::token(&connection, command).await
         }
+        Command::Project(command) => {
+            let connection = connect().await?;
+            database::migrate(&connection).await?;
+            administration::project(&connection, command).await
+        }
     }
 }

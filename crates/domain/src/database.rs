@@ -66,10 +66,14 @@ where
         .await
 }
 
-/// Applies every pending migration of [`nanobom_migration::Migrator`]. Migrations only move
-/// forward; there is no automatic downgrade.
+/// Applies every pending migration of [`nanobom_migration::Migrator`], then gives projects
+/// created before project tokens existed their upload token
+/// ([`crate::tokens::issue_missing_project_tokens`]), which a migration cannot do. Migrations
+/// only move forward; there is no automatic downgrade.
 pub async fn migrate(database: &DatabaseConnection) -> Result<(), DbErr> {
-    Migrator::up(database, None).await
+    Migrator::up(database, None).await?;
+    crate::tokens::issue_missing_project_tokens(database).await?;
+    Ok(())
 }
 
 /// Why [`backup`] refused or failed.

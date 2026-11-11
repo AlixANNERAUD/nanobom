@@ -25,6 +25,15 @@ reach operators rather than an organization's channel.
   them in logs and repositories.
 - Stored as a SHA-256 digest. A slow password hash is unnecessary for random values of that
   length, and would slow every upload down.
+- Except each project's own upload token, whose clear value is also stored, so that the project
+  page can show it again and a new project is ready for CI without a token to create and copy
+  at once. This is the trade-off CI services such as Codecov make for their upload tokens, and
+  the one nanobom already makes for webhook URLs (which may embed a secret) and badge keys:
+  whoever reads the database, or a backup of it, can upload SBOMs and import VEX documents to
+  every project, and so hide their vulnerabilities. They could already read every finding and
+  change any row, so the database is the boundary either way. Only admins and owners see the
+  value; it is never in a token list, an API response or the page of a member or viewer. It
+  cannot be revoked, only renewed, which stops the old value at once.
 - Limited to an organization or one project; they reach the upload, VEX and read APIs only,
   never the interface. A project token limits a leak to one project, and cannot create
   projects. Every token reads the findings of the projects it reaches, as a viewer, through the
@@ -34,8 +43,9 @@ reach operators rather than an organization's channel.
   it belongs to. A `read` token cannot change anything: every write path refuses it, in the
   server and again in the domain layer. Give tools that only read a read token
   ([Tokens and scopes](tokens.md)).
-- Shown once; revocable; their last use is recorded, to the minute: a token used again within
-  a minute does not write to the database, so reads stay reads.
+- Shown once (except the project's upload token); revocable (the project's upload token is
+  renewed instead); their last use is recorded, to the minute: a token used again within a
+  minute does not write to the database, so reads stay reads.
 
 The upload API is not exposed to cross-site request forgery: it is authenticated by the
 `Authorization` header (`X-Api-Key` for the Dependency-Track API), which browsers never add on
@@ -163,7 +173,7 @@ log records it with each request.
 
 ## Data at rest
 
-Everything, password hashes and token digests included, is in the database (SQLite or
-PostgreSQL): treat it and its backups as sensitive. On PostgreSQL, the connection carries that
+Everything, password hashes, token digests and the clear upload tokens of projects included, is
+in the database (SQLite or PostgreSQL): treat it and its backups as sensitive. On PostgreSQL, the connection carries that
 data too: use `sslmode=verify-full` when the database is on another host
 ([PostgreSQL URLs](../reference/configuration.md#postgresql-urls)).

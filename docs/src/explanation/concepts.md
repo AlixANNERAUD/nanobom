@@ -20,9 +20,10 @@ working alone.
 
 ## Projects
 
-A **project** is one thing you ship: a service, a library, a container image. It is created by
-its first upload with an organization-wide token (or never, with a project token: see
-[tokens](../reference/upload-api.md#tokens)). Its slug follows the same rules as organization
+A **project** is one thing you ship: a service, a library, a container image. Admins create it
+on the organization page, or an organization-wide token creates it with its first upload (a
+project token never does: see [tokens](../reference/upload-api.md#tokens)). Either way it comes
+with an upload token of its own, for its CI. Its slug follows the same rules as organization
 slugs.
 
 A project holds the components of the last SBOM of each of its [versions](#versions) only.

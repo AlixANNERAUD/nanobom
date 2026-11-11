@@ -2944,3 +2944,183 @@ async fn the_badge_is_managed_from_the_project_page() {
     assert!(html.contains("Activer le badge publie"), "{html}");
     assert!(!html.contains(&replaced));
 }
+
+#[tokio::test]
+async fn projects_are_created_from_the_organization_page() {
+    use nanobom_domain::{access::Role, memberships};
+    let server = server(&[]).await;
+    let owner = local_user(&server.database, "alice", PASSWORD).await;
+    local_user(&server.database, "bob", PASSWORD).await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    memberships::add(
+        &server.database,
+        &owner,
+        organization.id,
+        "bob",
+        Role::Member,
+    )
+    .await
+    .unwrap();
+    let alice = Browser::sign_in(&server, "alice").await;
+    let bob = Browser::sign_in(&server, "bob").await;
+    let page = "/organizations/acme";
+
+    let html = alice.page(page).await;
+    assert!(html.contains("action=\"/api/create_project\""), "{html}");
+    assert!(html.contains("New project"));
+    // Members do not manage projects: no form, and the action is refused.
+    let html = bob.page(page).await;
+    assert!(!html.contains("create_project"), "{html}");
+    let response = bob
+        .submit(page, "create_project", "organization=acme&slug=web&name=")
+        .await;
+    assert!(location(&response).contains("error="));
+
+    // Created with its slug as name, then the browser lands on the project's upload token.
+    let response = alice
+        .submit(page, "create_project", "organization=acme&slug=web&name=")
+        .await;
+    assert_eq!(response.status(), StatusCode::FOUND);
+    let target = location(&response);
+    assert!(
+        target.starts_with("/organizations/acme/projects/web?notice=Project%20created")
+            && target.ends_with("#upload-token"),
+        "{target}"
+    );
+    let project = projects::find(&server.database, &owner, organization.id, "web")
+        .await
+        .unwrap();
+    assert_eq!(project.name, "web");
+
+    // A taken slug says so.
+    let response = alice
+        .submit(
+            page,
+            "create_project",
+            "organization=acme&slug=web&name=Web",
+        )
+        .await;
+    let target = location(&response);
+    assert!(
+        target.contains("error=") && target.contains("already%20exists"),
+        "{target}"
+    );
+
+    // In French.
+    let french = Browser {
+        server: &server,
+        cookie: format!("{}; nanobom_locale=fr", alice.cookie),
+    };
+    let html = french.page(page).await;
+    assert!(html.contains("Nouveau projet"), "{html}");
+}
+
+#[tokio::test]
+async fn the_upload_token_is_shown_and_renewed_on_the_project_page() {
+    use nanobom_domain::{access::Role, memberships};
+    let server = server(&[]).await;
+    let owner = local_user(&server.database, "alice", PASSWORD).await;
+    local_user(&server.database, "bob", PASSWORD).await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    memberships::add(
+        &server.database,
+        &owner,
+        organization.id,
+        "bob",
+        Role::Member,
+    )
+    .await
+    .unwrap();
+    let project = projects::create(&server.database, &owner, organization.id, "web", "Web")
+        .await
+        .unwrap();
+    let secret = tokens::project_token(&server.database, &owner, project.id)
+        .await
+        .unwrap()
+        .secret;
+    let alice = Browser::sign_in(&server, "alice").await;
+    let bob = Browser::sign_in(&server, "bob").await;
+    let page = "/organizations/acme/projects/web";
+    let form = "organization=acme&project=web";
+
+    // The page carries the token: no cache may keep it after sign-out.
+    let response = alice.get(page).await;
+    assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
+    let html = alice.page(page).await;
+    assert!(html.contains("id=\"upload-token\""), "{html}");
+    assert!(html.contains(&format!("value=\"{secret}\"")), "{html}");
+    assert!(
+        html.contains("uses: AlixANNERAUD/nanobom-action@v1"),
+        "{html}"
+    );
+    assert!(html.contains("url: http://localhost:8080\n"), "{html}");
+    assert!(
+        html.contains("token: ${{ secrets.NANOBOM_TOKEN }}"),
+        "{html}"
+    );
+    // Quoted, so a slug such as `1.10` stays a string in YAML.
+    assert!(html.contains("organization: 'acme'\n"), "{html}");
+    assert!(html.contains("project: 'web'"), "{html}");
+    assert!(
+        html.contains("http://localhost:8080/api/organizations/acme/projects/web/sbom"),
+        "{html}"
+    );
+    assert!(html.contains("action=\"/api/renew_project_token\""));
+    // No SBOM yet: the page says so and points at the token.
+    assert!(html.contains("No SBOM yet"), "{html}");
+    assert!(html.contains("href=\"#upload-token\""), "{html}");
+
+    // Members see neither the token nor the button, and cannot renew it.
+    let html = bob.page(page).await;
+    assert!(!html.contains(&secret), "{html}");
+    assert!(!html.contains("renew_project_token"));
+    assert!(!html.contains("NANOBOM_TOKEN"));
+    assert!(html.contains("No SBOM yet"));
+    let response = bob.submit(page, "renew_project_token", form).await;
+    assert!(location(&response).contains("error="));
+    assert_eq!(
+        tokens::project_token(&server.database, &owner, project.id)
+            .await
+            .unwrap()
+            .secret,
+        secret
+    );
+
+    // The same section in French.
+    let french = Browser {
+        server: &server,
+        cookie: format!("{}; nanobom_locale=fr", alice.cookie),
+    };
+    let html = french.page(page).await;
+    assert!(html.contains("Jeton d’envoi"), "{html}");
+    assert!(html.contains("Renouveler"));
+    assert!(html.contains(&secret));
+
+    // Renewed: the new value replaces the old one on the page.
+    let response = alice.submit(page, "renew_project_token", form).await;
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert!(
+        location(&response).contains("notice=Upload%20token%20renewed"),
+        "{}",
+        location(&response)
+    );
+    let renewed = tokens::project_token(&server.database, &owner, project.id)
+        .await
+        .unwrap()
+        .secret;
+    assert_ne!(renewed, secret);
+    let html = alice.page(page).await;
+    assert!(html.contains(&renewed));
+    assert!(!html.contains(&secret));
+
+    // The settings list it as the project's token, without its value or a revoke button.
+    let html = alice.page("/organizations/acme/settings").await;
+    let row = table_row(&html, "/organizations/acme/projects/web#upload-token");
+    assert!(text(row).contains("Project token"), "{row}");
+    assert!(!row.contains("revoke_token"), "{row}");
+    assert!(!html.contains(&renewed), "{html}");
+}

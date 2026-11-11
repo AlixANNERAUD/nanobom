@@ -82,6 +82,7 @@ pub enum Problem {
     UnknownSeverity,
     UnknownJustification { justification: String },
     UnknownTokenScope { scope: String },
+    ProjectTokenRevoke,
     ReasonRequired,
     ReasonTooLong { maximum: usize },
     ExpiryNotInFuture,
@@ -312,6 +313,9 @@ impl Problem {
                     locale = locale
                 )
             ),
+            P::ProjectTokenRevoke => {
+                output.write_str(t!("problems.project_token_revoke", locale = locale))
+            }
             P::ReasonRequired => output.write_str(t!("problems.reason_required", locale = locale)),
             P::ReasonTooLong { maximum } => write!(
                 output,

@@ -31,6 +31,8 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     Organizations,
+    #[sea_orm(has_one = "super::project_tokens::Entity")]
+    ProjectTokens,
     #[sea_orm(
         belongs_to = "super::projects::Entity",
         from = "Column::ProjectId",
@@ -54,6 +56,12 @@ pub enum Relation {
 impl Related<super::organizations::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Organizations.def()
+    }
+}
+
+impl Related<super::project_tokens::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::ProjectTokens.def()
     }
 }
 

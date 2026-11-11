@@ -19,10 +19,11 @@ In the container image, run commands with `docker exec <container> /app/nanobom 
 | `nanobom backup <destination>` | Write a consistent copy of the live database to a new file. |
 | `nanobom create-administrator` | Create a local instance administrator. |
 | `nanobom token create`, `list`, `revoke` | Manage API tokens. |
+| `nanobom project create`, `token` | Create projects and print their upload token. |
 | `nanobom healthcheck` | Check that the running server is healthy. |
 
-`create-administrator` and `token` apply pending migrations first, so they work on a new
-database; `backup` copies the database as it is.
+`create-administrator`, `token` and `project` apply pending migrations first, so they work on a
+new database; `backup` copies the database as it is.
 
 ## `nanobom serve`
 
@@ -70,7 +71,7 @@ Manages API tokens with direct access to the database, like **Settings → API t
 | --- | --- | --- |
 | `nanobom token create` | `--organization` (`NANOBOM_TOKEN_ORGANIZATION`), `--name` (`NANOBOM_TOKEN_NAME`), `--project` (`NANOBOM_TOKEN_PROJECT`, optional), `--scope` (`NANOBOM_TOKEN_SCOPE`, `upload` or `read`, default `upload`) | Create a token and print it. Without `--project`, the token covers the organization and, with the `upload` scope, may create projects. A `read` token only reads ([scopes](upload-api.md#tokens)). |
 | `nanobom token list` | `--organization` (`NANOBOM_TOKEN_ORGANIZATION`) | List an organization's tokens. |
-| `nanobom token revoke` | `--id` | Revoke a token, by the identifier `token list` prints. |
+| `nanobom token revoke` | `--id` | Revoke a token, by the identifier `token list` prints. A project's upload token cannot be revoked: renew it with `nanobom project token --renew`. |
 
 ```sh
 nanobom token create --organization acme --name "web CI" --project web
@@ -78,6 +79,7 @@ nanobom token create --organization acme --name Grafana --scope read
 nanobom token list --organization acme
 # 8	nanobom_91d0e2	Grafana	(organization)	never used	active	read
 # 7	nanobom_3f9a1c	web CI	web	2026-11-08T03:12:44+00:00	active	upload
+# 6	nanobom_c04e7b	Project token	web	2026-11-08T03:10:02+00:00	active	upload
 nanobom token revoke --id 7
 ```
 
@@ -86,7 +88,25 @@ nanobom token revoke --id 7
 
 `token list` prints one tab-separated line per token, revoked ones included: identifier, first
 characters, name, project (or `(organization)`), last use, state, scope. The scope comes last, so
-scripts written for earlier versions keep their columns.
+scripts written for earlier versions keep their columns. Each project's own upload token is
+named `Project token`.
+
+## `nanobom project`
+
+Creates projects and prints their [upload token](upload-api.md#the-projects-upload-token), with
+direct access to the database.
+
+| Command | Flags | |
+| --- | --- | --- |
+| `nanobom project create` | `--organization`, `--project`, `--name` (optional, the slug by default) | Create an empty project and print its upload token. A taken slug fails with `the project "…" already exists`. |
+| `nanobom project token` | `--organization`, `--project`, `--renew` | Print the project's upload token. With `--renew`, replace it first: the old value stops working at once. |
+
+```sh
+TOKEN=$(nanobom project create --organization acme --project web --name "Web shop")
+TOKEN=$(nanobom project token --organization acme --project web --renew)
+```
+
+Both print the token alone on standard output, like `token create`.
 
 ## `nanobom healthcheck`
 

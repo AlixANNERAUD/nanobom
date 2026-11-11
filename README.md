@@ -64,8 +64,8 @@ docker compose up -d --wait
 docker compose exec nanobom /app/nanobom create-administrator --username admin
 ```
 
-Open <http://localhost:8080>, sign in, create an upload token in your organization's settings,
-and upload an SBOM:
+Open <http://localhost:8080>, sign in, create a project `my-app` in your organization, copy its
+upload token, and upload an SBOM:
 
 ```sh
 curl -X PUT -H "Authorization: Bearer $NANOBOM_TOKEN" --data-binary @sbom.json \
@@ -138,6 +138,8 @@ upload to nanobom with a new address and key: see [Dependency-Track clients](htt
   or PostgreSQL; no queue, no cache server, no vulnerability mirror to keep in sync.
 - Organizations and roles, local accounts and OpenID Connect single sign-on (Keycloak, Zitadel,
   Authentik, …) with roles mapped from groups.
+- Each project comes with its own upload token, shown on its page with a GitHub Actions step
+  ready to paste, and renewed in one click.
 - A read-only JSON API, described in OpenAPI, for dashboards and scripts, with read-only tokens.
 - A status badge per project for its README, off until an admin turns it on, behind an address
   that can be replaced or revoked at any time.

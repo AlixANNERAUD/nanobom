@@ -11,6 +11,7 @@ pub use super::organization_emails::Entity as OrganizationEmails;
 pub use super::organization_webhooks::Entity as OrganizationWebhooks;
 pub use super::organizations::Entity as Organizations;
 pub use super::project_badges::Entity as ProjectBadges;
+pub use super::project_tokens::Entity as ProjectTokens;
 pub use super::project_versions::Entity as ProjectVersions;
 pub use super::projects::Entity as Projects;
 pub use super::runs::Entity as Runs;

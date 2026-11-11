@@ -455,6 +455,20 @@ pub struct ProjectData {
     /// The project's public badge while it is on; always `None` for those who cannot manage
     /// the project, who do not see the badge's address.
     pub badge: Option<ProjectBadge>,
+    /// The project's upload token and how to use it; always `None` for those who cannot manage
+    /// tokens, who never receive its value.
+    pub upload_token: Option<ProjectUploadToken>,
+}
+
+/// A project's own upload token, as its settings show it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectUploadToken {
+    pub secret: String,
+    pub last_used_at: Option<DateTime<FixedOffset>>,
+    /// A GitHub Actions step that uploads with nanobom-action, under the public URL.
+    pub github_actions: String,
+    /// The same upload with `curl`, for any CI.
+    pub curl: String,
 }
 
 /// A project's public badge, as its settings show it.
@@ -622,6 +636,8 @@ pub struct UploadToken {
     pub created_at: DateTime<FixedOffset>,
     pub last_used_at: Option<DateTime<FixedOffset>>,
     pub revoked: bool,
+    /// The project's own token, renewed from the project page rather than revoked here.
+    pub project_token: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

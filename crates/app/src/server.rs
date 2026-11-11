@@ -214,12 +214,16 @@ pub fn back_quietly(fallback: &str) {
 }
 
 /// Redirects to `target` with a notice or an error message, replacing any `notice` or `error`
-/// already in its query string.
+/// already in its query string. A fragment (`#section`) stays at the end, where it belongs.
 pub fn redirect_with(target: &str, outcome: Result<&str, String>) {
     redirect_to(target, Some(outcome));
 }
 
 fn redirect_to(target: &str, outcome: Option<Result<&str, String>>) {
+    let (target, fragment) = match target.split_once('#') {
+        Some((target, fragment)) => (target, format!("#{fragment}")),
+        None => (target, String::new()),
+    };
     let (path, query) = target.split_once('?').unwrap_or((target, ""));
     let mut pairs: Vec<(String, String)> = query
         .split('&')
@@ -240,9 +244,9 @@ fn redirect_to(target: &str, outcome: Option<Result<&str, String>>) {
         .map(|(key, value)| format!("{key}={value}"))
         .collect();
     if query.is_empty() {
-        leptos_axum::redirect(path);
+        leptos_axum::redirect(&format!("{path}{fragment}"));
     } else {
-        leptos_axum::redirect(&format!("{path}?{}", query.join("&")));
+        leptos_axum::redirect(&format!("{path}?{}{fragment}", query.join("&")));
     }
 }
 

@@ -158,10 +158,22 @@ fn Tokens(page: SettingsData) -> impl IntoView {
                                         .into_iter()
                                         .map(|token| {
                                             let organization = organization.clone();
+                                            // A project's own token is named for the reader's
+                                            // language, and renewed from its project.
+                                            let name = if token.project_token {
+                                                t!("settings.project_token").to_owned()
+                                            } else {
+                                                token.name.clone()
+                                            };
+                                            let project_page = token
+                                                .project_slug
+                                                .clone()
+                                                .filter(|_| token.project_token)
+                                                .map(|project| format!("/organizations/{organization}/projects/{project}#upload-token"));
                                             view! {
                                                 <tr class=TABLE_ROW>
                                                     <th scope="row" class=format!("{TABLE_CELL} text-left font-medium")>
-                                                        {token.name.clone()}
+                                                        {name}
                                                         <span class="text-muted-foreground block font-mono text-xs font-normal">
                                                             {token.prefix.clone()} "…"
                                                         </span>
@@ -178,6 +190,13 @@ fn Tokens(page: SettingsData) -> impl IntoView {
                                                     <td class=format!("{TABLE_CELL} text-right")>
                                                         {if token.revoked {
                                                             view! { <Badge variant=BadgeVariant::Muted>{t!("settings.revoked")}</Badge> }.into_any()
+                                                        } else if let Some(href) = project_page {
+                                                            view! {
+                                                                <a class="text-sm font-medium underline-offset-4 hover:underline" href=href>
+                                                                    {t!("settings.project_token_manage")}
+                                                                </a>
+                                                            }
+                                                                .into_any()
                                                         } else {
                                                             view! {
                                                                 <form method="post" action={action::<RevokeToken>()}>
