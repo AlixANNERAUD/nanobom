@@ -147,8 +147,16 @@ async fn those_who_manage_projects_turn_the_badge_on_replace_it_and_turn_it_off(
     );
     assert!(badges::summary(database, &key, None).await.is_ok());
 
+    // Turning on a badge that is on keeps its address: a stale page cannot break a README.
+    assert_eq!(
+        badges::enable(database, &fixture.owner, project)
+            .await
+            .unwrap(),
+        key
+    );
+
     // A new address replaces the old one, which stops working at once.
-    let replaced = badges::enable(database, &fixture.owner, project)
+    let replaced = badges::regenerate(database, &fixture.owner, project)
         .await
         .unwrap();
     assert_ne!(replaced, key);
@@ -175,6 +183,17 @@ async fn those_who_manage_projects_turn_the_badge_on_replace_it_and_turn_it_off(
     badges::disable(database, &fixture.owner, project)
         .await
         .unwrap();
+    // A new address for a badge that is off does not turn it back on.
+    assert!(matches!(
+        badges::regenerate(database, &fixture.owner, project).await,
+        Err(Error::NotFound)
+    ));
+    assert_eq!(
+        badges::key(database, &fixture.owner, project)
+            .await
+            .unwrap(),
+        None
+    );
 }
 
 #[tokio::test]
@@ -190,6 +209,10 @@ async fn members_viewers_and_other_organizations_cannot_manage_the_badge() {
         ));
         assert!(matches!(
             badges::key(database, actor, project).await,
+            Err(Error::Forbidden)
+        ));
+        assert!(matches!(
+            badges::regenerate(database, actor, project).await,
             Err(Error::Forbidden)
         ));
         assert!(matches!(
@@ -210,6 +233,10 @@ async fn members_viewers_and_other_organizations_cannot_manage_the_badge() {
         Err(Error::NotFound)
     ));
     assert!(matches!(
+        badges::regenerate(database, &fixture.stranger, project).await,
+        Err(Error::NotFound)
+    ));
+    assert!(matches!(
         badges::enable(database, &fixture.owner, project + 1000).await,
         Err(Error::NotFound)
     ));
@@ -219,6 +246,7 @@ async fn members_viewers_and_other_organizations_cannot_manage_the_badge() {
         .await
         .unwrap();
     let _ = badges::disable(database, &fixture.viewer, project).await;
+    let _ = badges::regenerate(database, &fixture.member, project).await;
     let _ = badges::enable(database, &fixture.stranger, project).await;
     assert_eq!(
         badges::key(database, &fixture.owner, project)

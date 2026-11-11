@@ -13,7 +13,7 @@
 use chrono::Utc;
 use nanobom_entity::project_badges;
 use sea_orm::{
-    ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, sea_query::OnConflict,
+    ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, sea_query::Expr,
 };
 use serde::{Deserialize, Serialize};
 
@@ -58,9 +58,9 @@ pub async fn key(
         .map(|badge| badge.key))
 }
 
-/// Turns a project's badge on with a new key and returns it; when it is already on, the new key
-/// replaces the old one, whose address stops working at once. Requires
-/// [`Permission::ManageProjects`].
+/// Turns a project's badge on and returns its key. A badge that is already on keeps its key, so
+/// a "Turn on" sent from a stale page never breaks an address already published; only
+/// [`regenerate`] replaces it. Requires [`Permission::ManageProjects`].
 pub async fn enable(
     database: &impl ConnectionTrait,
     actor: &Actor,
@@ -68,33 +68,59 @@ pub async fn enable(
 ) -> Result<String> {
     let project =
         crate::projects::authorize(database, actor, project_id, Permission::ManageProjects).await?;
-    let replaced = project_badges::Entity::find_by_id(project_id)
+    if let Some(badge) = project_badges::Entity::find_by_id(project_id)
         .one(database)
         .await?
-        .is_some();
-    let key = generate_key();
-    // An upsert, so two concurrent requests both succeed and the last key wins.
-    project_badges::Entity::insert(project_badges::ActiveModel {
+    {
+        return Ok(badge.key);
+    }
+    let inserted = project_badges::Entity::insert(project_badges::ActiveModel {
         project_id: Set(project_id),
-        key: Set(key.clone()),
+        key: Set(generate_key()),
         created_at: Set(Utc::now().fixed_offset()),
     })
-    .on_conflict(
-        OnConflict::column(project_badges::Column::ProjectId)
-            .update_columns([
-                project_badges::Column::Key,
-                project_badges::Column::CreatedAt,
-            ])
-            .to_owned(),
-    )
     .exec(database)
-    .await?;
-    // The key itself is never logged: it is the badge's only authorization.
-    if replaced {
-        tracing::info!(project = %project.slug, user = actor.user_id, "badge address replaced");
-    } else {
-        tracing::info!(project = %project.slug, user = actor.user_id, "badge turned on");
+    .await;
+    // A concurrent request may have turned it on first: its key is the one to keep.
+    let badge = project_badges::Entity::find_by_id(project_id)
+        .one(database)
+        .await?;
+    match (inserted, badge) {
+        (Ok(_), Some(badge)) => {
+            // The key itself is never logged: it is the badge's only authorization.
+            tracing::info!(project = %project.slug, user = actor.user_id, "badge turned on");
+            Ok(badge.key)
+        }
+        (Err(_), Some(badge)) => Ok(badge.key),
+        (Err(error), None) => Err(error.into()),
+        (Ok(_), None) => Err(Error::NotFound),
     }
+}
+
+/// Gives a badge that is on a new key and returns it; the old address stops working at once.
+/// A badge that is off is [`Error::NotFound`]: a "New address" sent from a stale page must not
+/// publish a badge someone has turned off. Requires [`Permission::ManageProjects`].
+pub async fn regenerate(
+    database: &impl ConnectionTrait,
+    actor: &Actor,
+    project_id: i64,
+) -> Result<String> {
+    let project =
+        crate::projects::authorize(database, actor, project_id, Permission::ManageProjects).await?;
+    let key = generate_key();
+    let updated = project_badges::Entity::update_many()
+        .col_expr(project_badges::Column::Key, Expr::value(key.clone()))
+        .col_expr(
+            project_badges::Column::CreatedAt,
+            Expr::value(Utc::now().fixed_offset()),
+        )
+        .filter(project_badges::Column::ProjectId.eq(project_id))
+        .exec(database)
+        .await?;
+    if updated.rows_affected == 0 {
+        return Err(Error::NotFound);
+    }
+    tracing::info!(project = %project.slug, user = actor.user_id, "badge address replaced");
     Ok(key)
 }
 

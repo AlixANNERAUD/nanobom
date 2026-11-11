@@ -1,7 +1,7 @@
 # Badges
 
 A project's badge is a small image of the open findings of one of its versions, for a README.
-It is off by default; admins and owners turn it on, give it a new address and turn it off from
+It is off by default; admins, owners and instance administrators turn it on, give it a new address and turn it off from
 the project page ([Show a badge in a README](../how-to/badge.md),
 [permissions](accounts.md#organization-roles)).
 

@@ -158,7 +158,8 @@ Project [badges](../reference/badges.md) (`/badges/…`) need no session either:
 their address is their authorization, and it unlocks only the open finding counts of one project.
 They are off until an admin turns them on, and a new address or turning them off revokes the old
 one at once. To serve badges to the internet while keeping the rest of nanobom private, expose
-only `/badges/` at the proxy.
+only `/badges/` at the proxy. nanobom keeps the key out of its own logs, but the proxy's access
+log records it with each request.
 
 ## Data at rest
 

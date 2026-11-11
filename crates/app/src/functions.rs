@@ -1133,10 +1133,11 @@ pub async fn enable_badge(
     let database = &context()?.database;
     let result = async {
         let id = project_id(database, &actor, &organization, &project).await?;
-        nanobom_domain::badges::enable(database, &actor, id).await?;
         Ok(if replace.is_some() {
+            nanobom_domain::badges::regenerate(database, &actor, id).await?;
             crate::t!("notices.badge_replaced")
         } else {
+            nanobom_domain::badges::enable(database, &actor, id).await?;
             crate::t!("notices.badge_enabled")
         }
         .to_owned())

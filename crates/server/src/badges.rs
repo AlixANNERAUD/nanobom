@@ -203,7 +203,6 @@ const WIDTHS: [f64; 95] = [
     6.85, 6.85, 4.69, 5.73, 4.33, 6.96, 6.51, 9.0, 6.51, 6.51, 5.78, 6.98, 4.99, 6.98, 9.0,
 ];
 
-/// The width of a text in pixels.
 fn text_width(text: &str) -> f64 {
     text.chars()
         .map(|character| {
@@ -238,7 +237,6 @@ fn escape(text: &str) -> String {
     escaped
 }
 
-/// The `/badges/{file}` route.
 pub fn router() -> Router<AppState> {
     Router::new().route("/badges/{file}", get(badge))
 }
@@ -294,8 +292,10 @@ async fn badge(
     }
 }
 
+/// Not stored by caches, so a badge turned back on is served at once rather than a remembered
+/// 404 (RFC 9110 lets caches keep a 404 heuristically).
 fn not_found() -> Response {
-    StatusCode::NOT_FOUND.into_response()
+    (StatusCode::NOT_FOUND, [(header::CACHE_CONTROL, "no-store")]).into_response()
 }
 
 /// A badge with its caching headers, or `304` when `If-None-Match` names its tag.

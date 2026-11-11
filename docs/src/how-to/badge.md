@@ -9,8 +9,8 @@ version, and nothing else ([Badges](../reference/badges.md) lists what it shows)
 
 ## Turn the badge on
 
-1. Open the project's page and find the **Badge** section, near the bottom. Only admins and
-   owners see it.
+1. Open the project's page and find the **Badge** section, near the bottom. Only admins,
+   owners and instance administrators see it.
 2. Select **Turn on**.
 
 The section now shows the badge and the Markdown to paste.

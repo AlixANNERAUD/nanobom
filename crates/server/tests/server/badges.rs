@@ -117,6 +117,11 @@ fn header_value(response: &Response<Body>, name: header::HeaderName) -> &str {
 async fn missing(server: &TestServer, path: &str) {
     let response = get(server, path, None).await;
     assert_eq!(response.status(), StatusCode::NOT_FOUND, "GET {path}");
+    assert_eq!(
+        response.headers()[header::CACHE_CONTROL],
+        "no-store",
+        "GET {path}"
+    );
     assert_eq!(body_text(response).await, "", "GET {path}");
 }
 
@@ -282,7 +287,7 @@ async fn anything_that_does_not_resolve_is_an_empty_not_found() {
     missing(server, &format!("/badges/{}.svg", key.to_uppercase())).await;
 
     // A new address: the old one stops working at once.
-    let replaced = badges::enable(&server.database, &setup.owner, setup.project)
+    let replaced = badges::regenerate(&server.database, &setup.owner, setup.project)
         .await
         .unwrap();
     missing(server, &format!("/badges/{key}.svg")).await;
