@@ -45,6 +45,11 @@ async fn document(
         .await
         .into_response();
     read_api::private(&mut response);
+    // The language follows Accept-Language, so a cache must key on it too.
+    response.headers_mut().insert(
+        header::VARY,
+        HeaderValue::from_static("Cookie, Authorization, X-Api-Key, Accept-Language"),
+    );
     response
 }
 

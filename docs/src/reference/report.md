@@ -29,7 +29,7 @@ A token reaches its organization's projects, or its own project for a project to
 
 | Status | When |
 | --- | --- |
-| `200` | The report, `Content-Type: text/html; charset=utf-8`: a complete HTML document with the interface's stylesheet inlined, so a saved copy shows the same without the server |
+| `200` | The report, `Content-Type: text/html; charset=utf-8`: a complete HTML document with the interface's stylesheet inlined, so a saved copy keeps its layout without the server (fonts fall back to the system's) |
 | `401` | No token or session, or an invalid token |
 | `404` | Unknown organization, project or version, or one the token does not reach |
 | `422` | An invalid query string, such as `version` given twice |
@@ -50,7 +50,7 @@ The page and the document hold the same sections, in this order. Dates are in UT
 | Scope and provenance | The latest upload of the version (time, SBOM format, source commit and image tag when given), the components checked, the components of that SBOM without a package URL (not checked), the end of the last successful run covering the project, and the last reads of the CISA KEV catalog and of FIRST EPSS scores |
 | Summary | A sentence on open findings of high or critical severity, the open findings by severity, how many are known exploited, the ignored findings, and the findings fixed in the last 90 days |
 | Open vulnerabilities | Each open finding, in the order of the project page (known exploited first, then by severity and EPSS): identifier and aliases, component and version, severity and CVSS score, known exploited, EPSS percentile, direct or transitive dependency (and through which direct dependencies), fixed versions per the OSV record, first seen |
-| Assessed as not affecting the product | Each ignored finding with its justification ("None (accepted risk)" without one), its reason, when it was ignored and by which member or upload token, and its expiry. The address of the [VEX export](vex-api.md) of the same version follows, for machine-readable use |
+| Assessed as not affecting the product | Each ignored finding with its justification ("None (accepted risk)" without one), its reason, when it was ignored and by which member or upload token, and its expiry. The address of the [VEX export](vex-api.md) of the same version precedes them, for machine-readable use |
 | Licenses | With a [license policy](license-policy.md), the components it forbids or warns about; without one, the components by license expression, the 10 most common, then the others together and those without a license |
 | Method | What nanobom checks and what it does not, and that the report reflects the time of generation |
 

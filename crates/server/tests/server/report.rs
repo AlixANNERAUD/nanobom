@@ -119,6 +119,10 @@ async fn tokens_get_the_report_as_html() {
         response.headers()[header::CACHE_CONTROL],
         "private, no-cache"
     );
+    assert_eq!(
+        response.headers()[header::VARY],
+        "Cookie, Authorization, X-Api-Key, Accept-Language"
+    );
     let html = body_text(response).await;
     assert!(html.starts_with("<!DOCTYPE html><html lang=\"en\" class=\"light\">"));
     for section in [

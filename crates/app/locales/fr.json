@@ -263,6 +263,7 @@
       "other": "{count} composants sans package URL"
     },
     "last_evaluation": "Dernière vérification auprès d’OSV",
+    "not_checked_while_inactive": "Plus depuis que la version est devenue inactive",
     "kev_checked": "Dernière lecture du catalogue KEV de la CISA",
     "epss_checked": "Dernière lecture des scores EPSS du FIRST",
     "summary_title": "Synthèse",
@@ -306,7 +307,7 @@
       "one": "Et {count} autre composant, sur la page du projet.",
       "other": "Et {count} autres composants, sur la page du projet."
     },
-    "licenses_no_policy": "Les composants par expression de licence, telle que déclarée dans le SBOM. L’organisation n’a pas de politique de licences.",
+    "licenses_no_policy": "Les composants par expression de licence, telle que déclarée dans le SBOM. L’organisation n’a pas de politique de licences active.",
     "licenses_counts_caption": "Composants par expression de licence, les plus fréquentes d’abord",
     "license_components": "Composants",
     "licenses_other": "Autres expressions",

@@ -92,12 +92,15 @@ pub fn ReportPage() -> impl IntoView {
 /// The report itself, in the request's language.
 #[component]
 pub fn ReportBody(report: ReportData) -> impl IntoView {
-    let version = version_label(&report.version);
+    // The unnamed version's label already says "version".
+    let version = if report.version.is_empty() {
+        version_label(&report.version)
+    } else {
+        tf!("report.version", version = report.version.clone()).to_string()
+    };
     let subtitle = format!(
         "{} / {} · {}",
-        report.organization_name,
-        report.project_name,
-        tf!("report.version", version = version),
+        report.organization_name, report.project_name, version,
     );
     let generated = format!(
         "{} {}",
@@ -206,7 +209,15 @@ fn provenance(report: ReportData) -> impl IntoView + use<> {
                         t!("report.components_not_checked").to_owned(),
                         tp!("report.without_purl", without_purl),
                     )}
-                    {fact(t!("report.last_evaluation").to_owned(), time_or_never(report.last_evaluation))}
+                    {fact(
+                        t!("report.last_evaluation").to_owned(),
+                        // Runs skip inactive versions: the last run's date would overstate them.
+                        if report.active {
+                            time_or_never(report.last_evaluation)
+                        } else {
+                            t!("report.not_checked_while_inactive").to_owned()
+                        },
+                    )}
                     {fact(t!("report.kev_checked").to_owned(), time_or_never(report.kev_checked_at))}
                     {fact(t!("report.epss_checked").to_owned(), time_or_never(report.epss_checked_at))}
                 </dl>
@@ -387,10 +398,14 @@ fn assessed_row(row: AssessedFinding) -> impl IntoView {
         .ignore_justification
         .as_deref()
         .map_or_else(|| t!("report.accepted_risk"), justification_label);
-    let mut decided = row.ignored_at.map(format_date).unwrap_or_default();
-    if let Some(by) = changed_by(row.ignored_by, row.ignored_by_token) {
-        decided = format!("{decided} {by}");
-    }
+    let decided = [
+        row.ignored_at.map(format_date),
+        changed_by(row.ignored_by, row.ignored_by_token),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>()
+    .join(" ");
     let until = finding.ignore_expires_at.map(|date| {
         view! {
             <span class="text-muted-foreground block">
@@ -713,5 +728,23 @@ mod tests {
         assert!(html.contains("<html lang=\"fr\""));
         assert!(html.contains("Rapport de vulnérabilités"));
         assert!(!html.contains("<style>"));
+    }
+
+    #[test]
+    fn the_unnamed_version_is_named_once_and_inactive_versions_have_no_check_date() {
+        let mut data = report();
+        data.version = String::new();
+        data.active = false;
+        data.last_evaluation = Some(chrono::Utc::now().fixed_offset());
+        let html = document(data, None, None);
+        assert!(html.contains("· Unnamed version<"), "{html}");
+        assert!(!html.contains("version Unnamed version"), "{html}");
+        assert!(
+            html.contains("Not since the version became inactive"),
+            "{html}"
+        );
+
+        let html = document(report(), None, None);
+        assert!(html.contains("· version 1.0<"), "{html}");
     }
 }

@@ -263,6 +263,7 @@
       "other": "{count} components without a package URL"
     },
     "last_evaluation": "Last check against OSV",
+    "not_checked_while_inactive": "Not since the version became inactive",
     "kev_checked": "CISA KEV catalog last read",
     "epss_checked": "FIRST EPSS scores last read",
     "summary_title": "Summary",
@@ -306,7 +307,7 @@
       "one": "And {count} more component, listed on the project page.",
       "other": "And {count} more components, listed on the project page."
     },
-    "licenses_no_policy": "Components by license expression, as declared in the SBOM. The organization has no license policy.",
+    "licenses_no_policy": "Components by license expression, as declared in the SBOM. The organization has no active license policy.",
     "licenses_counts_caption": "Components by license expression, most common first",
     "license_components": "Components",
     "licenses_other": "Other expressions",
