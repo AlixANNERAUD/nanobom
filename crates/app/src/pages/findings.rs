@@ -11,12 +11,13 @@ use crate::{
         format_time, ui::*,
     },
     functions::{
-        DeleteProject, DeleteVersion, IgnoreFinding, RestoreFinding, SetLatestVersion,
-        SetVersionActive, TriggerRun, load_finding, load_project, search_components,
+        DeleteProject, DeleteVersion, DisableBadge, EnableBadge, IgnoreFinding, RestoreFinding,
+        SetLatestVersion, SetVersionActive, TriggerRun, load_finding, load_project,
+        search_components,
     },
     model::{
         ComponentMatch, DependencyComponent, DependencyPaths, FindingData, FindingFilter,
-        FindingRow, LicenseAction, LicenseViolations, ProjectData, Severity, Status,
+        FindingRow, LicenseAction, LicenseViolations, ProjectBadge, ProjectData, Severity, Status,
         VersionFinding, VersionOption,
     },
     pages::organizations::severity_cells,
@@ -708,6 +709,20 @@ pub fn ProjectPage() -> impl IntoView {
                             }
                         })
                         .collect_view();
+                    let badge = organization.role.can_manage().then({
+                        let organization_slug = organization_slug.clone();
+                        let project_slug = project_slug.clone();
+                        let badge = page.badge.clone();
+                        move || {
+                            view! {
+                                <BadgeSettings
+                                    organization=organization_slug
+                                    project=project_slug
+                                    badge
+                                />
+                            }
+                        }
+                    });
                     let delete = organization.role.can_manage().then({
                         let organization_slug = organization_slug.clone();
                         let project_slug = project_slug.clone();
@@ -792,12 +807,86 @@ pub fn ProjectPage() -> impl IntoView {
                             </CardContent>
                         </Card>
                         {versions}
+                        {badge}
                         {delete}
                     }
                 }}
             />
         </Page>
     }
+}
+
+/// The project's public badge, for those who manage the project: a button to turn it on, or
+/// the image, the Markdown to paste and the buttons to replace or remove its address.
+#[component]
+fn BadgeSettings(
+    organization: String,
+    project: String,
+    badge: Option<ProjectBadge>,
+) -> impl IntoView {
+    let hidden = {
+        let organization = organization.clone();
+        let project = project.clone();
+        move || {
+            view! {
+                <input type="hidden" name="organization" value=organization.clone() />
+                <input type="hidden" name="project" value=project.clone() />
+            }
+        }
+    };
+    let content = match badge {
+        None => view! {
+            <CardHeader>
+                <CardTitle>{t!("project.badge_title")}</CardTitle>
+                <CardDescription>{t!("project.badge_off")}</CardDescription>
+            </CardHeader>
+            <CardContent>
+                <form method="post" action={action::<EnableBadge>()}>
+                    {hidden()}
+                    <Button variant=ButtonVariant::Outline>{t!("project.badge_enable")}</Button>
+                </form>
+            </CardContent>
+        }
+            .into_any(),
+        Some(badge) => view! {
+            <CardHeader>
+                <CardTitle>{t!("project.badge_title")}</CardTitle>
+                <CardDescription>{t!("project.badge_on")}</CardDescription>
+            </CardHeader>
+            <CardContent>
+                <div class="grid gap-4">
+                <img src=badge.image_path alt=t!("project.badge_image") class="h-5 w-fit" />
+                <Field
+                    label=t!("project.badge_markdown")
+                    input_id="badge-markdown"
+                    hint=t!("project.badge_version_hint")
+                >
+                    <textarea
+                        id="badge-markdown"
+                        class=format!("{TEXTAREA} {MONO} min-h-16 wrap-anywhere")
+                        readonly
+                        rows="2"
+                    >
+                        {badge.markdown}
+                    </textarea>
+                </Field>
+                <div class="flex flex-wrap gap-3">
+                    <form method="post" action={action::<EnableBadge>()}>
+                        {hidden()}
+                        <input type="hidden" name="replace" value="1" />
+                        <Button variant=ButtonVariant::Outline>{t!("project.badge_replace")}</Button>
+                    </form>
+                    <form method="post" action={action::<DisableBadge>()}>
+                        {hidden()}
+                        <Button variant=ButtonVariant::Outline>{t!("project.badge_disable")}</Button>
+                    </form>
+                </div>
+                </div>
+            </CardContent>
+        }
+            .into_any(),
+    };
+    view! { <Card>{content}</Card> }
 }
 
 /// The components whose license the organization's policy forbids or warns about, shown when

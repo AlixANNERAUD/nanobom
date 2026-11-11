@@ -19,6 +19,8 @@
 //!   reads with a token of either scope or the session ([`read_api`]), next to the VEX
 //!   documents of a project ([`vex`]) and its vulnerability report in HTML ([`report`]).
 //! - **Operations** (`/healthz`, `/metrics`): unauthenticated ([`operations`]).
+//! - **Badges** (`/badges/{key}.svg`, `/badges/{key}.json`): a project's open findings for a
+//!   README, authorized by the random key in the path alone ([`badges`]).
 //!
 //! Every response goes through [`http::layers`] (security headers, compression, request logs).
 //!
@@ -38,6 +40,7 @@
 pub mod administration;
 pub mod api;
 pub mod authentication;
+pub mod badges;
 pub mod command_line;
 pub mod deliveries;
 pub mod dependency_track;

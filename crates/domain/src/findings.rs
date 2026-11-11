@@ -1171,12 +1171,21 @@ pub async fn open_summary_in_version(
     version: Option<&str>,
 ) -> Result<OpenSummary> {
     let version = crate::versions::find(database, reader, project_id, version).await?;
+    open_summary_of(database, version.id).await
+}
+
+/// The open findings of a version, without authorization: [`open_summary_in_version`] and the
+/// public badge ([`crate::badges::summary`]) count them the same way.
+pub(crate) async fn open_summary_of(
+    database: &impl ConnectionTrait,
+    version_id: i64,
+) -> Result<OpenSummary> {
     let rows: Vec<(i64, String, String)> = findings::Entity::find()
         .select_only()
         .column(findings::Column::Id)
         .column(findings::Column::VulnerabilityId)
         .column(findings::Column::Severity)
-        .filter(findings::Column::VersionId.eq(version.id))
+        .filter(findings::Column::VersionId.eq(version_id))
         .filter(findings::Column::Status.eq(Status::Open.as_str()))
         .into_tuple()
         .all(database)

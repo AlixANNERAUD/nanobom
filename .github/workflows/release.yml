@@ -14,6 +14,10 @@ on:
         description: Version tag to release, such as v1.2.3
         type: string
         required: true
+    secrets:
+      NANOBOM_TOKEN:
+        description: Upload token of the instance that tracks the published image
+        required: false
   workflow_dispatch:
     inputs:
       tag:
@@ -153,6 +157,34 @@ jobs:
           METADATA: ${{ steps.metadata.outputs.json }}
       - name: Inspect the image
         run: docker buildx imagetools inspect "$IMAGE:${{ steps.metadata.outputs.version }}"
+
+  # nanobom tracks its own image: Syft lists the Debian packages of the distroless base, which
+  # the source SBOM uploaded by sbom.yml cannot show. Each release line (0.1, 0.2) is a version of
+  # the project, so an old line still in use keeps its findings. A new line becomes the latest; a
+  # patch of an older line leaves the flag where it is; a pre-release never takes it. A failed
+  # upload does not hold the release back.
+  image-sbom:
+    name: Upload the image's SBOM
+    needs: image
+    if: github.repository_owner == 'AlixANNERAUD'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Name the image and its release line
+        run: |
+          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}:${TAG#v}" >> "$GITHUB_ENV"
+          line="${TAG#v}"
+          echo "LINE=${line%%.*}.$(cut -d. -f2 <<< "$line")" >> "$GITHUB_ENV"
+          if [[ "$TAG" == *-* ]]; then echo "LATEST=false" >> "$GITHUB_ENV"; fi
+      - uses: AlixANNERAUD/nanobom-action@v1
+        with:
+          url: https://vulnerabilites.anneraud.fr
+          token: ${{ secrets.NANOBOM_TOKEN }}
+          organization: alix_anneraud
+          project: nanobom-image
+          scan-image: ${{ env.IMAGE }}
+          image-tag: ${{ env.TAG }}
+          version: ${{ env.LINE }}
+          latest: ${{ env.LATEST }}
 
   release:
     name: GitHub release
