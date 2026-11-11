@@ -2,18 +2,25 @@
 //!
 //! Security headers are only added when a handler did not set its own, so a route can relax one
 //! when it must. Request logging is the outermost layer, so the logged status and duration are
-//! those the client sees.
+//! those the client sees. Responses with a strong `ETag` (badges, [`crate::badges`]) are not
+//! compressed: a strong tag names the exact bytes sent, which compression would change.
 
 use std::time::Instant;
 
 use axum::{
     Router,
     extract::Request,
-    http::{HeaderName, HeaderValue, header},
+    http::{Extensions, HeaderMap, HeaderName, HeaderValue, StatusCode, Version, header},
     middleware::{self, Next},
     response::Response,
 };
-use tower_http::{compression::CompressionLayer, set_header::SetResponseHeaderLayer};
+use tower_http::{
+    compression::{
+        CompressionLayer,
+        predicate::{DefaultPredicate, Predicate},
+    },
+    set_header::SetResponseHeaderLayer,
+};
 
 /// Wraps the router in the layers shared by every route.
 pub fn layers(router: Router) -> Router {
@@ -26,8 +33,18 @@ pub fn layers(router: Router) -> Router {
             header::CONTENT_SECURITY_POLICY,
             "frame-ancestors 'none'",
         ))
-        .layer(CompressionLayer::new())
+        .layer(
+            CompressionLayer::new().compress_when(DefaultPredicate::new().and(without_strong_tag)),
+        )
         .layer(middleware::from_fn(log_request))
+}
+
+/// Whether a response has no strong `ETag`; weak tags, as the read API sends, survive
+/// compression.
+fn without_strong_tag(_: StatusCode, _: Version, headers: &HeaderMap, _: &Extensions) -> bool {
+    headers
+        .get(header::ETAG)
+        .is_none_or(|tag| tag.as_bytes().starts_with(b"W/"))
 }
 
 fn security_header(name: HeaderName, value: &'static str) -> SetResponseHeaderLayer<HeaderValue> {
@@ -35,10 +52,10 @@ fn security_header(name: HeaderName, value: &'static str) -> SetResponseHeaderLa
 }
 
 /// Logs each request once it is answered. The query string is left out: it can carry search
-/// terms and messages. Probes, metrics scrapes and assets are logged at debug level.
+/// terms and messages. Probes, metrics scrapes, badges and assets are logged at debug level.
 async fn log_request(request: Request, next: Next) -> Response {
     let method = request.method().clone();
-    let path = request.uri().path().to_owned();
+    let path = logged_path(request.uri().path());
     let started = Instant::now();
     let response = next.run(request).await;
     let status = response.status().as_u16();
@@ -51,9 +68,19 @@ async fn log_request(request: Request, next: Next) -> Response {
     response
 }
 
+/// The path as logged: a badge's key is its only authorization, so it is left out.
+fn logged_path(path: &str) -> String {
+    if path.starts_with("/badges/") {
+        "/badges/…".to_owned()
+    } else {
+        path.to_owned()
+    }
+}
+
 fn is_routine(path: &str) -> bool {
     path == "/healthz"
         || path == "/metrics"
+        || path.starts_with("/badges/")
         || path.starts_with("/pkg/")
         || path.starts_with("/fonts/")
         || path == "/favicon.svg"
@@ -61,7 +88,7 @@ fn is_routine(path: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::is_routine;
+    use super::{is_routine, logged_path};
 
     #[test]
     fn assets_are_routine() {
@@ -74,5 +101,13 @@ mod tests {
         }
         assert!(!is_routine("/organizations"));
         assert!(!is_routine("/fonts"));
+    }
+
+    #[test]
+    fn badge_keys_are_not_logged() {
+        let path = "/badges/0123456789abcdef0123456789abcdef.svg";
+        assert!(is_routine(path));
+        assert_eq!(logged_path(path), "/badges/…");
+        assert_eq!(logged_path("/organizations"), "/organizations");
     }
 }

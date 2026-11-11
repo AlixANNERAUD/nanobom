@@ -154,6 +154,12 @@ an authority, and keep their URL secret.
 token. Metrics are instance-wide counts; restrict `/metrics` at the proxy if even those should
 stay private.
 
+Project [badges](../reference/badges.md) (`/badges/…`) need no session either: the random key in
+their address is their authorization, and it unlocks only the open finding counts of one project.
+They are off until an admin turns them on, and a new address or turning them off revokes the old
+one at once. To serve badges to the internet while keeping the rest of nanobom private, expose
+only `/badges/` at the proxy.
+
 ## Data at rest
 
 Everything, password hashes and token digests included, is in the database (SQLite or

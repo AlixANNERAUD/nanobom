@@ -2727,3 +2727,115 @@ async fn advisory_text_is_formatted_and_harmless() {
     assert!(!html.contains("prose-advisory"), "{html}");
     assert!(html.contains("No description."));
 }
+
+#[tokio::test]
+async fn the_badge_is_managed_from_the_project_page() {
+    use nanobom_domain::{access::Role, badges, memberships};
+    let server = server(&[]).await;
+    let owner = local_user(&server.database, "alice", PASSWORD).await;
+    local_user(&server.database, "bob", PASSWORD).await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    memberships::add(
+        &server.database,
+        &owner,
+        organization.id,
+        "bob",
+        Role::Viewer,
+    )
+    .await
+    .unwrap();
+    let project = projects::create(&server.database, &owner, organization.id, "web", "Web")
+        .await
+        .unwrap();
+    let alice = Browser::sign_in(&server, "alice").await;
+    let bob = Browser::sign_in(&server, "bob").await;
+    let page = "/organizations/acme/projects/web";
+    let form = "organization=acme&project=web";
+
+    // Off: owners and admins are told what turning it on publishes.
+    let html = alice.page(page).await;
+    assert!(html.contains(">Badge<"), "{html}");
+    assert!(
+        html.contains("publishes the number of open findings of the latest version"),
+        "{html}"
+    );
+    assert!(html.contains("action=\"/api/enable_badge\""));
+    assert!(!html.contains("action=\"/api/disable_badge\""));
+    // Viewers see no badge section and cannot turn it on.
+    let html = bob.page(page).await;
+    assert!(!html.contains("enable_badge"), "{html}");
+    let response = bob.submit(page, "enable_badge", form).await;
+    assert!(location(&response).contains("error="));
+    assert_eq!(
+        badges::key(&server.database, &owner, project.id)
+            .await
+            .unwrap(),
+        None
+    );
+
+    let response = alice.submit(page, "enable_badge", form).await;
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert!(
+        location(&response).contains("notice=Badge%20turned%20on."),
+        "{}",
+        location(&response)
+    );
+    let key = badges::key(&server.database, &owner, project.id)
+        .await
+        .unwrap()
+        .expect("a key");
+    let html = alice.page(page).await;
+    assert!(
+        html.contains(&format!("src=\"/badges/{key}.svg\"")),
+        "{html}"
+    );
+    assert!(
+        html.contains(&format!(
+            "[![vulnerabilities](http://localhost:8080/badges/{key}.svg)](http://localhost:8080/organizations/acme/projects/web)</textarea>"
+        )),
+        "{html}"
+    );
+    assert!(html.contains("?version=&lt;name&gt;"), "{html}");
+    assert!(html.contains("New address"));
+    assert!(html.contains("action=\"/api/disable_badge\""));
+    // The address stays hidden from viewers.
+    assert!(!bob.page(page).await.contains(&key));
+
+    // The same section in French.
+    let french = Browser {
+        server: &server,
+        cookie: format!("{}; nanobom_locale=fr", alice.cookie),
+    };
+    let html = french.page(page).await;
+    assert!(html.contains("Markdown pour un README"), "{html}");
+    assert!(html.contains("Nouvelle adresse"));
+    assert!(html.contains("Désactiver"));
+    assert!(html.contains(&key));
+
+    // A new address replaces the old one.
+    let response = alice
+        .submit(page, "enable_badge", &format!("{form}&replace=1"))
+        .await;
+    assert!(location(&response).contains("notice=The%20badge%20has%20a%20new%20address"));
+    let replaced = badges::key(&server.database, &owner, project.id)
+        .await
+        .unwrap()
+        .expect("a key");
+    assert_ne!(replaced, key);
+    assert!(!alice.page(page).await.contains(&key));
+
+    // Turned off: the French page offers to turn it on again.
+    let response = alice.submit(page, "disable_badge", form).await;
+    assert!(location(&response).contains("notice=Badge%20turned%20off"));
+    assert_eq!(
+        badges::key(&server.database, &owner, project.id)
+            .await
+            .unwrap(),
+        None
+    );
+    let html = french.page(page).await;
+    assert!(html.contains("Activer le badge publie"), "{html}");
+    assert!(!html.contains(&replaced));
+}

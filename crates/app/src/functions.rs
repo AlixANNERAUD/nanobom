@@ -259,11 +259,21 @@ pub async fn load_project(
             })
             .collect(),
     });
+    let organization = crate::server::organization(found);
+    let badge = if organization.role.can_manage() {
+        let public_url = context()?.settings.public_url;
+        nanobom_domain::badges::key(database, &actor, model.id)
+            .await
+            .map_err(failure)?
+            .map(|key| project_badge(&public_url, &organization.slug, &model.slug, &key))
+    } else {
+        None
+    };
     Ok(ProjectData {
         last_upload_at: model.last_upload_at,
         created_at: model.created_at,
         stale,
-        organization: crate::server::organization(found),
+        organization,
         slug: model.slug,
         name: model.name,
         findings: list.into_iter().map(crate::server::finding).collect(),
@@ -280,7 +290,30 @@ pub async fn load_project(
         licenses,
         counts: crate::server::counts(summary.counts),
         known_exploited: summary.known_exploited,
+        badge,
     })
+}
+
+/// The badge of a project as its settings show it: the image on this server, and Markdown that
+/// links the image to the project page, both under the public URL.
+#[cfg(feature = "ssr")]
+fn project_badge(
+    public_url: &nanobom_domain::Url,
+    organization: &str,
+    project: &str,
+    key: &str,
+) -> ProjectBadge {
+    use nanobom_domain::notifications::link;
+    let image_path = format!("badges/{key}.svg");
+    let image = link(public_url, &image_path);
+    let page = link(
+        public_url,
+        &format!("organizations/{organization}/projects/{project}"),
+    );
+    ProjectBadge {
+        image_path: format!("/{image_path}"),
+        markdown: format!("[![vulnerabilities]({image})]({page})"),
+    }
 }
 
 #[cfg(feature = "ssr")]
@@ -1085,6 +1118,46 @@ pub async fn delete_project(
         ),
         Err(error) => back(Err(crate::server::message(error)), "/organizations"),
     }
+    Ok(())
+}
+
+/// Turns a project's badge on, or gives it a new address when `replace` is set; the old
+/// address stops working.
+#[server(endpoint = "enable_badge")]
+pub async fn enable_badge(
+    organization: String,
+    project: String,
+    replace: Option<String>,
+) -> Result<(), ServerFnError> {
+    let actor = actor().await?;
+    let database = &context()?.database;
+    let result = async {
+        let id = project_id(database, &actor, &organization, &project).await?;
+        nanobom_domain::badges::enable(database, &actor, id).await?;
+        Ok(if replace.is_some() {
+            crate::t!("notices.badge_replaced")
+        } else {
+            crate::t!("notices.badge_enabled")
+        }
+        .to_owned())
+    }
+    .await;
+    finish(result, &version_page(&organization, &project));
+    Ok(())
+}
+
+/// Turns a project's badge off: its address stops working.
+#[server(endpoint = "disable_badge")]
+pub async fn disable_badge(organization: String, project: String) -> Result<(), ServerFnError> {
+    let actor = actor().await?;
+    let database = &context()?.database;
+    let result = async {
+        let id = project_id(database, &actor, &organization, &project).await?;
+        nanobom_domain::badges::disable(database, &actor, id).await?;
+        Ok(crate::t!("notices.badge_disabled").to_owned())
+    }
+    .await;
+    finish(result, &version_page(&organization, &project));
     Ok(())
 }
 

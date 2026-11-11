@@ -16,7 +16,7 @@ Each member of an organization has one of four roles, each including the ones be
 | Ignore and restore findings | | ✓ | ✓ | ✓ |
 | Start a run (**Check now**) | | ✓ | ✓ | ✓ |
 | Add, change and remove members other than owners | | | ✓ | ✓ |
-| Delete projects; make their [versions](versions.md) inactive or active, mark one latest, delete them | | | ✓ | ✓ |
+| Delete projects; make their [versions](versions.md) inactive or active, mark one latest, delete them; turn their [badge](badges.md) on or off and give it a new address | | | ✓ | ✓ |
 | Create and revoke API tokens, upload or read | | | ✓ | ✓ |
 | Configure the webhook and email notifications, send a test email | | | ✓ | ✓ |
 | Change the [license policy](license-policy.md) | | | ✓ | ✓ |

@@ -358,8 +358,15 @@ async fn the_migration_attaches_existing_rows_to_an_unnamed_version() {
         .unwrap()
         .unwrap();
 
-    // Back to the schema before versions, with a project created there.
-    Migrator::down(database, Some(1)).await.unwrap();
+    // Back to the schema before versions, with a project created there: the versions
+    // migration and every later one are undone.
+    let migrations = Migrator::migrations();
+    let versions = migrations
+        .iter()
+        .position(|migration| migration.name() == "m20261109_000004_project_versions")
+        .expect("the versions migration");
+    let steps = u32::try_from(migrations.len() - versions).unwrap();
+    Migrator::down(database, Some(steps)).await.unwrap();
     let manager = SchemaManager::new(database);
     assert!(!manager.has_table("project_versions").await.unwrap());
     for table in VERSIONED {
