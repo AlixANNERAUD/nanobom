@@ -7,3 +7,4 @@
 mise.local.toml
 lcov.info
 __pycache__/
+/crates/*/sbom.json

@@ -20,6 +20,7 @@ mise run coverage      # tests with coverage, written to lcov.info
 mise run build         # release binary and site in target/
 mise run docs          # this book, in docs/book
 mise run doc           # the API documentation (rustdoc); broken links fail it
+mise run sbom          # CycloneDX SBOM of the server, in crates/server/sbom.json
 ```
 
 `mise run dev` needs neither `/data` nor root. It runs `cargo leptos watch -- serve` (cargo-leptos

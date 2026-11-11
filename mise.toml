@@ -13,6 +13,8 @@ mr-boxington = "latest"
 # refusing those downloads was failing builds). The versions are cargo-leptos 0.3.11's defaults.
 "github:WebAssembly/binaryen" = { version = "123", version_prefix = "version_" }
 "aqua:tailwindlabs/tailwindcss" = "4.2.1"
+# Writes the SBOM nanobom uploads to its own instance (mise run sbom, .github/workflows/sbom.yml).
+"github:CycloneDX/cyclonedx-rust-cargo" = { version = "0.5.10", version_prefix = "cargo-cyclonedx-", bin = "cargo-cyclonedx" }
 # Builds the documentation in docs/ (mise run docs).
 "github:rust-lang/mdBook" = { version = "0.5.4", bin = "mdbook" }
 
@@ -53,6 +55,12 @@ run = [
   'case "$NANOBOM_TEST_DATABASE_URL" in postgres://*|postgresql://*) ;; *) echo "Set NANOBOM_TEST_DATABASE_URL to an empty PostgreSQL database, such as postgres://nanobom:nanobom@localhost:5432/nanobom" >&2; exit 1 ;; esac',
   "cargo nextest run $NANOBOM_SERVER_PACKAGES --no-tests=pass --test-threads 1",
 ]
+
+# cargo-cyclonedx writes one SBOM per workspace crate; crates/server/sbom.json describes the
+# released binary.
+[tasks.sbom]
+description = "Write the CycloneDX SBOM of the server to crates/server/sbom.json"
+run = "cargo cyclonedx --format json --spec-version 1.6 --override-filename sbom"
 
 [tasks.coverage]
 description = "Run the test suite with coverage, writing lcov.info"

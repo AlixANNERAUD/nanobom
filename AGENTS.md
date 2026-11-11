@@ -40,6 +40,7 @@ fail: the build directory is set up by mise.
 | `mise run entities` | Regenerates `crates/entity` from the migrations |
 | `mise run docs` | Builds the guide into `docs/book` |
 | `mise run build` | Release binary and site |
+| `mise run sbom` | CycloneDX SBOM of the server in `crates/server/sbom.json`, which `.github/workflows/sbom.yml` uploads to the maintainer's instance |
 
 Builds are heavy: run one cargo command at a time, and prefer focused tests
 (`mise exec -- cargo nextest run -p nanobom-domain <filter>`) while iterating, the full suite once
