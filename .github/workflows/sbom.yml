@@ -1,0 +1,38 @@
+name: SBOM
+
+# nanobom tracks itself: each push to main uploads the SBOM of the server to the maintainer's
+# instance, where the findings are triaged like those of any other project.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sbom
+  cancel-in-progress: true
+
+env:
+  MISE_ENV: ci
+
+jobs:
+  sbom:
+    name: Upload the SBOM
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: jdx/mise-action@v5.2.7
+      # The server package depends on every other crate except the browser bundle, whose own
+      # dependencies are almost all shared with the server. Only normal and build dependencies are
+      # listed, for the runner's target (x86_64 Linux), like the released binary.
+      - name: Generate the SBOM
+        run: mise run sbom
+      - uses: AlixANNERAUD/nanobom-action@v1
+        with:
+          url: https://vulnerabilites.anneraud.fr
+          token: ${{ secrets.NANOBOM_TOKEN }}
+          organization: alix_anneraud
+          project: nanobom
+          sbom: crates/server/sbom.json
