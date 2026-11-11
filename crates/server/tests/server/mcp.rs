@@ -774,3 +774,35 @@ async fn long_lists_are_cut_and_say_so() {
     assert_eq!(filtered["total"], 2);
     assert_eq!(filtered["truncated"], false);
 }
+
+#[tokio::test]
+async fn arguments_outside_a_tool_schema_are_tool_errors() {
+    let setup = setup().await;
+    let server = &setup.server;
+    for arguments in [
+        json!({"project": "web", "unknown": true}),
+        json!({}),
+        json!({"project": "web", "status": "maybe"}),
+    ] {
+        let response = post(
+            server,
+            Credentials::Bearer(&setup.acme_read),
+            json!({
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "list_findings", "arguments": arguments},
+            }),
+        )
+        .await;
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = body_json(response).await;
+        // A result the assistant can read and correct, not a protocol error.
+        assert_eq!(body["result"]["isError"], true, "{arguments}: {body}");
+        let message = body["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(
+            message.starts_with("failed to deserialize parameters"),
+            "{arguments}: {message}"
+        );
+    }
+}

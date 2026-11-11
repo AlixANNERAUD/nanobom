@@ -996,7 +996,8 @@ pub struct AffectedFinding {
 /// The outcome of [`affected_by`].
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AffectedFindings {
-    /// The stored vulnerabilities known under the identifier asked for, by identifier.
+    /// The identifiers, among those of the reader's findings, known under the identifier asked
+    /// for, sorted; empty when none of the reader's projects has it.
     pub vulnerability_ids: Vec<String>,
     /// At most [`MAXIMUM_AFFECTED_FINDINGS`], by organization, project, version and component.
     pub findings: Vec<AffectedFinding>,
@@ -1046,7 +1047,7 @@ pub async fn affected_by(
         .into_tuple()
         .all(database)
         .await?;
-    let vulnerability_ids: Vec<String> = candidates
+    let candidate_ids: Vec<String> = candidates
         .into_iter()
         .filter(|(id, aliases)| {
             id.to_lowercase() == wanted
@@ -1057,34 +1058,22 @@ pub async fn affected_by(
         })
         .map(|(id, _)| id)
         .collect();
-    if vulnerability_ids.is_empty() {
+    if candidate_ids.is_empty() {
         return Ok(AffectedFindings::default());
     }
 
-    let organizations: HashMap<i64, String> = crate::organizations::list(database, reader)
-        .await?
-        .into_iter()
-        .map(|organization| (organization.id, organization.slug))
-        .collect();
-    let projects: HashMap<i64, (String, String)> = projects::Entity::find()
-        .filter(projects::Column::OrganizationId.is_in(organizations.keys().copied()))
-        .all(database)
-        .await?
-        .into_iter()
-        .filter(|project| reader.reaches_project(project.id))
-        .map(|project| {
-            let organization = organizations[&project.organization_id].clone();
-            (project.id, (organization, project.slug))
-        })
-        .collect();
+    // The projects the reader sees, through the same authorization as everywhere else.
+    let mut projects: HashMap<i64, (String, String)> = HashMap::new();
+    for organization in crate::organizations::list(database, reader).await? {
+        for project in crate::projects::list(database, reader, organization.id).await? {
+            projects.insert(project.id, (organization.slug.clone(), project.slug));
+        }
+    }
     if projects.is_empty() {
-        return Ok(AffectedFindings {
-            vulnerability_ids,
-            ..AffectedFindings::default()
-        });
+        return Ok(AffectedFindings::default());
     }
     let mut select = findings::Entity::find()
-        .filter(findings::Column::VulnerabilityId.is_in(vulnerability_ids.iter().cloned()))
+        .filter(findings::Column::VulnerabilityId.is_in(candidate_ids.iter().cloned()))
         .filter(findings::Column::ProjectId.is_in(projects.keys().copied()));
     if !statuses.is_empty() {
         select = select
@@ -1094,6 +1083,17 @@ pub async fn affected_by(
         select =
             select.filter(findings::Column::VersionId.in_subquery(crate::versions::active_ids()));
     }
+    // The vulnerabilities table is shared by the whole instance: only identifiers with a finding
+    // the reader can see are named, so the answer says nothing about other organizations.
+    let vulnerability_ids: Vec<String> = select
+        .clone()
+        .select_only()
+        .column(findings::Column::VulnerabilityId)
+        .distinct()
+        .order_by_asc(findings::Column::VulnerabilityId)
+        .into_tuple()
+        .all(database)
+        .await?;
     let rows = select
         .order_by_asc(findings::Column::ProjectId)
         .order_by_asc(findings::Column::VersionId)

@@ -36,6 +36,9 @@ exist. Projects are named by slug within the token's organization.
 
 ## Status codes
 
+The token is checked first: a request without a valid token is `401`, whatever else is wrong
+with it.
+
 | Status | When |
 | --- | --- |
 | `200` | A JSON-RPC answer, including tool errors (see [Errors](#errors)) |
@@ -115,7 +118,8 @@ clients read from `tools/list`. Answers are JSON objects, as structured content 
 ```
 
 `known_as` lists the identifiers the vulnerability is filed under in nanobom: the one asked for,
-or those that list it as an alias. It is empty when no project ever had the vulnerability.
+or those that list it as an alias, among the findings of the projects the token reaches. It is
+empty when none of them has the vulnerability: it never reveals what other organizations have.
 
 ## Limits
 
@@ -123,7 +127,8 @@ or those that list it as an alias. It is empty when no project ever had the vuln
 | --- | --- |
 | Items in a list | 100; the answer has `"truncated": true` when there are more. `list_findings` also gives `total` |
 | Advisory details | 4000 characters; `details_truncated` says when they were cut |
-| Advisory references | 20 |
+| Advisory references | 20; `references_truncated` says when there were more |
+| Versions of a finding (`get_finding`) | 100; `versions_truncated` says when there were more |
 | Request body | 64 KiB |
 
 A truncated list calls for a narrower question: a filter on `list_findings`, a longer name or a
@@ -133,8 +138,10 @@ version prefix on `search_components`.
 
 A tool that cannot answer returns a result with `isError: true` and a message the assistant can
 act on, in English: `not found: …` for a project, version or finding that does not exist or is
-out of the token's reach, or what is wrong with the inputs, unknown or missing ones included. A
-database failure is a JSON-RPC internal error, without details.
+out of the token's reach, or what is wrong with the inputs: an unknown or missing field, a value
+outside an enumeration (`failed to deserialize parameters: …`), an empty `vulnerability`, a
+search with neither `name` nor `license`. A database failure is a JSON-RPC internal error,
+without details.
 
 ## Untrusted text
 

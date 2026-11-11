@@ -572,13 +572,22 @@ async fn findings_are_found_by_any_identifier_of_their_vulnerability() {
         ["acme/web GHSA-35jh-r3h4-6jhm open"]
     );
     // A project token sees its project; a member every organization of theirs.
+    let affected = findings::affected_by(&database, &web_token, "CVE-2021-23337", &[], false)
+        .await
+        .unwrap();
+    // Only the identifiers of findings it can see: api's CVE-2021-23337 is not named.
+    assert_eq!(affected.vulnerability_ids, ["GHSA-35jh-r3h4-6jhm"]);
+    assert_eq!(found(affected), ["acme/web GHSA-35jh-r3h4-6jhm open"]);
+    // Another organization's token learns nothing of a vulnerability only acme has.
+    let globex_token = tokens::create(&database, &owner, globex, None, "Globex CI")
+        .await
+        .unwrap();
+    let globex_token = token_model(&database, &globex_token).await;
     assert_eq!(
-        found(
-            findings::affected_by(&database, &web_token, "CVE-2021-23337", &[], false)
-                .await
-                .unwrap()
-        ),
-        ["acme/web GHSA-35jh-r3h4-6jhm open"]
+        findings::affected_by(&database, &globex_token, "CVE-2021-233370", &[], false)
+            .await
+            .unwrap(),
+        findings::AffectedFindings::default()
     );
     assert_eq!(
         found(
