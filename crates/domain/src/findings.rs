@@ -589,7 +589,7 @@ pub struct VersionFinding {
     pub finding_id: Option<i64>,
 }
 
-async fn token_names(
+pub(crate) async fn token_names(
     database: &impl ConnectionTrait,
     identifiers: impl Iterator<Item = i64>,
 ) -> Result<HashMap<i64, String>> {
@@ -634,7 +634,7 @@ pub struct FindingDetail {
     pub dependency_paths: Option<DependencyPaths>,
 }
 
-async fn usernames(
+pub(crate) async fn usernames(
     database: &impl ConnectionTrait,
     identifiers: impl Iterator<Item = i64>,
 ) -> Result<HashMap<i64, String>> {

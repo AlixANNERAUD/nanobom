@@ -27,7 +27,8 @@ Every endpoint is a `GET`.
 | `/api/openapi.json` | The OpenAPI description | |
 
 Slugs are case-insensitive. A project's findings as a CycloneDX VEX document come from the
-[VEX API](vex-api.md), with the same authentication.
+[VEX API](vex-api.md), and its [vulnerability report](report.md#endpoint) as HTML, with the same
+authentication.
 
 ## Versions
 

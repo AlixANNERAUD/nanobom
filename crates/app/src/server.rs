@@ -393,6 +393,105 @@ pub fn license_counts(value: nanobom_domain::licenses::ViolationCounts) -> model
     }
 }
 
+/// A report for the interface. `public_url` is the instance's address, which the report names
+/// and links the VEX export from.
+pub fn report(
+    value: nanobom_domain::report::Report,
+    public_url: &nanobom_domain::Url,
+) -> model::ReportData {
+    use nanobom_domain::report::Licenses;
+    let mut vex = format!(
+        "api/organizations/{}/projects/{}/vex",
+        value.organization_slug, value.project_slug
+    );
+    if !value.latest {
+        vex = with_query(&vex, &[("version", &value.version)]);
+    }
+    let vex_url = public_url
+        .join(&vex)
+        .map(|url| url.to_string())
+        .unwrap_or(vex);
+    model::ReportData {
+        generated_at: value.generated_at,
+        nanobom_version: env!("CARGO_PKG_VERSION").to_owned(),
+        host: public_url.host_str().unwrap_or_default().to_owned(),
+        vex_url,
+        upload: value.upload.map(|upload| model::Upload {
+            version: value.version.clone(),
+            uploaded_at: upload.uploaded_at,
+            specification_version: upload.specification_version,
+            source_commit: upload.source_commit,
+            image_tag: upload.image_tag,
+            component_count: upload.component_count,
+            components_without_purl: upload.components_without_purl,
+        }),
+        organization_slug: value.organization_slug,
+        organization_name: value.organization_name,
+        project_slug: value.project_slug,
+        project_name: value.project_name,
+        version: value.version,
+        latest: value.latest,
+        active: value.active,
+        component_count: value.component_count,
+        stale: value.stale,
+        project_last_upload_at: value.project_last_upload_at,
+        project_created_at: value.project_created_at,
+        last_evaluation: value.last_evaluation,
+        kev_checked_at: value.kev_checked_at,
+        epss_checked_at: value.epss_checked_at,
+        counts: counts(value.summary.open),
+        known_exploited: value.summary.known_exploited,
+        ignored: value.summary.ignored,
+        fixed_recently: value.summary.fixed_recently,
+        open: value
+            .open
+            .into_iter()
+            .map(|open| model::ReportFinding {
+                finding: finding(open.finding),
+                fixed_versions: open.fixed_versions,
+            })
+            .collect(),
+        assessed: value
+            .assessed
+            .into_iter()
+            .map(|assessed| model::AssessedFinding {
+                finding: finding(assessed.finding),
+                ignored_at: assessed.ignored_at,
+                ignored_by: assessed.ignored_by,
+                ignored_by_token: assessed.ignored_by_token,
+            })
+            .collect(),
+        licenses: match value.licenses {
+            Licenses::Policy(violations) => {
+                model::ReportLicenses::Policy(license_violations(violations))
+            }
+            Licenses::Counts(counts) => model::ReportLicenses::Counts {
+                groups: counts.groups,
+                other: counts.other,
+                without: counts.without,
+            },
+        },
+    }
+}
+
+pub fn license_violations(value: nanobom_domain::licenses::Violations) -> model::LicenseViolations {
+    model::LicenseViolations {
+        counts: license_counts(value.counts),
+        items: value
+            .items
+            .into_iter()
+            .map(|violation| model::LicenseViolation {
+                purl: violation.purl,
+                name: violation.name,
+                version: violation.version,
+                license: violation.license,
+                verdict: license_action(violation.verdict),
+                licenses: violation.licenses,
+            })
+            .collect(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::local_referer_path;

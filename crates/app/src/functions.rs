@@ -327,6 +327,28 @@ fn version_option(summary: &nanobom_domain::versions::VersionSummary) -> Version
     }
 }
 
+/// The vulnerability report of a project version (`None`: the latest).
+#[server(endpoint = "report_page")]
+pub async fn load_report(
+    organization: String,
+    project: String,
+    version: Option<String>,
+) -> Result<ReportData, ServerFnError> {
+    let actor = actor().await?;
+    let context = context()?;
+    let report = nanobom_domain::report::build(
+        &context.database,
+        &actor,
+        &organization,
+        &project,
+        version.as_deref(),
+        context.settings.stale_after_days,
+    )
+    .await
+    .map_err(failure)?;
+    Ok(crate::server::report(report, &context.settings.public_url))
+}
+
 #[server(endpoint = "finding_page")]
 pub async fn load_finding(finding: i64) -> Result<FindingData, ServerFnError> {
     use nanobom_domain::findings;

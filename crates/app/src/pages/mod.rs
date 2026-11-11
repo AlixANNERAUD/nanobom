@@ -2,4 +2,5 @@
 
 pub mod findings;
 pub mod organizations;
+pub mod report;
 pub mod settings;

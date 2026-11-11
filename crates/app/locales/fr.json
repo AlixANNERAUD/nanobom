@@ -180,6 +180,7 @@
     "upload_unnamed_version": "version sans nom",
     "uploads_title": "Historique des envois",
     "export_vex": "Exporter le VEX",
+    "report": "Rapport",
     "delete_title": "Supprimer ce projet",
     "delete_description": "Ses composants, son historique d’envois et ses vulnérabilités sont supprimés. Un envoi ultérieur avec un jeton d’organisation le recrée.",
     "delete": "Supprimer le projet",
@@ -240,6 +241,82 @@
     "delete_version": "Supprimer",
     "delete_version_confirm": "Supprimer {version} avec ses composants, son historique d'envois et ses vulnérabilités",
     "delete_version_submit": "Supprimer la version"
+  },
+  "report": {
+    "title": "Rapport de vulnérabilités",
+    "print_hint": "Imprimez-le ou enregistrez-le en PDF depuis votre navigateur.",
+    "version": "version {version}",
+    "generated": "Généré le {time}",
+    "generated_by": "par nanobom {version} sur {host}.",
+    "stale_title": "Le SBOM n’est peut-être plus à jour",
+    "stale": "Aucun SBOM reçu pour ce projet depuis le {date} : ce rapport peut ne pas décrire ce qui est déployé.",
+    "stale_never": "Aucun SBOM reçu depuis la création de ce projet le {date}.",
+    "inactive": "nanobom ne vérifie plus cette version : ses vulnérabilités sont celles de sa dernière vérification.",
+    "scope_title": "Périmètre et provenance",
+    "sbom": "Nomenclature logicielle (SBOM)",
+    "uploaded": "envoyé le {time}",
+    "no_upload": "Aucun SBOM n’a été envoyé pour cette version.",
+    "components_checked": "Composants vérifiés",
+    "components_not_checked": "Composants non vérifiés",
+    "without_purl": {
+      "one": "{count} composant sans package URL",
+      "other": "{count} composants sans package URL"
+    },
+    "last_evaluation": "Dernière vérification auprès d’OSV",
+    "not_checked_while_inactive": "Plus depuis que la version est devenue inactive",
+    "kev_checked": "Dernière lecture du catalogue KEV de la CISA",
+    "epss_checked": "Dernière lecture des scores EPSS du FIRST",
+    "summary_title": "Synthèse",
+    "sentence_none": "Aucune vulnérabilité ouverte.",
+    "sentence_lower": {
+      "one": "Aucune vulnérabilité ouverte de gravité élevée ou critique ; {count} de gravité moindre ou inconnue.",
+      "other": "Aucune vulnérabilité ouverte de gravité élevée ou critique ; {count} de gravité moindre ou inconnue."
+    },
+    "sentence_severe": {
+      "one": "{count} vulnérabilité ouverte de gravité élevée ou critique.",
+      "other": "{count} vulnérabilités ouvertes de gravité élevée ou critique."
+    },
+    "ignored": "Évaluées et ignorées",
+    "fixed_recently": "Corrigées ces 90 derniers jours",
+    "open_title": "Vulnérabilités ouvertes",
+    "open_description": "Les vulnérabilités exploitées d’abord, puis par gravité et EPSS, comme sur la page du projet. L’EPSS est le centile de la probabilité d’exploitation dans les 30 prochains jours.",
+    "open_caption": "Vulnérabilités ouvertes, exploitées d’abord",
+    "open_none": "Aucune vulnérabilité ouverte.",
+    "open_more": {
+      "one": "Et {count} autre, sur la page du projet.",
+      "other": "Et {count} autres, sur la page du projet."
+    },
+    "dependency": "Dépendance",
+    "direct": "Directe",
+    "transitive": "Transitive, par {names}",
+    "unknown": "Inconnue",
+    "first_seen": "Vue le",
+    "yes": "Oui",
+    "no": "Non",
+    "assessed_title": "Évaluées comme n’affectant pas le produit",
+    "assessed_description": "Les vulnérabilités que des membres ont évaluées et ignorées, avec leur raison. Une justification indique pourquoi le produit n’est pas affecté ; un ignore sans justification consigne un risque accepté. C’est la forme lisible des déclarations VEX.",
+    "vex_export": "Pour un usage automatisé, l’export VEX :",
+    "assessed_none": "Aucune vulnérabilité ignorée.",
+    "assessed_more": {
+      "one": "Et {count} autre, sur la page du projet.",
+      "other": "Et {count} autres, sur la page du projet."
+    },
+    "accepted_risk": "Aucune (risque accepté)",
+    "decided": "Décision",
+    "licenses_more": {
+      "one": "Et {count} autre composant, sur la page du projet.",
+      "other": "Et {count} autres composants, sur la page du projet."
+    },
+    "licenses_no_policy": "Les composants par expression de licence, telle que déclarée dans le SBOM. L’organisation n’a pas de politique de licences active.",
+    "licenses_counts_caption": "Composants par expression de licence, les plus fréquentes d’abord",
+    "license_components": "Composants",
+    "licenses_other": "Autres expressions",
+    "licenses_without": "Aucune licence déclarée",
+    "licenses_empty": "Cette version n’a aucun composant.",
+    "method_title": "Méthode",
+    "method_checks": "nanobom vérifie le package URL de chaque composant du SBOM auprès de la base de vulnérabilités OSV, puis classe les vulnérabilités avec le catalogue des vulnérabilités exploitées de la CISA (KEV) et les scores de prédiction d’exploitation du FIRST (EPSS).",
+    "method_limits": "Il ne vérifie ni les composants sans package URL, ni le code que le SBOM ne liste pas, comme du code copié ou généré.",
+    "method_time": "Ce rapport reflète l’état au moment de sa génération. Les dates sont en UTC."
   },
   "finding": {
     "title": "Vulnérabilité",

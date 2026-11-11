@@ -17,7 +17,7 @@
 //!   ([`dependency_track`]).
 //! - **Read API** (`GET /api/organizations…`, `/api/findings/…`, `/api/components`): JSON
 //!   reads with a token of either scope or the session ([`read_api`]), next to the VEX
-//!   documents of a project ([`vex`]).
+//!   documents of a project ([`vex`]) and its vulnerability report in HTML ([`report`]).
 //! - **Operations** (`/healthz`, `/metrics`): unauthenticated ([`operations`]).
 //! - **Badges** (`/badges/{key}.svg`, `/badges/{key}.json`): a project's open findings for a
 //!   README, authorized by the random key in the path alone ([`badges`]).
@@ -50,6 +50,7 @@ pub mod logging;
 pub mod metrics;
 pub mod operations;
 pub mod read_api;
+pub mod report;
 pub mod runner;
 pub mod serve;
 pub mod state;

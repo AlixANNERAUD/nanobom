@@ -62,6 +62,7 @@ use crate::{
     pages::{
         findings::{FindingPage, ProjectPage, SearchPage},
         organizations::{OrganizationPage, OrganizationsPage, SignInPage},
+        report::ReportPage,
         settings::{AdministrationPage, SettingsPage},
     },
 };
@@ -111,6 +112,11 @@ pub fn App() -> impl IntoView {
                 <Route
                     path=path!("/organizations/:organization/projects/:project")
                     view=ProjectPage
+                    ssr=SsrMode::Async
+                />
+                <Route
+                    path=path!("/organizations/:organization/projects/:project/report")
+                    view=ReportPage
                     ssr=SsrMode::Async
                 />
                 <Route path=path!("/findings/:finding") view=FindingPage ssr=SsrMode::Async />

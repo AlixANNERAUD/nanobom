@@ -180,6 +180,7 @@
     "upload_unnamed_version": "unnamed version",
     "uploads_title": "Upload history",
     "export_vex": "Export VEX",
+    "report": "Report",
     "delete_title": "Delete this project",
     "delete_description": "Its components, upload history and findings are deleted. A later upload with an organization token creates it again.",
     "delete": "Delete project",
@@ -240,6 +241,82 @@
     "delete_version": "Delete",
     "delete_version_confirm": "Delete {version} with its components, upload history and findings",
     "delete_version_submit": "Delete version"
+  },
+  "report": {
+    "title": "Vulnerability report",
+    "print_hint": "Print it or save it as PDF from your browser.",
+    "version": "version {version}",
+    "generated": "Generated on {time}",
+    "generated_by": "by nanobom {version} on {host}.",
+    "stale_title": "The SBOM may be out of date",
+    "stale": "No SBOM was received for this project since {date}: this report may not describe what is deployed.",
+    "stale_never": "No SBOM was received since this project was created on {date}.",
+    "inactive": "nanobom no longer checks this version: its findings are those of its last check.",
+    "scope_title": "Scope and provenance",
+    "sbom": "Software bill of materials",
+    "uploaded": "uploaded on {time}",
+    "no_upload": "No SBOM was uploaded for this version.",
+    "components_checked": "Components checked",
+    "components_not_checked": "Components not checked",
+    "without_purl": {
+      "one": "{count} component without a package URL",
+      "other": "{count} components without a package URL"
+    },
+    "last_evaluation": "Last check against OSV",
+    "not_checked_while_inactive": "Not since the version became inactive",
+    "kev_checked": "CISA KEV catalog last read",
+    "epss_checked": "FIRST EPSS scores last read",
+    "summary_title": "Summary",
+    "sentence_none": "No open vulnerabilities.",
+    "sentence_lower": {
+      "one": "No open vulnerabilities of high or critical severity; {count} of lower or unknown severity.",
+      "other": "No open vulnerabilities of high or critical severity; {count} of lower or unknown severity."
+    },
+    "sentence_severe": {
+      "one": "{count} open vulnerability of high or critical severity.",
+      "other": "{count} open vulnerabilities of high or critical severity."
+    },
+    "ignored": "Assessed and ignored",
+    "fixed_recently": "Fixed in the last 90 days",
+    "open_title": "Open vulnerabilities",
+    "open_description": "Known exploited first, then by severity and EPSS, as on the project page. EPSS is the percentile of the probability of exploitation in the next 30 days.",
+    "open_caption": "Open vulnerabilities, known exploited first",
+    "open_none": "No open vulnerabilities.",
+    "open_more": {
+      "one": "And {count} more, listed on the project page.",
+      "other": "And {count} more, listed on the project page."
+    },
+    "dependency": "Dependency",
+    "direct": "Direct",
+    "transitive": "Transitive, through {names}",
+    "unknown": "Not known",
+    "first_seen": "First seen",
+    "yes": "Yes",
+    "no": "No",
+    "assessed_title": "Assessed as not affecting the product",
+    "assessed_description": "Findings members assessed and ignored, with their reason. A justification states why the product is not affected; an ignore without one records an accepted risk. This is the readable form of the VEX statements.",
+    "vex_export": "For machine-readable use, the VEX export:",
+    "assessed_none": "No finding was ignored.",
+    "assessed_more": {
+      "one": "And {count} more, listed on the project page.",
+      "other": "And {count} more, listed on the project page."
+    },
+    "accepted_risk": "None (accepted risk)",
+    "decided": "Decided",
+    "licenses_more": {
+      "one": "And {count} more component, listed on the project page.",
+      "other": "And {count} more components, listed on the project page."
+    },
+    "licenses_no_policy": "Components by license expression, as declared in the SBOM. The organization has no active license policy.",
+    "licenses_counts_caption": "Components by license expression, most common first",
+    "license_components": "Components",
+    "licenses_other": "Other expressions",
+    "licenses_without": "No license declared",
+    "licenses_empty": "This version has no components.",
+    "method_title": "Method",
+    "method_checks": "nanobom checks the package URL of each component of the SBOM against the OSV vulnerability database, then ranks the findings with the CISA catalog of known exploited vulnerabilities (KEV) and the FIRST exploit prediction scores (EPSS).",
+    "method_limits": "It does not check components without a package URL, nor code the SBOM does not list, such as vendored or generated code.",
+    "method_time": "This report reflects the state at the time it was generated. Dates are in UTC."
   },
   "finding": {
     "title": "Finding",
