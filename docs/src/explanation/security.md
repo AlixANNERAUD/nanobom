@@ -34,10 +34,10 @@ reach operators rather than an organization's channel.
   change any row, so the database is the boundary either way. Only admins and owners see the
   value; it is never in a token list, an API response or the page of a member or viewer. It
   cannot be revoked, only renewed, which stops the old value at once.
-- Limited to an organization or one project; they reach the upload, VEX and read APIs only,
-  never the interface. A project token limits a leak to one project, and cannot create
-  projects. Every token reads the findings of the projects it reaches, as a viewer, through the
-  same checks as the interface.
+- Limited to an organization or one project; they reach the upload, VEX and read APIs and the
+  MCP endpoint only, never the interface. A project token limits a leak to one project, and
+  cannot create projects. Every token reads the findings of the projects it reaches, as a
+  viewer, through the same checks as the interface.
 - An `upload` token can also replace components and ignore findings by importing VEX
   statements: a leaked upload token can hide vulnerabilities, so treat it like the SBOM pipeline
   it belongs to. A `read` token cannot change anything: every write path refuses it, in the
@@ -54,6 +54,14 @@ it only answers `GET` requests and changes nothing, and since it sends no CORS h
 of another site cannot read its answers. Its responses are `Cache-Control: private, no-cache`
 and vary on the cookie and token headers, so a shared proxy cannot serve what one caller
 obtained to another.
+
+The [MCP endpoint](../reference/mcp.md) is driven by `POST` requests, so it accepts tokens only,
+never the session cookie, and refuses any request with an `Origin` header: a browser cannot
+send it a request with the user's credentials, and no web page can drive it. It reads what the
+read API reads, through the same checks, and has no tool that writes. Advisory text it returns
+comes from third parties and could try to steer the assistant reading it; nanobom marks it as
+data, and a read token keeps a misled assistant from changing anything
+([Query nanobom from an assistant](../how-to/assistant.md#mind-the-advisory-text)).
 
 ## Sessions and cookies
 

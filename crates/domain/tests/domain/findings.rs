@@ -404,3 +404,199 @@ async fn the_open_summary_counts_only_open_findings_of_the_version() {
         Err(Error::NotFound)
     ));
 }
+
+/// A stored vulnerability with these aliases.
+async fn vulnerability(database: &DatabaseConnection, id: &str, aliases: &[&str]) {
+    vulnerabilities::ActiveModel {
+        id: Set(id.to_owned()),
+        modified: Set(Utc::now().fixed_offset()),
+        aliases: Set(serde_json::to_string(aliases).unwrap()),
+        severity: Set("high".to_owned()),
+        record: Set("{}".to_owned()),
+        fetched_at: Set(Utc::now().fixed_offset()),
+        ..Default::default()
+    }
+    .insert(database)
+    .await
+    .unwrap();
+}
+
+/// A finding of a stored vulnerability on a component of the project's latest version.
+async fn finding_of(
+    database: &DatabaseConnection,
+    project_id: i64,
+    vulnerability_id: &str,
+    purl: &str,
+    status: &str,
+) {
+    findings_entity::ActiveModel {
+        project_id: Set(project_id),
+        version_id: Set(Some(testing::latest_version(database, project_id).await)),
+        purl: Set(purl.to_owned()),
+        ecosystem: Set("npm".to_owned()),
+        vulnerability_id: Set(vulnerability_id.to_owned()),
+        status: Set(status.to_owned()),
+        severity: Set("high".to_owned()),
+        first_seen_at: Set(Utc::now().fixed_offset()),
+        last_seen_at: Set(Utc::now().fixed_offset()),
+        ..Default::default()
+    }
+    .insert(database)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn findings_are_found_by_any_identifier_of_their_vulnerability() {
+    let database = testing::database().await;
+    let user = users::create(
+        &database,
+        NewUser {
+            username: "owner".to_owned(),
+            ..NewUser::default()
+        },
+        false,
+    )
+    .await
+    .unwrap();
+    let owner = Actor::from_user(&user);
+    let acme = organizations::create(&database, &owner, "acme", "Acme")
+        .await
+        .unwrap()
+        .id;
+    let globex = organizations::create(&database, &owner, "globex", "Globex")
+        .await
+        .unwrap()
+        .id;
+    let web = projects::create(&database, &owner, acme, "web", "Web")
+        .await
+        .unwrap()
+        .id;
+    let api = projects::create(&database, &owner, acme, "api", "API")
+        .await
+        .unwrap()
+        .id;
+    let other = projects::create(&database, &owner, globex, "web", "Web")
+        .await
+        .unwrap()
+        .id;
+    // One issue under two identifiers, a lookalike, and an identifier with a LIKE wildcard.
+    vulnerability(&database, "GHSA-35jh-r3h4-6jhm", &["CVE-2021-23337"]).await;
+    vulnerability(&database, "CVE-2021-23337", &[]).await;
+    vulnerability(&database, "CVE-2021-233370", &[]).await;
+    finding_of(
+        &database,
+        web,
+        "GHSA-35jh-r3h4-6jhm",
+        "pkg:npm/lodash@4.17.20",
+        "open",
+    )
+    .await;
+    finding_of(
+        &database,
+        api,
+        "CVE-2021-23337",
+        "pkg:npm/lodash@4.17.19",
+        "ignored",
+    )
+    .await;
+    finding_of(
+        &database,
+        api,
+        "CVE-2021-233370",
+        "pkg:npm/other@1.0.0",
+        "open",
+    )
+    .await;
+    finding_of(
+        &database,
+        other,
+        "GHSA-35jh-r3h4-6jhm",
+        "pkg:npm/lodash@4.17.20",
+        "open",
+    )
+    .await;
+
+    let acme_token = tokens::create(&database, &owner, acme, None, "CI")
+        .await
+        .unwrap();
+    let acme_token = token_model(&database, &acme_token).await;
+    let web_token = tokens::create(&database, &owner, acme, Some("web"), "Web CI")
+        .await
+        .unwrap();
+    let web_token = token_model(&database, &web_token).await;
+    let found = |found: findings::AffectedFindings| {
+        found
+            .findings
+            .into_iter()
+            .map(|finding| {
+                format!(
+                    "{}/{} {} {}",
+                    finding.organization_slug,
+                    finding.project_slug,
+                    finding.vulnerability_id,
+                    finding.status.as_str()
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+
+    // By the CVE, in any case: the finding filed under the GHSA counts, the lookalike does not.
+    let affected = findings::affected_by(&database, &acme_token, "cve-2021-23337", &[], false)
+        .await
+        .unwrap();
+    assert_eq!(
+        affected.vulnerability_ids,
+        ["CVE-2021-23337", "GHSA-35jh-r3h4-6jhm"]
+    );
+    assert_eq!(
+        found(affected),
+        [
+            "acme/api CVE-2021-23337 ignored",
+            "acme/web GHSA-35jh-r3h4-6jhm open"
+        ]
+    );
+    // By the GHSA, open findings only.
+    assert_eq!(
+        found(
+            findings::affected_by(
+                &database,
+                &acme_token,
+                "GHSA-35JH-R3H4-6JHM",
+                &[findings::Status::Open],
+                false
+            )
+            .await
+            .unwrap()
+        ),
+        ["acme/web GHSA-35jh-r3h4-6jhm open"]
+    );
+    // A project token sees its project; a member every organization of theirs.
+    assert_eq!(
+        found(
+            findings::affected_by(&database, &web_token, "CVE-2021-23337", &[], false)
+                .await
+                .unwrap()
+        ),
+        ["acme/web GHSA-35jh-r3h4-6jhm open"]
+    );
+    assert_eq!(
+        found(
+            findings::affected_by(&database, &owner, "CVE-2021-23337", &[], false)
+                .await
+                .unwrap()
+        )
+        .len(),
+        3
+    );
+    // Wildcards are taken literally, and an unknown identifier finds nothing.
+    for identifier in ["CVE-2021-2333_", "CVE-2021-%", "", "CVE-1999-0001"] {
+        assert_eq!(
+            findings::affected_by(&database, &acme_token, identifier, &[], false)
+                .await
+                .unwrap(),
+            findings::AffectedFindings::default(),
+            "{identifier}"
+        );
+    }
+}

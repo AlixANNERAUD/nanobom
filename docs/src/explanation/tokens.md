@@ -3,8 +3,8 @@
 CI pipelines, scripts and dashboards talk to nanobom without a person behind them, so they
 authenticate with tokens rather than user accounts. This page explains how a token's reach and
 scope combine, and which token to give to what. The facts (headers, endpoints, commands) are in
-the [upload API](../reference/upload-api.md#tokens) and [read API](../reference/read-api.md)
-references.
+the [upload API](../reference/upload-api.md#tokens), [read API](../reference/read-api.md) and
+[MCP endpoint](../reference/mcp.md) references.
 
 ## Two independent choices
 
@@ -14,7 +14,7 @@ A token is created with two answers:
   touches.
 - **Scope**: what the token may do within its reach.
 
-| Scope | Uploads SBOMs | Imports VEX documents | Creates projects | Reads (read API, VEX export) |
+| Scope | Uploads SBOMs | Imports VEX documents | Creates projects | Reads (read API, VEX export, MCP) |
 | --- | :---: | :---: | :---: | :---: |
 | `upload` | ✓ | ✓ | organization tokens only | ✓ |
 | `read` | | | | ✓ |

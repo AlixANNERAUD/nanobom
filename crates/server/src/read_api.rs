@@ -55,6 +55,7 @@ use nanobom_domain::{
     licenses::{self, Action},
     notifications, organizations, projects, tokens, versions,
 };
+use nanobom_entity::upload_tokens;
 use nanobom_osv::Severity;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
@@ -154,11 +155,7 @@ pub async fn reader(
             "sign in, or send a token in the Authorization header (Bearer) or in X-Api-Key",
         )
     };
-    if headers.contains_key(header::AUTHORIZATION) || headers.contains_key(X_API_KEY) {
-        let secret = token_secret(headers).ok_or_else(unauthorized)?;
-        let token = tokens::authenticate(&state.database, secret)
-            .await?
-            .ok_or_else(unauthorized)?;
+    if let Some(token) = token_reader(state, headers, unauthorized).await? {
         return Ok(Reader::from(&token));
     }
     let user = session.user.as_ref().ok_or_else(unauthorized)?;
@@ -167,6 +164,23 @@ pub async fn reader(
         .await
         .map_err(|_| unauthorized())?;
     Ok(Reader::User(actor))
+}
+
+/// The active token of `Authorization: Bearer` or `X-Api-Key`, of either scope; `None` when the
+/// request sends neither header, and `unauthorized()` when the one it sends is not a valid token.
+pub(crate) async fn token_reader(
+    state: &AppState,
+    headers: &HeaderMap,
+    unauthorized: impl Fn() -> ApiError,
+) -> Result<Option<upload_tokens::Model>, ApiError> {
+    if !headers.contains_key(header::AUTHORIZATION) && !headers.contains_key(X_API_KEY) {
+        return Ok(None);
+    }
+    let secret = token_secret(headers).ok_or_else(&unauthorized)?;
+    let token = tokens::authenticate(&state.database, secret)
+        .await?
+        .ok_or_else(unauthorized)?;
+    Ok(Some(token))
 }
 
 const X_API_KEY: &str = "x-api-key";

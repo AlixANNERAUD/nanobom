@@ -31,8 +31,11 @@ use nanobom_entity::{
 use nanobom_osv::{Severity, Vulnerability, schema::Reference};
 use packageurl::PackageUrl;
 use sea_orm::{
-    ActiveModelTrait, ActiveValue::Set, ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter,
-    QueryOrder, QuerySelect, TransactionSession, TransactionTrait,
+    ActiveModelTrait,
+    ActiveValue::Set,
+    ColumnTrait, Condition, ConnectionTrait, EntityTrait, ExprTrait, QueryFilter, QueryOrder,
+    QuerySelect, TransactionSession, TransactionTrait,
+    sea_query::{Expr, Func, LikeExpr},
 };
 use serde::{Deserialize, Serialize};
 
@@ -966,6 +969,194 @@ async fn across_versions(
             }
         })
         .collect())
+}
+
+/// At most this many findings are returned by [`affected_by`].
+pub const MAXIMUM_AFFECTED_FINDINGS: usize = 100;
+
+/// A finding of a vulnerability somewhere the reader can see, as [`affected_by`] lists it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AffectedFinding {
+    pub finding_id: i64,
+    pub organization_slug: String,
+    pub project_slug: String,
+    /// Empty for the unnamed version.
+    pub version: String,
+    pub version_active: bool,
+    pub version_latest: bool,
+    pub purl: String,
+    pub component_name: String,
+    pub component_version: Option<String>,
+    /// The identifier the finding is filed under: the one asked for, or one of its aliases.
+    pub vulnerability_id: String,
+    pub severity: Severity,
+    pub status: Status,
+}
+
+/// The outcome of [`affected_by`].
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AffectedFindings {
+    /// The stored vulnerabilities known under the identifier asked for, by identifier.
+    pub vulnerability_ids: Vec<String>,
+    /// At most [`MAXIMUM_AFFECTED_FINDINGS`], by organization, project, version and component.
+    pub findings: Vec<AffectedFinding>,
+    /// More findings matched than `findings` holds.
+    pub truncated: bool,
+}
+
+/// The findings of a vulnerability across the projects the reader can see, by any of its
+/// identifiers: `CVE-2021-23337` also finds findings filed under `GHSA-35jh-r3h4-6jhm`, which
+/// lists it as an alias. Identifiers match ignoring case, as on a finding's page. Only
+/// findings with one of `statuses` count (any status when empty), in active versions unless
+/// `include_inactive`.
+///
+/// Aliases are stored as a JSON array of strings, so the database narrows the vulnerabilities to
+/// those whose array contains the quoted identifier, and the arrays are then parsed to keep exact
+/// matches only.
+pub async fn affected_by(
+    database: &impl ConnectionTrait,
+    reader: impl Into<Reader>,
+    identifier: &str,
+    statuses: &[Status],
+    include_inactive: bool,
+) -> Result<AffectedFindings> {
+    let reader = reader.into();
+    let wanted = identifier.trim().to_lowercase();
+    // No identifier holds a quote or a backslash, which JSON would escape in the stored array.
+    if wanted.is_empty() || wanted.contains(['"', '\\']) {
+        return Ok(AffectedFindings::default());
+    }
+    let quoted = format!("%\"{}\"%", crate::inventory::escape_like(&wanted));
+    let candidates: Vec<(String, String)> = vulnerabilities::Entity::find()
+        .select_only()
+        .column(vulnerabilities::Column::Id)
+        .column(vulnerabilities::Column::Aliases)
+        .filter(
+            Condition::any()
+                .add(
+                    Expr::expr(Func::lower(Expr::col(vulnerabilities::Column::Id)))
+                        .eq(wanted.clone()),
+                )
+                .add(
+                    Expr::expr(Func::lower(Expr::col(vulnerabilities::Column::Aliases)))
+                        .like(LikeExpr::new(quoted).escape('\\')),
+                ),
+        )
+        .order_by_asc(vulnerabilities::Column::Id)
+        .into_tuple()
+        .all(database)
+        .await?;
+    let vulnerability_ids: Vec<String> = candidates
+        .into_iter()
+        .filter(|(id, aliases)| {
+            id.to_lowercase() == wanted
+                || serde_json::from_str::<Vec<String>>(aliases)
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|alias| alias.to_lowercase() == wanted)
+        })
+        .map(|(id, _)| id)
+        .collect();
+    if vulnerability_ids.is_empty() {
+        return Ok(AffectedFindings::default());
+    }
+
+    let organizations: HashMap<i64, String> = crate::organizations::list(database, reader)
+        .await?
+        .into_iter()
+        .map(|organization| (organization.id, organization.slug))
+        .collect();
+    let projects: HashMap<i64, (String, String)> = projects::Entity::find()
+        .filter(projects::Column::OrganizationId.is_in(organizations.keys().copied()))
+        .all(database)
+        .await?
+        .into_iter()
+        .filter(|project| reader.reaches_project(project.id))
+        .map(|project| {
+            let organization = organizations[&project.organization_id].clone();
+            (project.id, (organization, project.slug))
+        })
+        .collect();
+    if projects.is_empty() {
+        return Ok(AffectedFindings {
+            vulnerability_ids,
+            ..AffectedFindings::default()
+        });
+    }
+    let mut select = findings::Entity::find()
+        .filter(findings::Column::VulnerabilityId.is_in(vulnerability_ids.iter().cloned()))
+        .filter(findings::Column::ProjectId.is_in(projects.keys().copied()));
+    if !statuses.is_empty() {
+        select = select
+            .filter(findings::Column::Status.is_in(statuses.iter().map(|value| value.as_str())));
+    }
+    if !include_inactive {
+        select =
+            select.filter(findings::Column::VersionId.in_subquery(crate::versions::active_ids()));
+    }
+    let rows = select
+        .order_by_asc(findings::Column::ProjectId)
+        .order_by_asc(findings::Column::VersionId)
+        .order_by_asc(findings::Column::Purl)
+        .order_by_asc(findings::Column::Id)
+        // One more than returned, to know whether the cap cut the list.
+        .limit(MAXIMUM_AFFECTED_FINDINGS as u64 + 1)
+        .all(database)
+        .await?;
+    let truncated = rows.len() > MAXIMUM_AFFECTED_FINDINGS;
+    let rows: Vec<findings::Model> = rows.into_iter().take(MAXIMUM_AFFECTED_FINDINGS).collect();
+    let versions: HashMap<i64, project_versions::Model> = project_versions::Entity::find()
+        .filter(project_versions::Column::Id.is_in(rows.iter().filter_map(|row| row.version_id)))
+        .all(database)
+        .await?
+        .into_iter()
+        .map(|version| (version.id, version))
+        .collect();
+    let mut affected: Vec<AffectedFinding> = rows
+        .into_iter()
+        .map(|row| {
+            let (organization_slug, project_slug) = projects[&row.project_id].clone();
+            let version = row.version_id.and_then(|id| versions.get(&id));
+            let (component_name, component_version) = component_name_and_version(&row.purl);
+            AffectedFinding {
+                finding_id: row.id,
+                organization_slug,
+                project_slug,
+                version: version
+                    .map(|version| version.name.clone())
+                    .unwrap_or_default(),
+                version_active: version.is_some_and(|version| version.active),
+                version_latest: version.is_some_and(|version| version.latest),
+                component_name,
+                component_version,
+                severity: row.severity.parse().unwrap_or(Severity::Unknown),
+                status: Status::parse(&row.status),
+                purl: row.purl,
+                vulnerability_id: row.vulnerability_id,
+            }
+        })
+        .collect();
+    affected.sort_by(|left, right| {
+        (
+            &left.organization_slug,
+            &left.project_slug,
+            &left.version,
+            &left.purl,
+            &left.vulnerability_id,
+        )
+            .cmp(&(
+                &right.organization_slug,
+                &right.project_slug,
+                &right.version,
+                &right.purl,
+                &right.vulnerability_id,
+            ))
+    });
+    Ok(AffectedFindings {
+        vulnerability_ids,
+        findings: affected,
+        truncated,
+    })
 }
 
 async fn triaged_finding(

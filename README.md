@@ -141,6 +141,8 @@ upload to nanobom with a new address and key: see [Dependency-Track clients](htt
 - Each project comes with its own upload token, shown on its page with a GitHub Actions step
   ready to paste, and renewed in one click.
 - A read-only JSON API, described in OpenAPI, for dashboards and scripts, with read-only tokens.
+- An MCP endpoint for assistants (Claude Code, Claude Desktop, VS Code…): "which of our projects
+  are affected by CVE-2021-44228?", read-only, with the same tokens.
 - A status badge per project for its README, off until an admin turns it on, behind an address
   that can be replaced or revoked at any time.
 - Prometheus metrics, health check, JSON logs, online backups.
@@ -164,6 +166,7 @@ The full guide lives at **<https://alixanneraud.github.io/nanobom/>**:
 - **Reference** - [configuration](https://alixanneraud.github.io/nanobom/reference/configuration.html),
   [upload API](https://alixanneraud.github.io/nanobom/reference/upload-api.html),
   [read API](https://alixanneraud.github.io/nanobom/reference/read-api.html),
+  [MCP endpoint](https://alixanneraud.github.io/nanobom/reference/mcp.html),
   [webhook payloads and emails](https://alixanneraud.github.io/nanobom/reference/webhooks.html),
   [roles and permissions](https://alixanneraud.github.io/nanobom/reference/accounts.html),
   [metrics](https://alixanneraud.github.io/nanobom/reference/metrics.html).

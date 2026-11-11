@@ -101,15 +101,16 @@ fn minimist_advisory() -> Value {
 /// Two organizations: `acme` (owned by alice, who signs in) with projects `web` and `api`,
 /// and `globex` (owned by bob) with `web`. Every project has the npm fixture, so lodash
 /// (high, known exploited) and minimist (critical) findings. Tokens of each kind are created.
-struct Setup {
-    server: TestServer,
-    alice: Actor,
-    cookie: String,
-    acme_upload: String,
-    acme_read: String,
-    acme_web_read: String,
-    acme_web_upload: String,
-    globex_read: String,
+/// The MCP tests share it.
+pub(crate) struct Setup {
+    pub(crate) server: TestServer,
+    pub(crate) alice: Actor,
+    pub(crate) cookie: String,
+    pub(crate) acme_upload: String,
+    pub(crate) acme_read: String,
+    pub(crate) acme_web_read: String,
+    pub(crate) acme_web_upload: String,
+    pub(crate) globex_read: String,
 }
 
 async fn upload(server: &TestServer, token: &str, organization: &str, project: &str) {
@@ -172,7 +173,7 @@ async fn token(
     .secret
 }
 
-async fn setup() -> Setup {
+pub(crate) async fn setup() -> Setup {
     let server = server(&[]).await;
     server.source.publish(lodash_advisory(), &[LODASH]);
     server.source.publish(minimist_advisory(), &[MINIMIST]);

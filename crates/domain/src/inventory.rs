@@ -1159,7 +1159,7 @@ fn contains_text(column: components::Column, text: &str) -> Expr {
 }
 
 /// Escapes the wildcards of a `LIKE` pattern, so `_` in a package name matches itself.
-fn escape_like(value: &str) -> String {
+pub(crate) fn escape_like(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
     for character in value.chars() {
         if matches!(character, '%' | '_' | '\\') {
