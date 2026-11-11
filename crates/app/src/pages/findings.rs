@@ -262,12 +262,21 @@ pub(crate) fn version_label(name: &str) -> String {
 
 /// `version=…` for a link to a project version, encoded: version names may hold `+` and `/`.
 pub(crate) fn version_query(name: &str) -> String {
-    format!(
-        "version={}",
-        name.replace('%', "%25")
-            .replace('+', "%2B")
-            .replace('/', "%2F")
-    )
+    format!("version={}", encode_query_value(name))
+}
+
+/// Percent-encodes a query string value: every byte but the unreserved ones (RFC 3986), so a
+/// version or a filter holding `&`, `#`, `+` or `/` stays one value.
+pub(crate) fn encode_query_value(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(char::from(byte));
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    encoded
 }
 
 /// The ecosystems the filter offers: those of the version's findings, and the one the address

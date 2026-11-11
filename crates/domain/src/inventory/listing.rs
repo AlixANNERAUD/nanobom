@@ -148,6 +148,8 @@ pub async fn list_components(
         ComponentFilter::WithoutLicense => select.filter(components::Column::License.is_null()),
     };
     let matching = select.clone().count(database).await?;
+    // A page past the last shows the last one, not an empty table that reads as "no match".
+    let page = std::cmp::min(page, std::cmp::max(matching.div_ceil(per_page), 1));
     let models = select
         .order_by(worst_rank(), Order::Desc)
         .order_by_asc(components::Column::Name)

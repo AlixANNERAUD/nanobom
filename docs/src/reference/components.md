@@ -38,8 +38,12 @@ how many components match the filters when there are any.
 | Open findings | The severity of the worst open finding and their number, linking to the finding when there is one, to the version's findings otherwise; **None** without open findings |
 | Dependency | **Direct** when the SBOM lists it among the project's own dependencies, **Transitive** otherwise, **Not known** when the SBOM does not say which components the project depends on directly (see [Dependency paths](../explanation/dependency-paths.md)) |
 
-Components with open findings come first, the most severe first, then every component by name,
-version and package URL. A page holds 100 components.
+Components with open findings come first, the most severe first, then every component by name
+and version. A page holds 100 components; asking for a page past the last shows the last.
+
+When some links of the SBOM's dependency graph could not be followed (components without a
+package URL, or a reference shared by several packages), the page says so: a direct dependency
+whose link was lost shows as **Transitive**.
 
 The [read API](read-api.md)'s `/components` returns the same components as JSON, by package URL,
 without these filters.

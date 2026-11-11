@@ -12,7 +12,9 @@ use crate::{
     components::{Empty, Heading, Loaded, Page, PageTitle, SeverityBadge, ui::*},
     functions::load_components,
     model::{ComponentRow, ComponentsData, ComponentsQuery, ComponentsShown, DependencyKind},
-    pages::findings::{names_versions, split_namespace, version_options, version_query},
+    pages::findings::{
+        encode_query_value, names_versions, split_namespace, version_options, version_query,
+    },
     t, tf, tp,
 };
 
@@ -63,18 +65,6 @@ pub(crate) fn project_views(
 }
 
 /// Encodes a query string value: names are free text and may hold `&`, `#` or `+`.
-fn encode(value: &str) -> String {
-    let mut encoded = String::with_capacity(value.len());
-    for byte in value.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
-            encoded.push(char::from(byte));
-        } else {
-            encoded.push_str(&format!("%{byte:02X}"));
-        }
-    }
-    encoded
-}
-
 /// The address of a page of components with the same version and filters.
 fn page_href(
     base: &str,
@@ -85,10 +75,10 @@ fn page_href(
 ) -> String {
     let mut pairs = Vec::new();
     if let Some(version) = version {
-        pairs.push(format!("version={}", encode(version)));
+        pairs.push(format!("version={}", encode_query_value(version)));
     }
     if !name.is_empty() {
-        pairs.push(format!("name={}", encode(name)));
+        pairs.push(format!("name={}", encode_query_value(name)));
     }
     if shown != ComponentsShown::All {
         pairs.push(format!("show={}", shown.as_str()));
@@ -327,7 +317,11 @@ pub fn ComponentsPage() -> impl IntoView {
                             data.components.clone(),
                             &format!("{project_href}{version_suffix}"),
                         );
+                        let partial = data.dependencies_partial.then(|| view! {
+                            <p class="text-muted-foreground text-sm">{t!("finding.partial_graph")}</p>
+                        });
                         view! {
+                            {partial}
                             <Table caption=tp!("components.caption", data.matching) class="min-w-[56rem]">
                                 <thead>
                                     <tr class=TABLE_HEAD_ROW>
@@ -403,6 +397,6 @@ mod tests {
 
     #[test]
     fn non_ascii_names_are_encoded_by_byte() {
-        assert_eq!(encode("é/x"), "%C3%A9%2Fx");
+        assert_eq!(encode_query_value("é/x"), "%C3%A9%2Fx");
     }
 }

@@ -362,6 +362,7 @@ pub async fn load_components(
         versions: summaries.iter().map(version_option).collect(),
         version,
         has_next: listed.has_next(),
+        dependencies_partial: listed.version.dependencies_partial,
         matching: listed.matching,
         total: listed.total,
         without_purl: listed.without_purl,

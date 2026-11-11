@@ -248,11 +248,13 @@ async fn components_are_paged_in_a_stable_order() {
     assert_eq!(names(&third), ["org.example/Foxtrot"]);
     assert_eq!(third.page, 3);
     assert!(!third.has_next());
+    // A page past the last is the last one.
     let past = list(&fixture, None, page(4)).await;
-    assert!(past.components.is_empty());
+    assert_eq!(names(&past), names(&third));
+    assert_eq!(past.page, 3);
     assert_eq!(past.matching, 5);
     let far = list(&fixture, None, page(u64::MAX)).await;
-    assert!(far.components.is_empty());
+    assert_eq!(far.page, 3);
     assert!(!far.has_next());
 
     let large = ComponentQuery {

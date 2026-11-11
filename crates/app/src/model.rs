@@ -557,6 +557,9 @@ pub struct ComponentsData {
     pub per_page: u64,
     /// Whether matching components come after this page.
     pub has_next: bool,
+    /// Some edges of the version's dependency graph were lost (see the finding page), so a
+    /// direct dependency may be labelled transitive.
+    pub dependencies_partial: bool,
 }
 
 /// A project's own upload token, as its settings show it.
