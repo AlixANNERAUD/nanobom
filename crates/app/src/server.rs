@@ -361,6 +361,25 @@ pub fn finding(value: nanobom_domain::findings::Finding) -> model::FindingRow {
     }
 }
 
+pub fn listed_component(value: nanobom_domain::inventory::ListedComponent) -> model::ComponentRow {
+    use nanobom_domain::inventory::DependencyKind;
+    model::ComponentRow {
+        purl: value.purl,
+        ecosystem: value.ecosystem,
+        name: value.name,
+        version: value.version,
+        license: value.license,
+        open_findings: value.open_findings,
+        worst_severity: value.worst_severity.map(severity),
+        only_open_finding: value.only_open_finding,
+        dependency: match value.dependency {
+            DependencyKind::Direct => model::DependencyKind::Direct,
+            DependencyKind::Transitive => model::DependencyKind::Transitive,
+            DependencyKind::Unknown => model::DependencyKind::Unknown,
+        },
+    }
+}
+
 pub fn dependency_component(
     value: nanobom_domain::dependencies::ComponentRef,
 ) -> model::DependencyComponent {

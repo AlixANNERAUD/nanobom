@@ -309,6 +309,72 @@ pub async fn load_project(
     })
 }
 
+/// A page of the components of a project version.
+#[server(endpoint = "components_page")]
+pub async fn load_components(
+    organization: String,
+    project: String,
+    query: ComponentsQuery,
+) -> Result<ComponentsData, ServerFnError> {
+    use nanobom_domain::{
+        inventory::{self, ComponentFilter},
+        organizations, projects, versions,
+    };
+    let actor = actor().await?;
+    let database = &context()?.database;
+    let found = organizations::find(database, &actor, &organization)
+        .await
+        .map_err(failure)?;
+    let model = projects::find(database, &actor, found.id, &project)
+        .await
+        .map_err(failure)?;
+    let filter = match ComponentsShown::parse(query.show.as_deref()) {
+        ComponentsShown::All => ComponentFilter::All,
+        ComponentsShown::WithOpenFindings => ComponentFilter::WithOpenFindings,
+        ComponentsShown::WithoutLicense => ComponentFilter::WithoutLicense,
+    };
+    let listed = inventory::list_components(
+        database,
+        &actor,
+        model.id,
+        query.version.as_deref(),
+        &inventory::ComponentQuery {
+            name: query.name.unwrap_or_default(),
+            filter,
+            page: query.page,
+            per_page: inventory::COMPONENTS_PER_PAGE,
+        },
+    )
+    .await
+    .map_err(failure)?;
+    let summaries = versions::list(database, &actor, model.id)
+        .await
+        .map_err(failure)?;
+    let version = summaries
+        .iter()
+        .find(|summary| summary.id == listed.version.id)
+        .map(version_option)
+        .ok_or_else(|| failure(nanobom_domain::Error::NotFound))?;
+    Ok(ComponentsData {
+        organization: crate::server::organization(found),
+        slug: model.slug,
+        name: model.name,
+        versions: summaries.iter().map(version_option).collect(),
+        version,
+        has_next: listed.has_next(),
+        matching: listed.matching,
+        total: listed.total,
+        without_purl: listed.without_purl,
+        page: listed.page,
+        per_page: listed.per_page,
+        components: listed
+            .components
+            .into_iter()
+            .map(crate::server::listed_component)
+            .collect(),
+    })
+}
+
 /// A project's upload token with ready-to-paste uploads: a GitHub Actions step and a `curl`
 /// command, both under the public URL and reading the token from `NANOBOM_TOKEN`, so the
 /// snippets themselves hold no secret.

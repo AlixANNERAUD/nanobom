@@ -188,6 +188,9 @@
     "uploads_title": "Upload history",
     "export_vex": "Export VEX",
     "report": "Report",
+    "views": "Project views",
+    "tab_findings": "Findings",
+    "tab_components": "Components ({count})",
     "delete_title": "Delete this project",
     "delete_description": "Its components, upload history and findings are deleted. A later upload with an organization token creates it again.",
     "delete": "Delete project",
@@ -423,6 +426,49 @@
     "version_latest": "latest",
     "version_inactive": "inactive",
     "version_current": "this finding"
+  },
+  "components": {
+    "title": "Components",
+    "total": {
+      "one": "{count} component in this version",
+      "other": "{count} components in this version"
+    },
+    "without_purl": {
+      "one": "{count} more without a package URL, not listed",
+      "other": "{count} more without a package URL, not listed"
+    },
+    "matching": {
+      "one": "{count} matches the filters",
+      "other": "{count} match the filters"
+    },
+    "filter_label": "Filter components",
+    "name": "Name",
+    "show": "Show",
+    "show_all": "All components",
+    "show_open": "With open findings",
+    "show_unlicensed": "Without license",
+    "caption": {
+      "one": "{count} component, those with open findings first",
+      "other": "{count} components, those with open findings first"
+    },
+    "component": "Component",
+    "ecosystem": "Ecosystem",
+    "license": "License",
+    "findings": "Open findings",
+    "dependency": "Dependency",
+    "no_license": "None declared",
+    "no_findings": "None",
+    "direct": "Direct",
+    "transitive": "Transitive",
+    "dependency_unknown": "Not known",
+    "empty_title": "No component",
+    "empty_text": "No SBOM of this version listed a component with a package URL.",
+    "no_match_title": "No component matches",
+    "no_match_text": "Nothing to show for these filters.",
+    "pagination": "Pages of components",
+    "previous": "Previous",
+    "next": "Next",
+    "page_of": "Page {page} of {pages}"
   },
   "search": {
     "title": "Search",

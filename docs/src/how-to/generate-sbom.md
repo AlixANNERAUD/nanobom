@@ -112,3 +112,19 @@ jq '{version: .spdxVersion,
 `version` must be `SPDX-2.2` or `SPDX-2.3`. `without_purl` leaves out files and the operating
 system, which nanobom ignores, but counts the package the document describes (the scanned
 directory or image) when it has no package URL, though it is the project and not a component.
+
+## Check what nanobom received
+
+After an upload, open the project and its **Components** tab. It lists every component nanobom
+stored for the version shown, vulnerable or not, and says how many components of the SBOM had no
+package URL and were left out.
+
+- **Is the SBOM complete?** Compare the count with what the generator should have found. Type a
+  dependency's name in **Name** to confirm it is there; a missing one usually means the
+  generator read another lockfile or directory.
+- **Which licenses does it declare?** Choose **Without license** to list the components whose
+  SBOM entry gives none.
+- **Which components are vulnerable?** Choose **With open findings**: they come first anyway,
+  the most severe first.
+
+The columns and filters are described in [Components of a version](../reference/components.md).

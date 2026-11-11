@@ -60,6 +60,7 @@ use leptos_router::{
 use crate::{
     components::{Page, ui::Alert},
     pages::{
+        components::ComponentsPage,
         findings::{FindingPage, ProjectPage, SearchPage},
         organizations::{OrganizationPage, OrganizationsPage, SignInPage},
         report::ReportPage,
@@ -112,6 +113,11 @@ pub fn App() -> impl IntoView {
                 <Route
                     path=path!("/organizations/:organization/projects/:project")
                     view=ProjectPage
+                    ssr=SsrMode::Async
+                />
+                <Route
+                    path=path!("/organizations/:organization/projects/:project/components")
+                    view=ComponentsPage
                     ssr=SsrMode::Async
                 />
                 <Route

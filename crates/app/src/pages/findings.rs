@@ -20,7 +20,10 @@ use crate::{
         FindingRow, LicenseAction, LicenseViolations, ProjectBadge, ProjectData,
         ProjectUploadToken, Severity, Status, VersionFinding, VersionOption,
     },
-    pages::organizations::severity_cells,
+    pages::{
+        components::{ProjectView, project_views},
+        organizations::severity_cells,
+    },
     t, tf, tp,
 };
 
@@ -94,7 +97,7 @@ fn shows_via(findings: &[FindingRow]) -> bool {
 /// A component's name as its namespace and the rest, which starts with the separator:
 /// `org.apache.logging.log4j` and `/log4j-core`. A narrow cell cuts the namespace first, the
 /// part that tells the least.
-fn split_namespace(name: &str) -> (&str, &str) {
+pub(crate) fn split_namespace(name: &str) -> (&str, &str) {
     match name.rfind('/') {
         Some(separator) => name.split_at(separator),
         None => ("", name),
@@ -283,8 +286,36 @@ fn ecosystem_options(found: &[String], chosen: Option<&str>) -> Vec<String> {
 
 /// Whether a project names versions. One that never did has only the unnamed version, and
 /// nothing to choose or compare.
-fn names_versions(versions: &[VersionOption]) -> bool {
+pub(crate) fn names_versions(versions: &[VersionOption]) -> bool {
     versions.iter().any(|version| !version.name.is_empty())
+}
+
+/// The options of a version selector, `current` selected.
+pub(crate) fn version_options(versions: &[VersionOption], current: &str) -> impl IntoView + use<> {
+    versions
+        .iter()
+        .map(|version| {
+            let selected = version.name == current;
+            let label = if version.latest {
+                tf!(
+                    "project.version_latest",
+                    version = version_label(&version.name)
+                )
+            } else if !version.active {
+                tf!(
+                    "project.version_inactive_option",
+                    version = version_label(&version.name)
+                )
+            } else {
+                version_label(&version.name)
+            };
+            view! {
+                <option value=version.name.clone() selected=selected>
+                    {label}
+                </option>
+            }
+        })
+        .collect_view()
 }
 
 /// What the findings table shows, a plain GET form with one button: the version, for projects
@@ -294,31 +325,7 @@ fn names_versions(versions: &[VersionOption]) -> bool {
 fn Filters(page: ProjectData, filter: FindingFilter) -> impl IntoView {
     let selected = |current: &Option<String>, value: &str| current.as_deref() == Some(value);
     let version = if names_versions(&page.versions) {
-        let options = page
-            .versions
-            .iter()
-            .map(|version| {
-                let selected = version.name == page.version.name;
-                let label = if version.latest {
-                    tf!(
-                        "project.version_latest",
-                        version = version_label(&version.name)
-                    )
-                } else if !version.active {
-                    tf!(
-                        "project.version_inactive_option",
-                        version = version_label(&version.name)
-                    )
-                } else {
-                    version_label(&version.name)
-                };
-                view! {
-                    <option value=version.name.clone() selected=selected>
-                        {label}
-                    </option>
-                }
-            })
-            .collect_view();
+        let options = version_options(&page.versions, &page.version.name);
         Some(
             view! {
                 <div class="grid min-w-0 gap-1">
@@ -731,6 +738,13 @@ pub fn ProjectPage() -> impl IntoView {
                             .into_any()
                     } else {
                         view! {
+                            {project_views(
+                                &organization_slug,
+                                &project_slug,
+                                &version_suffix,
+                                u64::try_from(page.component_count).unwrap_or_default(),
+                                ProjectView::Findings,
+                            )}
                             <Filters page=page.clone() filter />
                             {table}
                         }

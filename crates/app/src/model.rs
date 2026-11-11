@@ -2,9 +2,9 @@
 //! defined here, independent of the server-only domain crate.
 //!
 //! They also compile for the browser bundle, which cannot link the domain crate (it pulls in
-//! the database driver). [`Severity`], [`Status`], [`Role`], [`DeliveryState`] and
-//! [`LicenseAction`] therefore mirror domain enumerations: keep them in sync, along with the conversions in
-//! `crate::server`.
+//! the database driver). [`Severity`], [`Status`], [`Role`], [`DeliveryState`],
+//! [`LicenseAction`] and [`DependencyKind`] therefore mirror domain enumerations: keep them in
+//! sync, along with the conversions in `crate::server`.
 //!
 //! Nothing here grants anything: methods such as [`Role::can_manage`] only decide which
 //! controls a page shows. The domain checks every action again.
@@ -458,6 +458,105 @@ pub struct ProjectData {
     /// The project's upload token and how to use it; always `None` for those who cannot manage
     /// tokens, who never receive its value.
     pub upload_token: Option<ProjectUploadToken>,
+}
+
+/// What the components page lists, from its query string.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ComponentsQuery {
+    /// The project version shown (`version=`, empty for the unnamed version); the latest when
+    /// `None`.
+    pub version: Option<String>,
+    /// Only components whose name contains this text (`name=`).
+    pub name: Option<String>,
+    /// [`ComponentsShown::as_str`] (`show=`); every component otherwise.
+    pub show: Option<String>,
+    /// The page, from 1 (`page=`).
+    pub page: u64,
+}
+
+/// Which components the components page lists, besides the name filter.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ComponentsShown {
+    #[default]
+    All,
+    WithOpenFindings,
+    WithoutLicense,
+}
+
+impl ComponentsShown {
+    /// The filters the form offers after "all", in order.
+    pub const FILTERS: [ComponentsShown; 2] = [
+        ComponentsShown::WithOpenFindings,
+        ComponentsShown::WithoutLicense,
+    ];
+
+    /// The value of `show=`; empty for every component.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ComponentsShown::All => "",
+            ComponentsShown::WithOpenFindings => "open",
+            ComponentsShown::WithoutLicense => "unlicensed",
+        }
+    }
+
+    /// From `show=`: an unknown value lists every component, like no value.
+    pub fn parse(value: Option<&str>) -> Self {
+        match value {
+            Some("open") => ComponentsShown::WithOpenFindings,
+            Some("unlicensed") => ComponentsShown::WithoutLicense,
+            _ => ComponentsShown::All,
+        }
+    }
+}
+
+/// How the project depends on a component; mirrors the domain's `DependencyKind`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DependencyKind {
+    Direct,
+    Transitive,
+    /// The SBOM does not say which components the project depends on directly.
+    Unknown,
+}
+
+/// A component of the components page.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ComponentRow {
+    pub purl: String,
+    pub ecosystem: String,
+    /// With its namespace when it has one.
+    pub name: String,
+    pub version: Option<String>,
+    pub license: Option<String>,
+    pub open_findings: u64,
+    /// The severity of the worst open finding.
+    pub worst_severity: Option<Severity>,
+    /// The open finding when it is the only one, to link to it.
+    pub only_open_finding: Option<i64>,
+    pub dependency: DependencyKind,
+}
+
+/// A page of the components of a project version.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ComponentsData {
+    pub organization: Organization,
+    pub slug: String,
+    pub name: String,
+    /// The project's versions, newest first.
+    pub versions: Vec<VersionOption>,
+    /// The version shown.
+    pub version: VersionOption,
+    pub components: Vec<ComponentRow>,
+    /// Components matching the filters, on every page.
+    pub matching: u64,
+    /// Components of the version, whatever the filters.
+    pub total: u64,
+    /// Components of the version's latest upload without a usable package URL, not stored.
+    pub without_purl: u64,
+    /// The page shown, from 1.
+    pub page: u64,
+    pub per_page: u64,
+    /// Whether matching components come after this page.
+    pub has_next: bool,
 }
 
 /// A project's own upload token, as its settings show it.

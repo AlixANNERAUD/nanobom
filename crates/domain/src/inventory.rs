@@ -22,6 +22,8 @@
 //! [`MAXIMUM_LICENSE_LENGTH`]. Expressions are only trimmed, not parsed or validated: free-text
 //! license names are kept as written, and whoever evaluates them must expect strings that are
 //! not valid SPDX.
+//!
+//! [`list_components`] reads a version's components back a page at a time, for the interface.
 
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap, HashSet},
@@ -61,7 +63,13 @@ use crate::{
 };
 
 mod header;
+mod listing;
 pub mod spdx;
+
+pub use listing::{
+    COMPONENTS_PER_PAGE, ComponentFilter, ComponentPage, ComponentQuery, DependencyKind,
+    ListedComponent, MAXIMUM_COMPONENTS_PER_PAGE, list_components,
+};
 
 /// CycloneDX specification versions accepted at upload.
 pub const SUPPORTED_SPECIFICATION_VERSIONS: [&str; 5] = ["1.3", "1.4", "1.5", "1.6", "1.7"];
