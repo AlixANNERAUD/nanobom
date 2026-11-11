@@ -16,7 +16,9 @@ release with the changelog and the Linux archives (x86_64 and aarch64), and cont
 4. Merge it when a release is wanted. The workflow then tags `vX.Y.Z`, drafts the GitHub
    release with the changelog entry, and calls `release.yml`, which builds both architectures
    natively, attaches the archives (with build provenance), pushes the images tagged `X.Y.Z`,
-   `X.Y`, `X` and `latest`, and publishes the release.
+   `X.Y`, `X` and `latest`, and publishes the release. It also uploads the image's SBOM to the
+   maintainer's nanobom instance, as version `X.Y` of the project `nanobom-image` (with the
+   repository secret `NANOBOM_TOKEN`); a failed upload does not stop the release.
 
 Ordinary merges never release (`release_always = false`). If the build fails, the release stays
 a draft: fix the cause and run `Release` again for the tag from the Actions tab.
