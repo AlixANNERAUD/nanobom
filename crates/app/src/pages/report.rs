@@ -731,6 +731,124 @@ mod tests {
     }
 
     #[test]
+    fn a_full_report_lists_its_open_findings_provenance_and_policy_violations() {
+        use crate::model::{
+            DependencyComponent, LicenseAction, LicenseCounts, LicenseViolation, LicenseViolations,
+            Severity, Upload,
+        };
+        let now = chrono::Utc::now().fixed_offset();
+        let mut data = report();
+        data.stale = true;
+        data.last_evaluation = Some(now);
+        data.upload = Some(Upload {
+            version: "1.0".to_owned(),
+            uploaded_at: now,
+            specification_version: "1.6".to_owned(),
+            source_commit: Some("0123abcd".to_owned()),
+            image_tag: Some("ghcr.io/acme/web:1.0".to_owned()),
+            component_count: 3,
+            components_without_purl: 1,
+        });
+        data.counts = SeverityCounts {
+            critical: 1,
+            medium: 2,
+            ..SeverityCounts::default()
+        };
+        data.known_exploited = 1;
+        let mut direct = data.assessed[0].finding.clone();
+        direct.status = Status::Open;
+        direct.severity = Severity::Critical;
+        direct.vulnerability_id = "CVE-2021-44228".to_owned();
+        direct.aliases = Vec::new();
+        direct.component_name = "log4j-core".to_owned();
+        direct.exploitation.known_exploited = true;
+        direct.exploitation.epss_percentile = Some(0.97);
+        // A component the project depends on directly is introduced through itself.
+        direct.introduced_via = vec![DependencyComponent {
+            purl: direct.purl.clone(),
+            name: direct.component_name.clone(),
+            version: direct.component_version.clone(),
+        }];
+        let mut transitive = direct.clone();
+        transitive.severity = Severity::Medium;
+        transitive.vulnerability_id = "GHSA-transitive".to_owned();
+        transitive.component_name = "deep-dependency".to_owned();
+        transitive.exploitation = crate::model::Exploitation::default();
+        transitive.introduced_via = vec![DependencyComponent {
+            purl: "pkg:npm/express@4.0.0".to_owned(),
+            name: "express".to_owned(),
+            version: Some("4.0.0".to_owned()),
+        }];
+        data.open = vec![
+            ReportFinding {
+                finding: direct,
+                fixed_versions: vec!["2.17.1".to_owned()],
+            },
+            ReportFinding {
+                finding: transitive,
+                fixed_versions: Vec::new(),
+            },
+        ];
+        data.ignored = 3;
+        data.assessed[0].finding.ignore_justification = Some("code_not_reachable".to_owned());
+        data.assessed[0].ignored_by = None;
+        data.assessed[0].ignored_by_token = Some("CI".to_owned());
+        data.assessed[0].ignored_at = None;
+        data.licenses = ReportLicenses::Policy(LicenseViolations {
+            counts: LicenseCounts {
+                forbidden: 2,
+                warned: 1,
+            },
+            items: vec![LicenseViolation {
+                purl: "pkg:npm/copyleft@1.0.0".to_owned(),
+                name: "copyleft".to_owned(),
+                version: Some("1.0.0".to_owned()),
+                license: Some("GPL-3.0-only".to_owned()),
+                verdict: LicenseAction::Forbid,
+                licenses: vec!["GPL-3.0-only".to_owned()],
+            }],
+        });
+
+        let html = document(data, None, None);
+        for expected in [
+            "1 open vulnerability of high or critical severity.",
+            "this report may not describe what is deployed",
+            "0123abcd",
+            "ghcr.io/acme/web:1.0",
+            "CVE-2021-44228",
+            "log4j-core",
+            "2.17.1",
+            "97%",
+            ">Direct<",
+            "Transitive, through express",
+            // Three open findings counted, two listed.
+            "And 1 more, listed on the project page.",
+            // Three ignored, one listed.
+            "And 2 more, listed on the project page.",
+            "copyleft",
+            "GPL-3.0-only",
+            // Three violations counted, one listed.
+            "And 2 more components, listed on the project page.",
+        ] {
+            assert!(html.contains(expected), "{expected} missing from {html}");
+        }
+        // Only the token is known: the decision column has no leading space.
+        assert!(!html.contains("> by"), "{html}");
+    }
+
+    #[test]
+    fn the_summary_sentence_follows_the_worst_severity() {
+        let mut data = report();
+        data.counts = SeverityCounts::default();
+        assert_eq!(summary_sentence(&data), "No open vulnerabilities.");
+        data.counts.low = 2;
+        assert_eq!(
+            summary_sentence(&data),
+            "No open vulnerabilities of high or critical severity; 2 of lower or unknown severity."
+        );
+    }
+
+    #[test]
     fn the_unnamed_version_is_named_once_and_inactive_versions_have_no_check_date() {
         let mut data = report();
         data.version = String::new();
