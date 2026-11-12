@@ -18,6 +18,8 @@
 //! - **Read API** (`GET /api/organizations…`, `/api/findings/…`, `/api/components`): JSON
 //!   reads with a token of either scope or the session ([`read_api`]), next to the VEX
 //!   documents of a project ([`vex`]) and its vulnerability report in HTML ([`report`]).
+//! - **MCP** (`POST /mcp`): the same reads as tools for assistants, with a token only, never
+//!   the session ([`mcp`]).
 //! - **Operations** (`/healthz`, `/metrics`): unauthenticated ([`operations`]).
 //! - **Badges** (`/badges/{key}.svg`, `/badges/{key}.json`): a project's open findings for a
 //!   README, authorized by the random key in the path alone ([`badges`]).
@@ -47,6 +49,7 @@ pub mod dependency_track;
 pub mod healthcheck;
 pub mod http;
 pub mod logging;
+pub mod mcp;
 pub mod metrics;
 pub mod operations;
 pub mod read_api;

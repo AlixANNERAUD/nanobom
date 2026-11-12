@@ -6,6 +6,7 @@ mod command_line;
 mod common;
 mod dependency_track;
 mod interface;
+mod mcp;
 mod operations;
 mod read_api;
 mod report;

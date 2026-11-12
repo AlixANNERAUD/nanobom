@@ -64,6 +64,9 @@ console_error_panic_hook = "0.1"
 embedded-i18n = "0.2"
 # Renders advisory text on the server. Only the parser and its HTML writer: no command line.
 pulldown-cmark = { version = "0.13.6", default-features = false, features = ["html"] }
+# The MCP endpoint: the server side of the Streamable HTTP transport and the tool macros only, no
+# client, no OAuth, no process transport.
+rmcp = { version = "3.9.0", default-features = false, features = ["server", "macros", "transport-streamable-http-server"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
