@@ -188,6 +188,9 @@
     "uploads_title": "Historique des envois",
     "export_vex": "Exporter le VEX",
     "report": "Rapport",
+    "views": "Vues du projet",
+    "tab_findings": "Vulnérabilités",
+    "tab_components": "Composants ({count})",
     "delete_title": "Supprimer ce projet",
     "delete_description": "Ses composants, son historique d’envois et ses vulnérabilités sont supprimés. Un envoi ultérieur avec un jeton d’organisation le recrée.",
     "delete": "Supprimer le projet",
@@ -423,6 +426,49 @@
     "version_latest": "dernière",
     "version_inactive": "inactive",
     "version_current": "cette vulnérabilité"
+  },
+  "components": {
+    "title": "Composants",
+    "total": {
+      "one": "{count} composant dans cette version",
+      "other": "{count} composants dans cette version"
+    },
+    "without_purl": {
+      "one": "{count} autre sans package URL, non listé",
+      "other": "{count} autres sans package URL, non listés"
+    },
+    "matching": {
+      "one": "{count} correspond aux filtres",
+      "other": "{count} correspondent aux filtres"
+    },
+    "filter_label": "Filtrer les composants",
+    "name": "Nom",
+    "show": "Afficher",
+    "show_all": "Tous les composants",
+    "show_open": "Avec des vulnérabilités ouvertes",
+    "show_unlicensed": "Sans licence",
+    "caption": {
+      "one": "{count} composant, ceux avec des vulnérabilités ouvertes en premier",
+      "other": "{count} composants, ceux avec des vulnérabilités ouvertes en premier"
+    },
+    "component": "Composant",
+    "ecosystem": "Écosystème",
+    "license": "Licence",
+    "findings": "Vulnérabilités ouvertes",
+    "dependency": "Dépendance",
+    "no_license": "Aucune déclarée",
+    "no_findings": "Aucune",
+    "direct": "Directe",
+    "transitive": "Transitive",
+    "dependency_unknown": "Inconnue",
+    "empty_title": "Aucun composant",
+    "empty_text": "Aucun SBOM de cette version n'a listé de composant avec un package URL.",
+    "no_match_title": "Aucun composant ne correspond",
+    "no_match_text": "Rien à afficher pour ces filtres.",
+    "pagination": "Pages de composants",
+    "previous": "Précédente",
+    "next": "Suivante",
+    "page_of": "Page {page} sur {pages}"
   },
   "search": {
     "title": "Recherche",

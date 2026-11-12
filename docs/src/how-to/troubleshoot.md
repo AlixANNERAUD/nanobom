@@ -112,6 +112,8 @@ nanobom still finishes the run. Raise the proxy's read timeout above
 The response's `components_without_purl` is not zero, and the project page says some components
 cannot be checked. OSV matches components by package URL, so those are invisible to it. The
 `skipped` list in the response names them with the reason (`no package URL`, or an invalid one).
+The project's **Components** tab lists the components that were stored, and counts those left
+out.
 
 Usually the generator could not identify them: vendored code, binaries copied into an image,
 packages installed outside a package manager. Use the generator of the ecosystem instead of a

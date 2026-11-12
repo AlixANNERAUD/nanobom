@@ -146,6 +146,7 @@ async fn a_name_cannot_leave_the_page_title() {
         "/organizations/acme/settings",
         "/organizations/acme/projects/web",
         "/organizations/acme/projects/web/report",
+        "/organizations/acme/projects/web/components",
     ] {
         let html = alice.page(page).await;
         // The first `</title>` of the document is the one that ends the whole title.
@@ -3123,4 +3124,172 @@ async fn the_upload_token_is_shown_and_renewed_on_the_project_page() {
     assert!(text(row).contains("Project token"), "{row}");
     assert!(!row.contains("revoke_token"), "{row}");
     assert!(!html.contains(&renewed), "{html}");
+}
+
+/// A CycloneDX document of these package URLs, without licenses or dependency graph.
+fn sbom_of(purls: &[String]) -> String {
+    let components: Vec<_> = purls
+        .iter()
+        .map(|purl| json!({"type": "library", "name": "x", "version": "1", "purl": purl}))
+        .collect();
+    json!({"bomFormat": "CycloneDX", "specVersion": "1.6", "version": 1, "components": components})
+        .to_string()
+}
+
+#[tokio::test]
+async fn the_components_page_lists_a_version_page_by_page() {
+    use nanobom_domain::{access::Role, memberships};
+    let server = server(&[]).await;
+    server.source.publish(
+        json!({
+            "id": "GHSA-35jh-r3h4-6jhm",
+            "modified": "2024-01-01T00:00:00Z",
+            "severity": [{"type": "CVSS_V3", "score": "CVSS:3.1/AV:N/AC:L/PR:H/UI:N/S:U/C:H/I:H/A:H"}],
+            "affected": [{"package": {"ecosystem": "npm", "name": "lodash"},
+                "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "4.17.21"}]}]}]
+        }),
+        &["pkg:npm/lodash@4.17.20"],
+    );
+    let owner = local_user(&server.database, "alice", PASSWORD).await;
+    local_user(&server.database, "bob", PASSWORD).await;
+    let carol = local_user(&server.database, "carol", PASSWORD).await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    organizations::create(&server.database, &carol, "other", "Other")
+        .await
+        .unwrap();
+    memberships::add(
+        &server.database,
+        &owner,
+        organization.id,
+        "bob",
+        Role::Viewer,
+    )
+    .await
+    .unwrap();
+    let secret = tokens::create(&server.database, &owner, organization.id, None, "CI")
+        .await
+        .unwrap()
+        .secret;
+    // Version 1.0: lodash, a name holding markup, and 100 packages without vulnerabilities, one
+    // more than a page holds. Version 2.0, uploaded next, becomes the latest.
+    let mut purls: Vec<String> = (0..100)
+        .map(|index| format!("pkg:npm/pkg-{index:03}@1.0.0"))
+        .collect();
+    purls.push("pkg:npm/lodash@4.17.20".to_owned());
+    purls.push("pkg:npm/%3Cscript%3Ealert@1.0.0".to_owned());
+    for (version, purls) in [
+        ("1.0", purls),
+        ("2.0", vec!["pkg:npm/left-pad@1.0.0".to_owned()]),
+    ] {
+        let response = server
+            .send(
+                Request::put(format!(
+                    "/api/organizations/acme/projects/web/sbom?version={version}"
+                ))
+                .header(header::AUTHORIZATION, format!("Bearer {secret}"))
+                .body(Body::from(sbom_of(&purls)))
+                .unwrap(),
+            )
+            .await;
+        assert!(response.status().is_success(), "{}", response.status());
+        server.runner.wait_until_idle().await;
+    }
+    let project = projects::find(&server.database, &owner, organization.id, "web")
+        .await
+        .unwrap();
+    let finding = findings::list_in_version(
+        &server.database,
+        &owner,
+        project.id,
+        Some("1.0"),
+        &Filter::default(),
+    )
+    .await
+    .unwrap()[0]
+        .id;
+    let bob = Browser::sign_in(&server, "bob").await;
+
+    // The project page links to the components of the version it shows.
+    let html = bob
+        .page("/organizations/acme/projects/web?version=1.0")
+        .await;
+    assert!(html.contains("href=\"/organizations/acme/projects/web/components?version=1.0\""));
+    assert!(text(&html).contains("Components (102)"));
+    let html = bob.page("/organizations/acme/projects/web").await;
+    assert!(html.contains("href=\"/organizations/acme/projects/web/components\""));
+    assert!(text(&html).contains("Components (1)"));
+
+    let base = "/organizations/acme/projects/web/components";
+    let html = bob.page(&format!("{base}?version=1.0")).await;
+    let shown = text(&html);
+    assert!(shown.contains("102 components in this version"), "{shown}");
+    assert!(shown.contains("Page 1 of 2"));
+    // Open findings first: lodash leads, its only finding a link away.
+    let first = table_row(&html, "pkg:npm/lodash@4.17.20");
+    assert!(html.find("pkg:npm/lodash@4.17.20") < html.find("pkg:npm/pkg-000@1.0.0"));
+    assert!(first.contains(&format!("href=\"/findings/{finding}\"")));
+    assert!(text(first).contains("High"));
+    assert!(text(first).contains("1 open finding"));
+    let quiet = text(table_row(&html, "pkg:npm/pkg-000@1.0.0"));
+    assert!(quiet.contains("None declared"), "{quiet}");
+    assert!(quiet.contains("Not known"), "{quiet}");
+    assert!(html.contains(&format!("href=\"{base}?version=1.0&amp;page=2\"")));
+    // Markup in a name stays text.
+    assert!(!html.contains("<script>alert"));
+    assert!(html.contains("&lt;script&gt;alert"));
+
+    let html = bob.page(&format!("{base}?version=1.0&page=2")).await;
+    assert!(text(&html).contains("Page 2 of 2"));
+    assert!(html.contains(&format!("href=\"{base}?version=1.0\"")));
+    assert!(!html.contains("pkg:npm/lodash@4.17.20"));
+
+    // Filters keep the version, in the form and in the page links.
+    let html = bob
+        .page(&format!("{base}?version=1.0&name=PKG-05&show="))
+        .await;
+    assert!(text(&html).contains("10 match the filters"));
+    assert!(html.contains("pkg:npm/pkg-055@1.0.0"));
+    assert!(!html.contains("pkg:npm/pkg-060@1.0.0"));
+    let filters = form(&html, "Filter components");
+    assert_eq!(selected(filters, "version"), Some("1.0"));
+    assert!(filters.contains("value=\"PKG-05\""));
+    let html = bob.page(&format!("{base}?version=1.0&show=open")).await;
+    assert!(html.contains("pkg:npm/lodash@4.17.20"));
+    assert!(!html.contains("pkg:npm/pkg-000@1.0.0"));
+    assert_eq!(
+        selected(form(&html, "Filter components"), "show"),
+        Some("open")
+    );
+    let html = bob
+        .page(&format!("{base}?version=1.0&show=unlicensed&page=2"))
+        .await;
+    assert!(html.contains(&format!("href=\"{base}?version=1.0&amp;show=unlicensed\"")));
+
+    // The latest version without a query.
+    let html = bob.page(base).await;
+    assert!(html.contains("pkg:npm/left-pad@1.0.0"));
+    assert!(text(&html).contains("1 component in this version"));
+
+    let response = server
+        .send(
+            Request::get(format!("{base}?version=1.0"))
+                .header(header::COOKIE, &bob.cookie)
+                .header(header::ACCEPT, "text/html")
+                .header(header::ACCEPT_LANGUAGE, "fr")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    let html = text(&body_text(response).await);
+    assert!(html.contains("102 composants dans cette version"), "{html}");
+    assert!(html.contains("Aucune déclarée"));
+    assert!(html.contains("Page 1 sur 2"));
+    assert!(html.contains("Composants (102)"));
+
+    let response = bob.get(&format!("{base}?version=9.9")).await;
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    let carol = Browser::sign_in(&server, "carol").await;
+    assert_eq!(carol.get(base).await.status(), StatusCode::NOT_FOUND);
 }

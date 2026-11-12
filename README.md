@@ -103,6 +103,8 @@ upload to nanobom with a new address and key: see [Dependency-Track clients](htt
   dependency graph export.
 - Every component matched against OSV, which aggregates GitHub, PyPI, RustSec, Go, npm, Debian,
   Alpine and more; aliases (GHSA, CVE, …) of one vulnerability merged into one finding.
+- Every component of each version listed, vulnerable or not, with its license and whether the
+  project depends on it directly: check that an SBOM arrived complete.
 - A history per project: uploads with their commit and image tag, findings opened, fixed,
   reopened or ignored with a reason and an expiry date.
 - Several versions per project, for maintenance branches next to the main one: each with its own

@@ -2,6 +2,7 @@
 mod access;
 mod badges;
 mod chat;
+mod components;
 mod database;
 mod deliveries;
 mod dependencies;
