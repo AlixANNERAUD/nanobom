@@ -95,16 +95,36 @@ async fn wrong_passwords_and_unknown_users_are_refused_alike() {
 #[tokio::test]
 async fn sign_in_attempts_are_rate_limited() {
     let server = server(&[]).await;
-    let mut statuses = Vec::new();
-    for _ in 0..7 {
-        statuses.push(server.send(sign_in("alice", "guess", None)).await.status());
-    }
-    assert!(
-        statuses[..5]
-            .iter()
-            .all(|status| *status == StatusCode::SEE_OTHER)
+    // Sent together: after a burst of 5, the limiter lets one attempt through every 4 seconds,
+    // and one password check can take that long under coverage instrumentation, so attempts
+    // sent one after the other may each find the limiter refilled.
+    let attempt = || server.send(sign_in("alice", "guess", None));
+    let responses = tokio::join!(
+        attempt(),
+        attempt(),
+        attempt(),
+        attempt(),
+        attempt(),
+        attempt(),
+        attempt()
     );
-    assert_eq!(statuses[6], StatusCode::TOO_MANY_REQUESTS);
+    let statuses = [
+        responses.0.status(),
+        responses.1.status(),
+        responses.2.status(),
+        responses.3.status(),
+        responses.4.status(),
+        responses.5.status(),
+        responses.6.status(),
+    ];
+    let count = |expected| {
+        statuses
+            .iter()
+            .filter(|status| **status == expected)
+            .count()
+    };
+    assert_eq!(count(StatusCode::SEE_OTHER), 5, "{statuses:?}");
+    assert_eq!(count(StatusCode::TOO_MANY_REQUESTS), 2, "{statuses:?}");
 }
 
 #[tokio::test]
