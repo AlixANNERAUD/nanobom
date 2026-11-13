@@ -15,8 +15,8 @@ on:
         type: string
         required: true
     secrets:
-      NANOBOM_TOKEN:
-        description: Upload token of the instance that tracks the published image
+      NANOBOM_IMAGE_TOKEN:
+        description: Upload token of the nanobom-image project on the instance that tracks the published image
         required: false
   workflow_dispatch:
     inputs:
@@ -178,7 +178,7 @@ jobs:
       - uses: AlixANNERAUD/nanobom-action@v1
         with:
           url: https://vulnerabilites.anneraud.fr
-          token: ${{ secrets.NANOBOM_TOKEN }}
+          token: ${{ secrets.NANOBOM_IMAGE_TOKEN }}
           organization: alix_anneraud
           project: nanobom-image
           scan-image: ${{ env.IMAGE }}

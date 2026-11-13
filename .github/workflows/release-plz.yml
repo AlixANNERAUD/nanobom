@@ -56,7 +56,7 @@ jobs:
     with:
       tag: ${{ needs.release.outputs.tag }}
     secrets:
-      NANOBOM_TOKEN: ${{ secrets.NANOBOM_TOKEN }}
+      NANOBOM_IMAGE_TOKEN: ${{ secrets.NANOBOM_IMAGE_TOKEN }}
 
   release-pr:
     name: Update the release PR
