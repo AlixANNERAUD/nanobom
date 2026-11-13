@@ -9,6 +9,7 @@
 <p align="center">
   <a href="https://github.com/AlixANNERAUD/nanobom/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/AlixANNERAUD/nanobom/actions/workflows/ci.yml/badge.svg"></a>
   <a href="https://codecov.io/github/AlixANNERAUD/nanobom"><img alt="Coverage" src="https://codecov.io/github/AlixANNERAUD/nanobom/graph/badge.svg"></a>
+  <a href="https://vulnerabilites.anneraud.fr/organizations/alix_anneraud/projects/nanobom"><img alt="Vulnerabilities" src="https://vulnerabilites.anneraud.fr/badges/ef0814d4cfde0c77db94ad6d03951029.svg"></a>
   <a href="https://alixanneraud.github.io/nanobom/"><img alt="Documentation" src="https://img.shields.io/badge/docs-guide-blue"></a>
   <a href="https://github.com/AlixANNERAUD/nanobom-action"><img alt="GitHub Action" src="https://img.shields.io/badge/GitHub%20Action-nanobom--action-2088FF?logo=githubactions&logoColor=white"></a>
   <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue.svg"></a>
