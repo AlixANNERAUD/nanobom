@@ -5,6 +5,20 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3](https://github.com/AlixANNERAUD/nanobom/compare/v0.1.2...v0.1.3) - 2026-11-12
+
+### Added
+
+- add a status badge for projects ([#87](https://github.com/AlixANNERAUD/nanobom/pull/87))
+- add a printable vulnerability report for project versions ([#90](https://github.com/AlixANNERAUD/nanobom/pull/90))
+- create projects in the interface, each with its own upload token ([#91](https://github.com/AlixANNERAUD/nanobom/pull/91))
+- list the components of a project version ([#93](https://github.com/AlixANNERAUD/nanobom/pull/93))
+- add an MCP endpoint for assistants ([#94](https://github.com/AlixANNERAUD/nanobom/pull/94))
+
+### Miscellaneous
+
+- render a full vulnerability report ([#92](https://github.com/AlixANNERAUD/nanobom/pull/92))
+
 ## [0.1.2](https://github.com/AlixANNERAUD/nanobom/compare/v0.1.1...v0.1.2) - 2026-11-10
 
 ### Added
