@@ -367,7 +367,7 @@ pub async fn open_for_upload_token(
 /// The findings of a version of a project, without authorization: known exploited first, then
 /// most severe first, then by EPSS score (findings without one last), then by CVSS score,
 /// component and vulnerability.
-async fn version_findings(
+pub(crate) async fn version_findings(
     database: &impl ConnectionTrait,
     project: projects::Model,
     version: &project_versions::Model,

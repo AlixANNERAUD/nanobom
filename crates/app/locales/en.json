@@ -203,6 +203,15 @@
     "badge_version_hint": "Add ?version=<name> to the image address to show another version.",
     "badge_replace": "New address",
     "badge_disable": "Turn off",
+    "badge_links_public": "The Markdown links the badge to the project's public page.",
+    "badge_links_project": "The Markdown links the badge to this page, which only members can open. Turn on the public page below to link visitors to it instead.",
+    "public_page_title": "Public page",
+    "public_page_off": "Off: only members see this project's findings.",
+    "public_page_shows": "Anyone with the page's address sees the open and ignored findings of the latest version (another one with ?version=<name>) and the VEX justification of each ignore, never the reasons members wrote nor who triaged. Keep it off for private or commercial projects.",
+    "public_page_enable": "Turn on",
+    "public_page_on": "On: anyone with this address sees the page.",
+    "public_page_replace": "New address",
+    "public_page_disable": "Turn off",
     "token_title": "Upload token",
     "token_description": "CI sends this project's SBOMs with this token. It uploads to this project only, and reads it.",
     "token_label": "Token",
@@ -341,6 +350,21 @@
     "method_checks": "nanobom checks the package URL of each component of the SBOM against the OSV vulnerability database, then ranks the findings with the CISA catalog of known exploited vulnerabilities (KEV) and the FIRST exploit prediction scores (EPSS).",
     "method_limits": "It does not check components without a package URL, nor code the SBOM does not list, such as vendored or generated code.",
     "method_time": "This report reflects the state at the time it was generated. Dates are in UTC."
+  },
+  "public": {
+    "title": "Vulnerabilities",
+    "served_by": "Published by nanobom {version} on {host}.",
+    "stale": "No SBOM was received for this project for a while: this page may not describe what is deployed.",
+    "open_description": "Known exploited first, then by severity and EPSS. EPSS is the percentile of the probability of exploitation in the next 30 days.",
+    "more": {
+      "one": "And {count} more, not listed here.",
+      "other": "And {count} more, not listed here."
+    },
+    "assessed_title": "Assessed by the maintainers",
+    "assessed_description": "Findings the maintainers assessed and ignored. A justification states why the project is not affected; an ignore without one records an accepted risk.",
+    "ignored_on": "Ignored on",
+    "vex": "For scanners, the same assessments as a CycloneDX VEX document:",
+    "method_time": "This page shows the state when it was served. Dates are in UTC."
   },
   "finding": {
     "title": "Finding",
@@ -609,6 +633,9 @@
     "badge_enabled": "Badge turned on.",
     "badge_replaced": "The badge has a new address; the old one no longer works.",
     "badge_disabled": "Badge turned off; its address no longer works.",
+    "public_page_enabled": "Public page turned on.",
+    "public_page_replaced": "The public page has a new address; the old one no longer works.",
+    "public_page_disabled": "Public page turned off; its address no longer works.",
     "organization_created": "Organization created.",
     "run_started": "Run started; refresh the page in a moment to see its results.",
     "invalid_expiry": "The expiry date must be a date (YYYY-MM-DD).",

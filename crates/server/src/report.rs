@@ -88,8 +88,8 @@ async fn render(
 }
 
 /// The interface's stylesheet, as built into the site's package directory; `None` when it is
-/// missing, as in tests, and the document is then unstyled.
-async fn stylesheet(state: &AppState) -> Option<String> {
+/// missing, as in tests, and the document is then unstyled. Public pages inline it too.
+pub(crate) async fn stylesheet(state: &AppState) -> Option<String> {
     let options = &state.leptos_options;
     let path = std::path::Path::new(options.site_root.as_ref())
         .join(options.site_pkg_dir.as_ref())

@@ -36,6 +36,8 @@ pub enum Relation {
     Organizations,
     #[sea_orm(has_one = "super::project_badges::Entity")]
     ProjectBadges,
+    #[sea_orm(has_one = "super::project_public_pages::Entity")]
+    ProjectPublicPages,
     #[sea_orm(has_one = "super::project_tokens::Entity")]
     ProjectTokens,
     #[sea_orm(has_many = "super::project_versions::Entity")]
@@ -75,6 +77,12 @@ impl Related<super::organizations::Entity> for Entity {
 impl Related<super::project_badges::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::ProjectBadges.def()
+    }
+}
+
+impl Related<super::project_public_pages::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::ProjectPublicPages.def()
     }
 }
 

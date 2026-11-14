@@ -19,7 +19,7 @@ the browser runs it.
 | `migration` | The database schema, as SeaORM migrations. |
 | `app` | The Leptos interface: pages, components, server functions, translations. |
 | `frontend` | The WebAssembly entry point of the interface. |
-| `server` | The `nanobom` binary: command line, HTTP server, upload and read APIs, MCP endpoint, badges, run queue, metrics. |
+| `server` | The `nanobom` binary: command line, HTTP server, upload and read APIs, MCP endpoint, badges, public pages, run queue, metrics. |
 
 ```text
                     ┌──────────────────── server: the nanobom binary ───────────────────┐
@@ -32,6 +32,7 @@ the browser runs it.
                     │  OIDC)                                                             │
   Prometheus ──────►│ /metrics, /healthz                                                 │
   README image ────►│ badges ───────────► domain::badges (key, open finding counts)      │
+  visitor ─────────►│ public_pages ─────► domain::public_pages (key, allowlisted page)   │
                     └─────────────────────────────────────┬─────────────────────────────┘
                                                           │
                                 SQLite or PostgreSQL (SeaORM entities, migrations)

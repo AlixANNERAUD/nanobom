@@ -11,13 +11,13 @@ use crate::{
         format_time, ui::*,
     },
     functions::{
-        DeleteProject, DeleteVersion, DisableBadge, EnableBadge, IgnoreFinding, RenewProjectToken,
-        RestoreFinding, SetLatestVersion, SetVersionActive, TriggerRun, load_finding, load_project,
-        search_components,
+        DeleteProject, DeleteVersion, DisableBadge, DisablePublicPage, EnableBadge,
+        EnablePublicPage, IgnoreFinding, RenewProjectToken, RestoreFinding, SetLatestVersion,
+        SetVersionActive, TriggerRun, load_finding, load_project, search_components,
     },
     model::{
         ComponentMatch, DependencyComponent, DependencyPaths, FindingData, FindingFilter,
-        FindingRow, LicenseAction, LicenseViolations, ProjectBadge, ProjectData,
+        FindingRow, LicenseAction, LicenseViolations, ProjectBadge, ProjectData, ProjectPublicPage,
         ProjectUploadToken, Severity, Status, VersionFinding, VersionOption,
     },
     pages::{
@@ -786,6 +786,20 @@ pub fn ProjectPage() -> impl IntoView {
                             }
                         }
                     });
+                    let public_page = organization.role.can_manage().then({
+                        let organization_slug = organization_slug.clone();
+                        let project_slug = project_slug.clone();
+                        let page = page.public_page.clone();
+                        move || {
+                            view! {
+                                <PublicPageSettings
+                                    organization=organization_slug
+                                    project=project_slug
+                                    page
+                                />
+                            }
+                        }
+                    });
                     let delete = organization.role.can_manage().then({
                         let organization_slug = organization_slug.clone();
                         let project_slug = project_slug.clone();
@@ -873,6 +887,7 @@ pub fn ProjectPage() -> impl IntoView {
                         {versions}
                         {upload_token}
                         {badge}
+                        {public_page}
                         {delete}
                     }
                 }}
@@ -992,6 +1007,13 @@ fn BadgeSettings(
             <CardContent>
                 <div class="grid gap-4">
                 <img src=badge.image_path alt=t!("project.badge_image") class="h-5 w-fit" />
+                <p class="text-muted-foreground text-sm">
+                    {if badge.links_to_public_page {
+                        t!("project.badge_links_public")
+                    } else {
+                        t!("project.badge_links_project")
+                    }}
+                </p>
                 <Field
                     label=t!("project.badge_markdown")
                     input_id="badge-markdown"
@@ -1017,6 +1039,77 @@ fn BadgeSettings(
                         <Button variant=ButtonVariant::Outline>{t!("project.badge_disable")}</Button>
                     </form>
                 </div>
+                </div>
+            </CardContent>
+        }
+            .into_any(),
+    };
+    view! { <Card>{content}</Card> }
+}
+
+/// The project's public page, for those who manage the project: what it publishes and a button
+/// to turn it on, or its address and the buttons to replace or remove it.
+#[component]
+fn PublicPageSettings(
+    organization: String,
+    project: String,
+    page: Option<ProjectPublicPage>,
+) -> impl IntoView {
+    let hidden = {
+        let organization = organization.clone();
+        let project = project.clone();
+        move || {
+            view! {
+                <input type="hidden" name="organization" value=organization.clone() />
+                <input type="hidden" name="project" value=project.clone() />
+            }
+        }
+    };
+    let content = match page {
+        None => view! {
+            <CardHeader>
+                <CardTitle>{t!("project.public_page_title")}</CardTitle>
+                <CardDescription>{t!("project.public_page_off")}</CardDescription>
+            </CardHeader>
+            <CardContent>
+                <div class="grid justify-items-start gap-3">
+                    <p class="text-muted-foreground text-sm">{t!("project.public_page_shows")}</p>
+                    <form method="post" action={action::<EnablePublicPage>()}>
+                        {hidden()}
+                        <Button variant=ButtonVariant::Outline>{t!("project.public_page_enable")}</Button>
+                    </form>
+                </div>
+            </CardContent>
+        }
+            .into_any(),
+        Some(page) => view! {
+            <CardHeader>
+                <CardTitle>{t!("project.public_page_title")}</CardTitle>
+                <CardDescription>{t!("project.public_page_on")}</CardDescription>
+            </CardHeader>
+            <CardContent>
+                <div class="grid gap-4">
+                    <p class="text-sm wrap-anywhere">
+                        <a
+                            class="text-primary underline underline-offset-4"
+                            href=page.url.clone()
+                            rel="noreferrer"
+                        >
+                            {page.url.clone()}
+                        </a>
+                    </p>
+                    <p class="text-muted-foreground text-sm">{t!("project.public_page_shows")}</p>
+                    <div class="flex flex-wrap gap-3">
+                        <form method="post" action={action::<EnablePublicPage>()}>
+                            {hidden()}
+                            <input type="hidden" name="replace" value="1" />
+                            <Button variant=ButtonVariant::Outline>{t!("project.public_page_replace")}</Button>
+                        </form>
+                        <form method="post" action={action::<DisablePublicPage>()}>
+                            {hidden()}
+                            <Button variant=ButtonVariant::Outline>{t!("project.public_page_disable")}</Button>
+                        </form>
+                    </div>
                 </div>
             </CardContent>
         }

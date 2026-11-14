@@ -14,6 +14,9 @@
 //! | ignored without a justification | `in_triage` | | the reason |
 //! | fixed | `resolved` | | |
 //!
+//! The document of a public page ([`crate::public_pages::vex`]) leaves out `analysis.detail`
+//! and the organization, which only members may read.
+//!
 //! An ignore without a justification is often an accepted risk rather than a proof that the
 //! product is not affected, so it is never exported as `not_affected`: the document claims no
 //! more than members recorded. Open findings are `in_triage` even when known exploited, since
@@ -47,7 +50,9 @@ use std::{
 
 use chrono::{DateTime, FixedOffset, SecondsFormat, Utc};
 use cyclonedx_bom::{models::component::Component, prelude::Bom};
-use nanobom_entity::{finding_events, findings, organizations, projects, upload_tokens};
+use nanobom_entity::{
+    finding_events, findings, organizations, project_versions, projects, upload_tokens,
+};
 use packageurl::PackageUrl;
 use sea_orm::{
     ColumnTrait, ConnectionTrait, EntityTrait, QueryFilter, QueryOrder, TransactionSession,
@@ -264,22 +269,44 @@ pub async fn export(
     let organization = crate::organizations::find(database, reader, organization_slug).await?;
     let project = crate::projects::find(database, reader, organization.id, project_slug).await?;
     let version = crate::versions::select(database, project.id, version).await?;
-    let findings = crate::findings::list_in_version(
+    version_document(
         database,
-        reader,
-        project.id,
-        Some(&version.name),
+        project,
+        &version,
+        Audience::Members {
+            organization_slug: &organization.slug,
+        },
+    )
+    .await
+}
+
+/// Who a document is for, which decides what it may say beyond the findings themselves.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum Audience<'a> {
+    /// Readers of the project: the document names the organization, and `analysis.detail`
+    /// carries the reason of each ignore.
+    Members { organization_slug: &'a str },
+    /// Anyone holding a public page's key ([`crate::public_pages`]): no organization and no
+    /// `analysis.detail`, since reasons are internal notes that may name people or systems.
+    Public,
+}
+
+/// The VEX document of a version of a project, **without authorization**: [`export`] checks
+/// the reader first, and a public page's key stands for its authorization.
+pub(crate) async fn version_document(
+    database: &impl ConnectionTrait,
+    project: projects::Model,
+    version: &project_versions::Model,
+    audience: Audience<'_>,
+) -> Result<Document> {
+    let findings = crate::findings::version_findings(
+        database,
+        project.clone(),
+        version,
         &crate::findings::Filter::default(),
     )
     .await?;
-    document(
-        database,
-        &organization.slug,
-        project,
-        &version.name,
-        findings,
-    )
-    .await
+    document(database, audience, project, &version.name, findings).await
 }
 
 /// The organization and project an upload token names, if the token covers them.
@@ -304,7 +331,7 @@ async fn token_project(
 
 async fn document(
     database: &impl ConnectionTrait,
-    organization_slug: &str,
+    audience: Audience<'_>,
     project: projects::Model,
     version: &str,
     mut findings: Vec<Finding>,
@@ -334,6 +361,10 @@ async fn document(
                 .copied()
                 .unwrap_or(finding.last_seen_at);
             let (state, justification, detail) = analysis(finding);
+            let detail = match audience {
+                Audience::Members { .. } => detail,
+                Audience::Public => None,
+            };
             let rating = Rating {
                 score: finding.cvss_score,
                 severity: finding.severity.as_str().to_owned(),
@@ -391,7 +422,12 @@ async fn document(
             },
             component: DocumentComponent {
                 component_type: "application".to_owned(),
-                bom_ref: Some(format!("{organization_slug}/{}", project.slug)),
+                bom_ref: match audience {
+                    Audience::Members { organization_slug } => {
+                        Some(format!("{organization_slug}/{}", project.slug))
+                    }
+                    Audience::Public => None,
+                },
                 group: None,
                 name: project.name,
                 version: (!version.is_empty()).then(|| version.to_owned()),

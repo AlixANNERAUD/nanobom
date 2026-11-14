@@ -261,12 +261,35 @@ pub async fn load_project(
             .collect(),
     });
     let organization = crate::server::organization(found);
+    let public_page = if organization.role.can_manage() {
+        let public_url = context()?.settings.public_url;
+        nanobom_domain::public_pages::key(database, &actor, model.id)
+            .await
+            .map_err(failure)?
+            .map(|key| ProjectPublicPage {
+                url: public_page_url(&public_url, &key),
+            })
+    } else {
+        None
+    };
     let badge = if organization.role.can_manage() {
         let public_url = context()?.settings.public_url;
+        // Visitors of a README cannot open the project page: the badge links to the public page
+        // when there is one.
+        let target = match &public_page {
+            Some(page) => page.url.clone(),
+            None => nanobom_domain::notifications::link(
+                &public_url,
+                &format!(
+                    "organizations/{}/projects/{}",
+                    organization.slug, model.slug
+                ),
+            ),
+        };
         nanobom_domain::badges::key(database, &actor, model.id)
             .await
             .map_err(failure)?
-            .map(|key| project_badge(&public_url, &organization.slug, &model.slug, &key))
+            .map(|key| project_badge(&public_url, &key, &target, public_page.is_some()))
     } else {
         None
     };
@@ -305,6 +328,7 @@ pub async fn load_project(
         counts: crate::server::counts(summary.counts),
         known_exploited: summary.known_exploited,
         badge,
+        public_page,
         upload_token,
     })
 }
@@ -412,25 +436,27 @@ fn project_upload_token(
 }
 
 /// The badge of a project as its settings show it: the image on this server, and Markdown that
-/// links the image to the project page, both under the public URL.
+/// links the image to `target`, both under the public URL.
 #[cfg(feature = "ssr")]
 fn project_badge(
     public_url: &nanobom_domain::Url,
-    organization: &str,
-    project: &str,
     key: &str,
+    target: &str,
+    links_to_public_page: bool,
 ) -> ProjectBadge {
-    use nanobom_domain::notifications::link;
     let image_path = format!("badges/{key}.svg");
-    let image = link(public_url, &image_path);
-    let page = link(
-        public_url,
-        &format!("organizations/{organization}/projects/{project}"),
-    );
+    let image = nanobom_domain::notifications::link(public_url, &image_path);
     ProjectBadge {
         image_path: format!("/{image_path}"),
-        markdown: format!("[![vulnerabilities]({image})]({page})"),
+        markdown: format!("[![vulnerabilities]({image})]({target})"),
+        links_to_public_page,
     }
+}
+
+/// The address of the public page with this key, under the public URL.
+#[cfg(feature = "ssr")]
+fn public_page_url(public_url: &nanobom_domain::Url, key: &str) -> String {
+    nanobom_domain::notifications::link(public_url, &format!("public/{key}"))
 }
 
 #[cfg(feature = "ssr")]
@@ -1326,6 +1352,50 @@ pub async fn disable_badge(organization: String, project: String) -> Result<(), 
         let id = project_id(database, &actor, &organization, &project).await?;
         nanobom_domain::badges::disable(database, &actor, id).await?;
         Ok(crate::t!("notices.badge_disabled").to_owned())
+    }
+    .await;
+    finish(result, &version_page(&organization, &project));
+    Ok(())
+}
+
+/// Turns a project's public page on, or gives it a new address when `replace` is set; the old
+/// address stops working.
+#[server(endpoint = "enable_public_page")]
+pub async fn enable_public_page(
+    organization: String,
+    project: String,
+    replace: Option<String>,
+) -> Result<(), ServerFnError> {
+    let actor = actor().await?;
+    let database = &context()?.database;
+    let result = async {
+        let id = project_id(database, &actor, &organization, &project).await?;
+        Ok(if replace.is_some() {
+            nanobom_domain::public_pages::regenerate(database, &actor, id).await?;
+            crate::t!("notices.public_page_replaced")
+        } else {
+            nanobom_domain::public_pages::enable(database, &actor, id).await?;
+            crate::t!("notices.public_page_enabled")
+        }
+        .to_owned())
+    }
+    .await;
+    finish(result, &version_page(&organization, &project));
+    Ok(())
+}
+
+/// Turns a project's public page off: its address stops working.
+#[server(endpoint = "disable_public_page")]
+pub async fn disable_public_page(
+    organization: String,
+    project: String,
+) -> Result<(), ServerFnError> {
+    let actor = actor().await?;
+    let database = &context()?.database;
+    let result = async {
+        let id = project_id(database, &actor, &organization, &project).await?;
+        nanobom_domain::public_pages::disable(database, &actor, id).await?;
+        Ok(crate::t!("notices.public_page_disabled").to_owned())
     }
     .await;
     finish(result, &version_page(&organization, &project));
