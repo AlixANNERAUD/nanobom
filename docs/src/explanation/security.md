@@ -170,9 +170,10 @@ an authority, and keep their URL secret.
 
 `/healthz`, `/metrics`, the sign-in page and static assets need no session; the upload API needs a
 token. Metrics are instance-wide counts; restrict `/metrics` at the proxy if even those should
-stay private. None of them names the running release: only signed-in users see it, at the bottom
-of each page and on the **About** page, so that an anonymous visitor cannot tell which instances
-run a release with a known flaw.
+stay private. None of them names the running release, so that an anonymous visitor cannot tell which
+instances run a release with a known flaw. Signed-in users see it at the bottom of each page and
+on the **About** page; holders of a token see it in the report and VEX documents and in the MCP
+server's information.
 
 Project [badges](../reference/badges.md) (`/badges/…`) need no session either: the random key in
 their address is their authorization, and it unlocks only the open finding counts of one project.

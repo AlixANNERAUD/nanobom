@@ -70,7 +70,7 @@ pub fn AboutBody(data: AboutData) -> impl IntoView {
     view! {
         <Card>
             <CardHeader>
-                <CardTitle>"nanobom"</CardTitle>
+                <CardTitle>{t!("about.name")}</CardTitle>
                 <CardDescription>{t!("about.description")}</CardDescription>
             </CardHeader>
             <CardContent>

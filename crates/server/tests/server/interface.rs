@@ -386,6 +386,23 @@ async fn the_about_page_and_the_footer_are_for_signed_in_users() {
     .await;
     assert!(!sign_in.contains("<footer"), "{sign_in}");
     assert!(!sign_in.contains("href=\"/about\""), "{sign_in}");
+    // Nor on a page an anonymous visitor reaches by mistake.
+    let missing = body_text(
+        server
+            .send(
+                Request::get("/no/such/page")
+                    .header(header::ACCEPT, "text/html")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await,
+    )
+    .await;
+    assert!(!missing.contains("<footer"), "{missing}");
+    assert!(
+        !missing.contains(&format!("nanobom {version}")),
+        "{missing}"
+    );
 
     local_user(&server.database, "bob", PASSWORD).await;
     let bob = Browser::sign_in(&server, "bob").await;
@@ -393,7 +410,7 @@ async fn the_about_page_and_the_footer_are_for_signed_in_users() {
     assert!(about.contains("About nanobom"), "{about}");
     assert!(about.contains(version), "{about}");
     assert!(about.contains(">Alix ANNERAUD</a>"), "{about}");
-    assert!(!about.contains("anneraud.fr>"), "never the email address");
+    assert!(!about.contains("alix@"), "never the email address");
     assert!(about.contains("Data sources"), "{about}");
 
     let html = bob.page("/organizations").await;

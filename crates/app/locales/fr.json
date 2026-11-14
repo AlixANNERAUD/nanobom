@@ -635,6 +635,7 @@
     "organizations_description": "Toutes les organisations de l’instance ; ouvrez-en une pour la gérer."
   },
   "about": {
+    "name": "nanobom",
     "title": "À propos",
     "heading": "À propos de nanobom",
     "description": "Le suivi de vulnérabilités de SBOM léger et auto-hébergé.",

@@ -635,6 +635,7 @@
     "organizations_description": "Every organization of the instance; open one to manage it."
   },
   "about": {
+    "name": "nanobom",
     "title": "About",
     "heading": "About nanobom",
     "description": "The lightweight, self-hosted SBOM vulnerability tracker.",

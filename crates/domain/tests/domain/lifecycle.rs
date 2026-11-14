@@ -820,7 +820,35 @@ async fn the_last_success_counts_the_runs_the_actor_can_see() {
         .await
         .unwrap()
         .unwrap();
-    assert!(own >= instance_wide, "the viewer's own project run counts");
+    // The project run is the newest run of the viewer's organization: its end, not the
+    // whole-instance run's, is what the viewer sees.
+    let project_run =
+        evaluation::recent_runs(&fixture.database, &fixture.owner, fixture.organization, 1)
+            .await
+            .unwrap()
+            .remove(0)
+            .finished_at
+            .expect("a finished run");
+    assert_eq!(own, project_run, "the viewer's own project run counts");
+    // An instance administrator who is a member of nothing sees every run.
+    let administrator = users::create(
+        &fixture.database,
+        NewUser {
+            username: "root".to_owned(),
+            is_instance_administrator: true,
+            ..NewUser::default()
+        },
+        false,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        evaluation::last_success(&fixture.database, &Actor::from_user(&administrator))
+            .await
+            .unwrap(),
+        Some(project_run),
+        "an instance administrator sees every run"
+    );
     assert_eq!(
         evaluation::last_success(&fixture.database, &stranger)
             .await
