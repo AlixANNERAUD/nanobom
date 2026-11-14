@@ -56,6 +56,11 @@ A run:
    downloads little more than the batch answers;
 4. updates the findings of each project in one transaction.
 
+OSV gathers advisories from many databases (GitHub, PyPI, Go, RustSec and others), each under its
+own license, listed on [OSV's data sources page](https://google.github.io/osv.dev/data/). The
+**About** page of the interface links to it, and shows when this instance last completed a run
+for you.
+
 After a successful run, exploitation data is refreshed for the run's scope
 ([Prioritization](prioritization.md#when-the-data-is-refreshed)), then webhooks are sent.
 

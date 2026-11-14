@@ -34,12 +34,17 @@
     "search_placeholder": "Rechercher des composants, p. ex. openssl 3.",
     "account": "Compte",
     "administration": "Administration",
+    "about": "À propos",
     "sign_out": "Se déconnecter"
   },
   "signed_out": {
     "title": "Déconnecté",
     "sign_in": "Connectez-vous",
     "to_continue": " pour continuer."
+  },
+  "footer": {
+    "version": "nanobom {version}",
+    "about": "À propos"
   },
   "severity": {
     "critical": "Critique",
@@ -628,6 +633,38 @@
     "create_user": "Créer l’utilisateur",
     "organizations": "Organisations",
     "organizations_description": "Toutes les organisations de l’instance ; ouvrez-en une pour la gérer."
+  },
+  "about": {
+    "title": "À propos",
+    "heading": "À propos de nanobom",
+    "description": "Le suivi de vulnérabilités de SBOM léger et auto-hébergé.",
+    "version": "Version",
+    "author": "Auteur",
+    "links": "Liens",
+    "guide": "Guide",
+    "source": "Code source",
+    "releases": "Notes de version",
+    "issues": "Signaler un problème",
+    "license": "Licence",
+    "license_text": "nanobom est distribué sous la licence {license}.",
+    "license_link": "Lire la licence",
+    "sources": "Sources de données",
+    "sources_description": "Les données publiques que nanobom lit, et quand cette instance les a lues pour vous.",
+    "last_read": "Dernière lecture : {time}",
+    "osv_name": "OSV",
+    "osv_use": "Les avis de sécurité comparés à vos composants, à chaque analyse.",
+    "osv_terms": "Chaque avis vient de l’une des bases qu’OSV rassemble, sous la licence de cette base.",
+    "osv_terms_link": "Les sources et leurs licences",
+    "kev_name": "Catalogue des vulnérabilités exploitées connues de la CISA (KEV)",
+    "kev_use": "Les CVE dont l’exploitation est avérée.",
+    "kev_terms": "Publié par la CISA sous la licence Creative Commons 0 1.0.",
+    "epss_name": "Exploit Prediction Scoring System de FIRST (EPSS)",
+    "epss_use": "La probabilité qu’une CVE soit exploitée dans les 30 prochains jours.",
+    "epss_terms": "Libre d’utilisation, en citant FIRST : Scores EPSS par FIRST.org.",
+    "built_with": "Conçu avec",
+    "rust_role": "Le langage de programmation.",
+    "leptos_role": "Le framework web.",
+    "primitives_role": "Les composants de base de l’interface, sous licence MIT."
   },
   "notices": {
     "badge_enabled": "Badge activé.",

@@ -362,6 +362,49 @@ async fn pages_redirect_to_sign_in_without_a_session() {
     assert_eq!(location(&response), "/login?next=/organizations");
 }
 
+/// The About page and the footer name the release: anonymous visitors see neither, since an
+/// anonymous page naming it would tell anyone which instances run a release with a known flaw.
+#[tokio::test]
+async fn the_about_page_and_the_footer_are_for_signed_in_users() {
+    let version = env!("CARGO_PKG_VERSION");
+    let server = server(&[]).await;
+    let response = server
+        .send(
+            Request::get("/about")
+                .header(header::ACCEPT, "text/html")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert_eq!(location(&response), "/login?next=/about");
+    let sign_in = body_text(
+        server
+            .send(Request::get("/login").body(Body::empty()).unwrap())
+            .await,
+    )
+    .await;
+    assert!(!sign_in.contains("<footer"), "{sign_in}");
+    assert!(!sign_in.contains("href=\"/about\""), "{sign_in}");
+
+    local_user(&server.database, "bob", PASSWORD).await;
+    let bob = Browser::sign_in(&server, "bob").await;
+    let about = bob.page("/about").await;
+    assert!(about.contains("About nanobom"), "{about}");
+    assert!(about.contains(version), "{about}");
+    assert!(about.contains(">Alix ANNERAUD</a>"), "{about}");
+    assert!(!about.contains("anneraud.fr>"), "never the email address");
+    assert!(about.contains("Data sources"), "{about}");
+
+    let html = bob.page("/organizations").await;
+    let account = menu(element(&html, "<header", "</header>"), "Account");
+    assert!(account.contains("href=\"/about\""), "{account}");
+    let footer = element(&html, "<footer", "</footer>");
+    assert!(footer.contains(&format!("nanobom {version}")), "{footer}");
+    assert!(footer.contains("href=\"/about\""), "{footer}");
+    assert_eq!(footer.matches("<a ").count(), 1, "nothing else: {footer}");
+}
+
 #[tokio::test]
 async fn organizations_are_listed_created_and_isolated() {
     let server = server(&[]).await;

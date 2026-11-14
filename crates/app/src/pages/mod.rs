@@ -1,5 +1,6 @@
 //! The pages of the interface.
 
+pub mod about;
 pub mod components;
 pub mod findings;
 pub mod organizations;

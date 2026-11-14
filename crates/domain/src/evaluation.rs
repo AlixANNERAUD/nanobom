@@ -1091,6 +1091,40 @@ pub async fn recent_runs(
         .collect())
 }
 
+/// The end of the last successful run the actor can see, the last time this instance read OSV
+/// for them: a whole-instance run, or a run of one of their organizations or its projects (of
+/// any organization for an instance administrator). `None` before the first one.
+///
+/// Like [`recent_runs`], it never reveals another organization's activity: an organization run
+/// is only counted for its members.
+pub async fn last_success(
+    database: &impl ConnectionTrait,
+    actor: &Actor,
+) -> Result<Option<DateTime<FixedOffset>>> {
+    use sea_orm::Condition;
+    let mut query = runs::Entity::find()
+        .filter(runs::Column::Status.eq("succeeded"))
+        .filter(runs::Column::FinishedAt.is_not_null());
+    if !actor.is_instance_administrator {
+        let organization_ids: Vec<i64> = crate::organizations::list(database, actor)
+            .await?
+            .into_iter()
+            .map(|organization| organization.id)
+            .collect();
+        query = query.filter(
+            Condition::any()
+                .add(runs::Column::Scope.eq(Scope::All.as_str()))
+                .add(runs::Column::OrganizationId.is_in(organization_ids)),
+        );
+    }
+    Ok(query
+        .order_by_desc(runs::Column::FinishedAt)
+        .order_by_desc(runs::Column::Id)
+        .one(database)
+        .await?
+        .and_then(|run| run.finished_at))
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;

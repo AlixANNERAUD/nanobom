@@ -12,7 +12,7 @@ use crate::{
     functions::{SetLanguage, load_current_user},
     i18n,
     model::{CurrentUser, Organization, Severity, Status},
-    t,
+    t, tf,
 };
 use ui::*;
 
@@ -290,8 +290,8 @@ fn OrganizationSwitcher(organizations: Vec<Organization>) -> impl IntoView {
 }
 
 /// The account menu of the header, opened from a round button showing the user's initial: who
-/// is signed in, the administration for instance administrators, the language, the theme and
-/// signing out.
+/// is signed in, the administration for instance administrators, the About page, the language,
+/// the theme and signing out.
 #[component]
 fn UserMenu(user: CurrentUser) -> impl IntoView {
     let initial = initial(&user.display_name, &user.username);
@@ -336,6 +336,9 @@ fn UserMenu(user: CurrentUser) -> impl IntoView {
                                 </a>
                             }
                         })}
+                    <a href="/about" class=MENU_ITEM>
+                        {t!("header.about")}
+                    </a>
                     <LanguageSwitch />
                     <ThemeToggle />
                 </div>
@@ -420,7 +423,22 @@ pub(crate) fn title_text(text: &str) -> String {
     title
 }
 
-/// A page of the signed-in interface: header, title, flash message and content.
+/// The line under every signed-in page: the release and a link to the About page. Like the
+/// release named there, it is never shown to anonymous visitors.
+#[component]
+fn Footer() -> impl IntoView {
+    view! {
+        <footer class="text-muted-foreground mx-auto max-w-6xl px-4 pb-6 text-xs print:hidden">
+            {tf!("footer.version", version = crate::pages::about::VERSION)}
+            " · "
+            <a href="/about" class="underline underline-offset-4">
+                {t!("footer.about")}
+            </a>
+        </footer>
+    }
+}
+
+/// A page of the signed-in interface: header, title, flash message, content and footer.
 #[component]
 pub fn Page(#[prop(into)] title: String, children: ChildrenFn) -> impl IntoView {
     let user = Resource::new(|| (), |()| load_current_user());
@@ -446,6 +464,7 @@ pub fn Page(#[prop(into)] title: String, children: ChildrenFn) -> impl IntoView 
                                 <Flash />
                                 {children()}
                             </main>
+                            <Footer />
                         }
                             .into_any()
                     }

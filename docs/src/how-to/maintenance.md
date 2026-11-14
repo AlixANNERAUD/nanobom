@@ -119,6 +119,10 @@ docker compose pull && docker compose up -d --wait
 Database migrations run when the server starts, before it accepts requests. `nanobom migrate`
 runs them alone, for a deployment that wants them as a separate step.
 
+To check which version runs, sign in: the line at the bottom of every page names it, and links to
+the **About** page (also in the account menu), with the release notes and when the instance last
+read OSV, the KEV catalog and EPSS. From a shell, `nanobom --version` prints it.
+
 Images are tagged `X.Y.Z`, `X.Y`, `X` and `latest`. Pin a tag that matches how you want to
 upgrade: `X.Y` follows fixes only. While nanobom's version is below 1.0, a breaking change raises
 the minor version (`0.3` to `0.4`): read the
