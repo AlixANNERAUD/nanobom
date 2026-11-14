@@ -856,6 +856,17 @@ pub struct AdministrationData {
     pub password_minimum_length: usize,
 }
 
+/// When this instance last read each data source, for the About page. The release, author and
+/// links are compiled in and need no request.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AboutData {
+    /// The end of the last successful run the user can see: the last time OSV was queried for
+    /// their projects.
+    pub osv_read_at: Option<DateTime<FixedOffset>>,
+    pub kev_checked_at: Option<DateTime<FixedOffset>>,
+    pub epss_checked_at: Option<DateTime<FixedOffset>>,
+}
+
 /// The vulnerability report of a project version: the printable page and the document served
 /// to tokens render it alike.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

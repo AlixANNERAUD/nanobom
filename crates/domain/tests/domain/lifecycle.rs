@@ -784,6 +784,91 @@ async fn recent_runs_cover_the_organization_and_hide_instance_wide_details() {
 }
 
 #[tokio::test]
+async fn the_last_success_counts_the_runs_the_actor_can_see() {
+    let fixture = Fixture::new().await;
+    assert_eq!(
+        evaluation::last_success(&fixture.database, &fixture.viewer)
+            .await
+            .unwrap(),
+        None
+    );
+    let project = fixture.upload(&[LODASH]).await;
+    fixture.run().await;
+    let instance_wide = evaluation::last_success(&fixture.database, &fixture.viewer)
+        .await
+        .unwrap()
+        .expect("a whole-instance run");
+
+    // A project run of another organization is not counted for the viewer, who is not a member.
+    let stranger = users::create(
+        &fixture.database,
+        NewUser {
+            username: "stranger".to_owned(),
+            ..NewUser::default()
+        },
+        true,
+    )
+    .await
+    .unwrap();
+    let stranger = Actor::from_user(&stranger);
+    fixture
+        .evaluator
+        .run(Trigger::Manual, Scope::Project(project), None)
+        .await
+        .unwrap();
+    let own = evaluation::last_success(&fixture.database, &fixture.viewer)
+        .await
+        .unwrap()
+        .unwrap();
+    // The project run is the newest run of the viewer's organization: its end, not the
+    // whole-instance run's, is what the viewer sees.
+    let project_run =
+        evaluation::recent_runs(&fixture.database, &fixture.owner, fixture.organization, 1)
+            .await
+            .unwrap()
+            .remove(0)
+            .finished_at
+            .expect("a finished run");
+    assert_eq!(own, project_run, "the viewer's own project run counts");
+    // An instance administrator who is a member of nothing sees every run.
+    let administrator = users::create(
+        &fixture.database,
+        NewUser {
+            username: "root".to_owned(),
+            is_instance_administrator: true,
+            ..NewUser::default()
+        },
+        false,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        evaluation::last_success(&fixture.database, &Actor::from_user(&administrator))
+            .await
+            .unwrap(),
+        Some(project_run),
+        "an instance administrator sees every run"
+    );
+    assert_eq!(
+        evaluation::last_success(&fixture.database, &stranger)
+            .await
+            .unwrap(),
+        Some(instance_wide),
+        "another organization's run is not counted"
+    );
+
+    // A failed run is no success.
+    fixture.source.set_failing(true);
+    fixture.run().await;
+    assert_eq!(
+        evaluation::last_success(&fixture.database, &fixture.viewer)
+            .await
+            .unwrap(),
+        Some(own)
+    );
+}
+
+#[tokio::test]
 async fn a_run_that_panics_can_be_closed_as_failed() {
     let fixture = Fixture::new().await;
     let project = fixture.upload(&[LODASH]).await;

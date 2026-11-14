@@ -736,6 +736,23 @@ pub async fn load_settings(organization: String) -> Result<SettingsData, ServerF
     })
 }
 
+#[server(endpoint = "about_page")]
+pub async fn load_about() -> Result<AboutData, ServerFnError> {
+    let actor = actor().await?;
+    let database = &context()?.database;
+    let osv_read_at = nanobom_domain::evaluation::last_success(database, &actor)
+        .await
+        .map_err(failure)?;
+    let (kev_checked_at, epss_checked_at) = nanobom_domain::exploitation::last_checked(database)
+        .await
+        .map_err(failure)?;
+    Ok(AboutData {
+        osv_read_at,
+        kev_checked_at,
+        epss_checked_at,
+    })
+}
+
 #[server(endpoint = "administration_page")]
 pub async fn load_administration() -> Result<AdministrationData, ServerFnError> {
     use nanobom_domain::{organizations, users};

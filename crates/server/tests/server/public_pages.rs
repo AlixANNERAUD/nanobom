@@ -234,6 +234,9 @@ async fn anyone_with_the_key_reads_the_page_with_public_headers() {
         "Acme Corp",
         "/organizations",
         "<script",
+        // No footer and no release: the page is anonymous.
+        "<footer",
+        concat!("nanobom ", env!("CARGO_PKG_VERSION")),
     ] {
         assert!(!html.contains(absent), "{absent} in {html}");
     }

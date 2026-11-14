@@ -25,6 +25,11 @@ probability that a CVE is exploited in the next 30 days, from 0 to 1, and its pe
 all scored CVEs. An EPSS of 0.0149 with a percentile of 0.78 means "1.5% chance, higher than 78%
 of CVEs". It is a ranking aid, not a verdict.
 
+Both are public data: CISA distributes the KEV catalog under the
+[Creative Commons 0 1.0](https://github.com/cisagov/kev-data) license, and FIRST publishes EPSS
+freely, asking products that use it for credit (the interface says "EPSS scores by FIRST.org" on
+its **About** page, along with when each was last read).
+
 Only CVE identifiers are looked up: those among the finding's identifier and its aliases. A
 finding known only by a GHSA or RustSec identifier, with no CVE alias, has neither signal. When a
 finding has several CVEs, it takes the most alarming value of each signal: known exploited if any

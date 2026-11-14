@@ -8,6 +8,7 @@ edition = "2024"
 rust-version = "1.99"
 license = "Apache-2.0"
 repository = "https://github.com/AlixANNERAUD/nanobom"
+homepage = "https://alixanneraud.github.io/nanobom/"
 authors = ["Alix ANNERAUD <alix@anneraud.fr>"]
 publish = false
 

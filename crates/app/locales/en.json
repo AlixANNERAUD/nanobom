@@ -34,12 +34,17 @@
     "search_placeholder": "Search components, e.g. openssl 3.",
     "account": "Account",
     "administration": "Administration",
+    "about": "About",
     "sign_out": "Sign out"
   },
   "signed_out": {
     "title": "Signed out",
     "sign_in": "Sign in",
     "to_continue": " to continue."
+  },
+  "footer": {
+    "version": "nanobom {version}",
+    "about": "About"
   },
   "severity": {
     "critical": "Critical",
@@ -628,6 +633,39 @@
     "create_user": "Create user",
     "organizations": "Organizations",
     "organizations_description": "Every organization of the instance; open one to manage it."
+  },
+  "about": {
+    "name": "nanobom",
+    "title": "About",
+    "heading": "About nanobom",
+    "description": "The lightweight, self-hosted SBOM vulnerability tracker.",
+    "version": "Version",
+    "author": "Author",
+    "links": "Links",
+    "guide": "Guide",
+    "source": "Source code",
+    "releases": "Release notes",
+    "issues": "Report a problem",
+    "license": "License",
+    "license_text": "nanobom is distributed under the {license} license.",
+    "license_link": "Read the license",
+    "sources": "Data sources",
+    "sources_description": "The public data nanobom reads, and when this instance last read it for you.",
+    "last_read": "Last read: {time}",
+    "osv_name": "OSV",
+    "osv_use": "The advisories matched against your components, at each run.",
+    "osv_terms": "Each advisory comes from one of the databases OSV gathers, under that database's own license.",
+    "osv_terms_link": "Sources and their licenses",
+    "kev_name": "CISA Known Exploited Vulnerabilities catalog",
+    "kev_use": "Which CVEs are known to be exploited in the wild.",
+    "kev_terms": "Published by CISA under the Creative Commons 0 1.0 license.",
+    "epss_name": "FIRST Exploit Prediction Scoring System (EPSS)",
+    "epss_use": "The probability that a CVE is exploited in the next 30 days.",
+    "epss_terms": "Free to use, with credit to FIRST: EPSS scores by FIRST.org.",
+    "built_with": "Built with",
+    "rust_role": "The programming language.",
+    "leptos_role": "The web framework.",
+    "primitives_role": "The interface primitives, under the MIT License."
   },
   "notices": {
     "badge_enabled": "Badge turned on.",
