@@ -18,6 +18,8 @@
 //!   it should not list it;
 //! - a Content Security Policy that allows no script, the inline stylesheet and the
 //!   interface's fonts.
+//!
+//! At most two pages or documents are built at once (`CONCURRENT_PAGES`); further requests wait.
 
 use axum::{
     Json, Router,
@@ -28,6 +30,7 @@ use axum::{
 };
 use nanobom_domain::{Error, public_pages};
 use serde::Deserialize;
+use tower::limit::GlobalConcurrencyLimitLayer;
 
 use crate::state::AppState;
 
@@ -41,10 +44,18 @@ const PAGE_POLICY: &str = "default-src 'none'; style-src 'unsafe-inline'; font-s
 /// A JSON document needs nothing at all.
 const DOCUMENT_POLICY: &str = "default-src 'none'; frame-ancestors 'none'";
 
+/// Public pages built at once, across both routes; the others wait their turn. A page costs what
+/// the report costs (every finding of the version, the OSV records of the open ones), and its
+/// address is published in READMEs, so crawlers or a script in a loop must not be able to keep
+/// more of the database busy than this, away from uploads and the run worker.
+const CONCURRENT_PAGES: usize = 2;
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/public/{key}", get(page))
         .route("/public/{key}/vex.json", get(vex))
+        // One semaphore shared by the clones the router makes for each route.
+        .layer(GlobalConcurrencyLimitLayer::new(CONCURRENT_PAGES))
 }
 
 #[derive(Debug, Default, Deserialize)]

@@ -353,7 +353,7 @@
   },
   "public": {
     "title": "Vulnérabilités",
-    "served_by": "Publié par nanobom {version} sur {host}.",
+    "served_by": "Publié par nanobom sur {host}.",
     "stale": "Aucun SBOM reçu pour ce projet depuis un moment : cette page peut ne pas décrire ce qui est déployé.",
     "open_description": "Les vulnérabilités exploitées d’abord, puis par sévérité et EPSS. L’EPSS est le centile de la probabilité d’exploitation dans les 30 prochains jours.",
     "more": {

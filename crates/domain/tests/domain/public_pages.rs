@@ -337,6 +337,14 @@ async fn unknown_and_malformed_keys_and_unknown_versions_are_not_found() {
         .await
         .unwrap();
     not_found(public_pages::page(database, &key, None, 0).await);
+    // Removed, not merely unreachable: the foreign key cascades.
+    assert_eq!(
+        nanobom_entity::project_public_pages::Entity::find()
+            .all(database)
+            .await
+            .unwrap(),
+        Vec::new()
+    );
 }
 
 #[tokio::test]

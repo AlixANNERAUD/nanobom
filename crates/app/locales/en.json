@@ -353,7 +353,7 @@
   },
   "public": {
     "title": "Vulnerabilities",
-    "served_by": "Published by nanobom {version} on {host}.",
+    "served_by": "Published by nanobom on {host}.",
     "stale": "No SBOM was received for this project for a while: this page may not describe what is deployed.",
     "open_description": "Known exploited first, then by severity and EPSS. EPSS is the percentile of the probability of exploitation in the next 30 days.",
     "more": {

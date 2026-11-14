@@ -89,10 +89,19 @@ async fn render(
 
 /// The interface's stylesheet, as built into the site's package directory; `None` when it is
 /// missing, as in tests, and the document is then unstyled. Public pages inline it too.
+///
+/// Read once: the site does not change while the server runs, and public pages, which anyone
+/// holding their address may load, should not cost a disk read each.
 pub(crate) async fn stylesheet(state: &AppState) -> Option<String> {
-    let options = &state.leptos_options;
-    let path = std::path::Path::new(options.site_root.as_ref())
-        .join(options.site_pkg_dir.as_ref())
-        .join(format!("{}.css", options.output_name));
-    tokio::fs::read_to_string(path).await.ok()
+    static STYLESHEET: tokio::sync::OnceCell<Option<String>> = tokio::sync::OnceCell::const_new();
+    STYLESHEET
+        .get_or_init(|| async {
+            let options = &state.leptos_options;
+            let path = std::path::Path::new(options.site_root.as_ref())
+                .join(options.site_pkg_dir.as_ref())
+                .join(format!("{}.css", options.output_name));
+            tokio::fs::read_to_string(path).await.ok()
+        })
+        .await
+        .clone()
 }

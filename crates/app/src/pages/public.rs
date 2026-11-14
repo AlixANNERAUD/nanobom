@@ -27,11 +27,9 @@ pub fn PublicPageBody(page: PublicPageData) -> impl IntoView {
     } else {
         tf!("report.version", version = page.version.clone()).to_string()
     };
-    let served = tf!(
-        "public.served_by",
-        version = page.nanobom_version.clone(),
-        host = page.host.clone()
-    );
+    // No nanobom release: the page is unauthenticated, and naming the release would tell
+    // anyone which instances run one with a known flaw.
+    let served = tf!("public.served_by", host = page.host.clone());
     let stale = page.stale.then(|| {
         view! {
             <Alert variant=AlertVariant::Warning title=t!("report.stale_title")>
@@ -376,7 +374,6 @@ mod tests {
     fn page() -> PublicPageData {
         let now = chrono::Utc::now().fixed_offset();
         PublicPageData {
-            nanobom_version: "0.1.3".to_owned(),
             host: "nanobom.example".to_owned(),
             vex_url: "https://nanobom.example/public/0123456789abcdef0123456789abcdef/vex.json"
                 .to_owned(),
@@ -461,7 +458,7 @@ mod tests {
         );
         for expected in [
             "Vulnerabilities · version 1.0",
-            "nanobom 0.1.3 on nanobom.example",
+            "Published by nanobom on nanobom.example",
             "2 open vulnerabilities of high or critical severity.",
             "href=\"https://osv.dev/vulnerability/CVE-2021-44228\"",
             "GHSA-jfh8-c2jp-5v3q",
@@ -471,11 +468,15 @@ mod tests {
             "Vulnerable code not reachable",
             "None (accepted risk)",
             "/public/0123456789abcdef0123456789abcdef/vex.json",
-            // Two open counted, one listed; three ignored, two listed.
-            "And 1 more, not listed here.",
         ] {
             assert!(html.contains(expected), "{expected} missing from {html}");
         }
+        // Two open counted, one listed; three ignored, two listed: one note under each list.
+        assert_eq!(
+            html.matches("And 1 more, not listed here.").count(),
+            2,
+            "{html}"
+        );
         assert_eq!(html.matches("rel=\"noreferrer\"").count(), 4, "{html}");
         // Nothing links into the interface.
         assert!(!html.contains("/organizations"), "{html}");

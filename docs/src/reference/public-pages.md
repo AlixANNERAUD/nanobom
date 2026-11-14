@@ -56,7 +56,7 @@ The page follows the layout of the [vulnerability report](report.md) and shows o
 
 | Section | Content |
 | --- | --- |
-| Header | The project's name, the version's name, and the nanobom release and host serving it |
+| Header | The project's name, the version's name, and the host serving it (not the nanobom release, which would tell anyone whether the instance runs one with a known flaw) |
 | Warnings | Whether the project received no SBOM for longer than `NANOBOM_STALE_AFTER_DAYS` ([Configuration](configuration.md)), and whether the version is inactive |
 | Scope and provenance | When the version's SBOM was uploaded, the number of components checked and of components without a package URL, the last check against OSV, and when the CISA KEV catalog and FIRST EPSS scores were last read |
 | Summary | Open findings by severity, how many are known exploited, how many are ignored, how many were fixed in the last 90 days |
@@ -77,6 +77,10 @@ The page never shows:
 - dependency paths (which direct dependency pulls in a component);
 - other versions, other projects, finding identifiers, or any link into the interface.
 
+Package URLs are shown as the SBOM gives them, qualifiers included: a qualifier such as
+`repository_url` that names a private registry appears on the page and in the VEX document.
+Check the SBOM before turning the page on if its package URLs carry such qualifiers.
+
 ## The VEX document
 
 `/public/{key}/vex.json` is the [VEX export](vex-api.md#export) of the same version, open, ignored
@@ -85,7 +89,16 @@ and fixed findings included, with two differences:
 - no vulnerability has an `analysis.detail`, which carries the reason of an ignore in the
   members' export: `analysis.state` and `analysis.justification` remain;
 - `metadata.component` has no `bom-ref`, which names the organization in the members' export;
-  its `name` is the project's name and its `version` the version's name.
+  its `name` is the project's name and its `version` the version's name;
+- the nanobom entry of `metadata.tools` has no `version`.
+
+## Load
+
+A page costs what the report costs: every finding of the version, and the OSV records of the
+open ones. At most two pages or VEX documents are built at once across the instance; further
+requests wait their turn, so a crawler or a script in a loop cannot keep more of the database
+busy, away from uploads and checks. A cache in front of nanobom can serve repeated requests for
+the five minutes of `Cache-Control`.
 
 ## Storage and logs
 

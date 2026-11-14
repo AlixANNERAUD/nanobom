@@ -516,7 +516,6 @@ pub fn public_page(
         }
     }
     model::PublicPageData {
-        nanobom_version: env!("CARGO_PKG_VERSION").to_owned(),
         host: public_url.host_str().unwrap_or_default().to_owned(),
         vex_url,
         project_name: value.project_name,

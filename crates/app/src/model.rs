@@ -918,8 +918,6 @@ pub struct AssessedFinding {
 /// a member or a token, or carries an ignore's reason.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PublicPageData {
-    /// The nanobom release that serves it.
-    pub nanobom_version: String,
     /// The host of the instance's public URL.
     pub host: String,
     /// The page's VEX document, as an absolute address.

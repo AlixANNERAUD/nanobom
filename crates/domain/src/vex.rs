@@ -416,7 +416,12 @@ async fn document(
                     bom_ref: None,
                     group: None,
                     name: "nanobom".to_owned(),
-                    version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+                    // Not to the public: it would tell anyone which instances run a release
+                    // with a known flaw.
+                    version: match audience {
+                        Audience::Members { .. } => Some(env!("CARGO_PKG_VERSION").to_owned()),
+                        Audience::Public => None,
+                    },
                     purl: None,
                 }],
             },
