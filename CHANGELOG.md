@@ -5,6 +5,17 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4](https://github.com/AlixANNERAUD/nanobom/compare/v0.1.3...v0.1.4) - 2026-11-14
+
+### Added
+
+- publish an opt-in public page of a project's findings ([#99](https://github.com/AlixANNERAUD/nanobom/pull/99))
+- add an About page and a version footer ([#100](https://github.com/AlixANNERAUD/nanobom/pull/100))
+
+### Miscellaneous
+
+- send the rate-limited sign-in attempts together ([#97](https://github.com/AlixANNERAUD/nanobom/pull/97))
+
 ## [0.1.3](https://github.com/AlixANNERAUD/nanobom/compare/v0.1.2...v0.1.3) - 2026-11-12
 
 ### Added
