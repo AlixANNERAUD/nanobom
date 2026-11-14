@@ -16,7 +16,11 @@ release with the changelog and the Linux archives (x86_64 and aarch64), and cont
 4. Merge it when a release is wanted. The workflow then tags `vX.Y.Z`, drafts the GitHub
    release with the changelog entry, and calls `release.yml`, which builds both architectures
    natively, attaches the archives (with build provenance), pushes the images tagged `X.Y.Z`,
-   `X.Y`, `X` and `latest`, and publishes the release. It also uploads the image's SBOM to the
+   `X.Y`, `X` and `latest`, and publishes the release. It copies the same tags to Docker Hub,
+   as `<DOCKERHUB_USERNAME>/nanobom`, and updates the repository's description there from the
+   README (with the repository variable `DOCKERHUB_USERNAME` and the secret `DOCKERHUB_TOKEN`, an
+   access token with read, write and delete access; without the variable the copy is skipped,
+   and a failed copy does not stop the release). It also uploads the image's SBOM to the
    maintainer's nanobom instance, as version `X.Y` of the project `nanobom-image` (with the
    repository secret `NANOBOM_IMAGE_TOKEN`, that project's upload token); a failed upload does not
    stop the release.

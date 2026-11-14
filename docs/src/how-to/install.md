@@ -17,7 +17,8 @@ docker compose up -d --wait
 ```
 
 `--wait` returns once the container reports itself healthy. The file uses the published image
-(`ghcr.io/alixanneraud/nanobom:latest`, for amd64 and arm64) and builds it from the checkout
+(`ghcr.io/alixanneraud/nanobom:latest`, for amd64 and arm64; the same image is on Docker Hub
+as `alixanneraud/nanobom`) and builds it from the checkout
 when it is not available. Settings come from the environment or a `.env` file next to
 `compose.yaml`, for example:
 
