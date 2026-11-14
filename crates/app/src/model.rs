@@ -455,6 +455,9 @@ pub struct ProjectData {
     /// The project's public badge while it is on; always `None` for those who cannot manage
     /// the project, who do not see the badge's address.
     pub badge: Option<ProjectBadge>,
+    /// The project's public page while it is on; always `None` for those who cannot manage the
+    /// project.
+    pub public_page: Option<ProjectPublicPage>,
     /// The project's upload token and how to use it; always `None` for those who cannot manage
     /// tokens, who never receive its value.
     pub upload_token: Option<ProjectUploadToken>,
@@ -580,6 +583,16 @@ pub struct ProjectBadge {
     pub image_path: String,
     /// The Markdown to paste in a README, with addresses under the public URL.
     pub markdown: String,
+    /// Whether the Markdown links to the project's public page rather than to its page in the
+    /// interface, which only members can open.
+    pub links_to_public_page: bool,
+}
+
+/// A project's public page, as its settings show it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectPublicPage {
+    /// The page's address, under the public URL.
+    pub url: String,
 }
 
 /// A reference of an advisory. Its address is written by the advisory's author: see
@@ -898,6 +911,70 @@ pub struct AssessedFinding {
     pub ignored_by: Option<String>,
     /// The upload token that imported a VEX statement.
     pub ignored_by_token: Option<String>,
+}
+
+/// The public page of a project version, rendered by the server only. Its fields are those of
+/// `nanobom_domain::public_pages::PublicPage`, an allowlist: nothing here names the organization,
+/// a member or a token, or carries an ignore's reason.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PublicPageData {
+    /// The host of the instance's public URL.
+    pub host: String,
+    /// The page's VEX document, as an absolute address.
+    pub vex_url: String,
+    pub project_name: String,
+    /// Empty for the unnamed version.
+    pub version: String,
+    pub latest: bool,
+    pub active: bool,
+    pub uploaded_at: Option<DateTime<FixedOffset>>,
+    pub component_count: u64,
+    pub components_without_purl: u64,
+    pub last_evaluation: Option<DateTime<FixedOffset>>,
+    pub kev_checked_at: Option<DateTime<FixedOffset>>,
+    pub epss_checked_at: Option<DateTime<FixedOffset>>,
+    pub stale: bool,
+    /// Open findings by severity, all of them.
+    pub counts: SeverityCounts,
+    pub known_exploited: u64,
+    pub ignored: u64,
+    pub fixed_recently: u64,
+    /// The first open findings, in the project page's order; `counts` has them all.
+    pub open: Vec<PublicOpenFinding>,
+    /// The first ignored findings; `ignored` counts them all.
+    pub assessed: Vec<PublicAssessedFinding>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PublicComponent {
+    pub name: String,
+    pub version: Option<String>,
+    pub purl: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PublicOpenFinding {
+    pub vulnerability_id: String,
+    pub aliases: Vec<String>,
+    pub summary: Option<String>,
+    pub severity: Severity,
+    pub cvss_score: Option<f64>,
+    pub component: PublicComponent,
+    pub fixed_versions: Vec<String>,
+    pub exploitation: Exploitation,
+    pub first_seen_at: DateTime<FixedOffset>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PublicAssessedFinding {
+    pub vulnerability_id: String,
+    pub aliases: Vec<String>,
+    pub severity: Severity,
+    pub component: PublicComponent,
+    /// The CycloneDX name of the justification, or `false_positive`; `None` for an accepted
+    /// risk.
+    pub justification: Option<String>,
+    pub ignored_at: Option<DateTime<FixedOffset>>,
 }
 
 /// The licenses section of a report.

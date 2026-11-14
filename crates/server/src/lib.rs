@@ -23,6 +23,9 @@
 //! - **Operations** (`/healthz`, `/metrics`): unauthenticated ([`operations`]).
 //! - **Badges** (`/badges/{key}.svg`, `/badges/{key}.json`): a project's open findings for a
 //!   README, authorized by the random key in the path alone ([`badges`]).
+//! - **Public pages** (`/public/{key}`, `/public/{key}/vex.json`): a project's findings and
+//!   their triage as a page and a VEX document, for visitors, authorized by a random key of
+//!   their own in the path alone ([`public_pages`]).
 //!
 //! Every response goes through [`http::layers`] (security headers, compression, request logs).
 //!
@@ -52,6 +55,7 @@ pub mod logging;
 pub mod mcp;
 pub mod metrics;
 pub mod operations;
+pub mod public_pages;
 pub mod read_api;
 pub mod report;
 pub mod runner;

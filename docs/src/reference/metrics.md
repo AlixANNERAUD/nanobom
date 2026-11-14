@@ -44,8 +44,9 @@ humans; standard output is kept for command results), with the event's fields at
 
 Every request is logged once answered, with its method, path, status and duration. Query strings
 are left out, since they can carry search terms; requests to `/healthz`, `/metrics`,
-[badges](badges.md) and static assets are logged at debug level only. Badge paths are logged as
-`/badges/…`: their key is their authorization. `NANOBOM_LOG_LEVEL=info,nanobom=debug` shows
+[badges](badges.md), [public pages](public-pages.md) and static assets are logged at debug level
+only. Badge and public page paths are logged as `/badges/…` and `/public/…`: their key is their
+authorization. `NANOBOM_LOG_LEVEL=info,nanobom=debug` shows
 them, and more detail from nanobom's own crates.
 
 ### Log messages

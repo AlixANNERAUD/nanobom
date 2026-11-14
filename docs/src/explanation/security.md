@@ -179,6 +179,13 @@ one at once. To serve badges to the internet while keeping the rest of nanobom p
 only `/badges/` at the proxy. nanobom keeps the key out of its own logs, but the proxy's access
 log records it with each request.
 
+[Public pages](../reference/public-pages.md) (`/public/…`) work the same way, with a key of
+their own, and unlock more: a version's open and ignored findings, with the justification of
+each ignore, and its VEX document. They are built from an allowlist of fields, so the reasons
+members write, who triaged, the organization and anything else added to the interface later stay
+private. They never read the session, send no `Referer` to the sites they link to, and ask
+search engines not to index them. Expose `/public/` at the proxy to serve them.
+
 ## Data at rest
 
 Everything, password hashes, token digests and the clear upload tokens of projects included, is

@@ -15,7 +15,9 @@
 //!
 //! - the caller is authenticated by other means: an upload token ([`tokens::authenticate`],
 //!   then [`inventory::ingest`] and [`vex::import`], which also check its scope), a badge key
-//!   ([`badges::summary`], which only reads a version's open counts), a password or an
+//!   ([`badges::summary`], which only reads a version's open counts), a public page key
+//!   ([`public_pages::page`] and [`public_pages::vex`], which read an allowlist of a version's
+//!   findings), a password or an
 //!   identity provider at sign-in ([`users`], [`memberships::synchronize`]), or the operator on
 //!   the command line (the `*_from_command_line` functions of [`tokens`]);
 //! - background work of the server over the whole instance: runs ([`evaluation::Evaluator`],
@@ -43,7 +45,8 @@
 //!   deliveries are queued and retried ([`deliveries`]); webhooks can post to Slack and
 //!   Microsoft Teams ([`chat`]) instead of sending JSON.
 //! - A project can publish a **badge** ([`badges`]): the open findings of a version, at a
-//!   public address that only its random key authorizes.
+//!   public address that only its random key authorizes. It can also publish a **public page**
+//!   ([`public_pages`]) of its findings and their triage, behind a key of its own.
 //! - An organization's **license policy** ([`licenses`]) allows, warns about or forbids the
 //!   licenses of its components; violations are computed when read.
 //!
@@ -95,6 +98,7 @@ pub mod organizations;
 pub mod passwords;
 pub mod problem;
 pub mod projects;
+pub mod public_pages;
 pub mod report;
 pub mod staleness;
 pub mod tokens;

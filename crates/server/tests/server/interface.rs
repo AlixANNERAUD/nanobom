@@ -2947,6 +2947,124 @@ async fn the_badge_is_managed_from_the_project_page() {
 }
 
 #[tokio::test]
+async fn the_public_page_is_managed_from_the_project_page_and_the_badge_links_to_it() {
+    use nanobom_domain::{access::Role, badges, memberships, public_pages};
+    let server = server(&[]).await;
+    let owner = local_user(&server.database, "alice", PASSWORD).await;
+    local_user(&server.database, "bob", PASSWORD).await;
+    let organization = organizations::create(&server.database, &owner, "acme", "Acme")
+        .await
+        .unwrap();
+    memberships::add(
+        &server.database,
+        &owner,
+        organization.id,
+        "bob",
+        Role::Viewer,
+    )
+    .await
+    .unwrap();
+    let project = projects::create(&server.database, &owner, organization.id, "web", "Web")
+        .await
+        .unwrap();
+    let badge = badges::enable(&server.database, &owner, project.id)
+        .await
+        .unwrap();
+    let alice = Browser::sign_in(&server, "alice").await;
+    let bob = Browser::sign_in(&server, "bob").await;
+    let page = "/organizations/acme/projects/web";
+    let form = "organization=acme&project=web";
+    let image = format!("[![vulnerabilities](http://localhost:8080/badges/{badge}.svg)]");
+
+    // Off: what it publishes, and the badge links to the members-only project page.
+    let html = alice.page(page).await;
+    assert!(html.contains(">Public page<"), "{html}");
+    assert!(
+        html.contains("never the reasons members wrote nor who triaged"),
+        "{html}"
+    );
+    assert!(html.contains("action=\"/api/enable_public_page\""));
+    assert!(!html.contains("action=\"/api/disable_public_page\""));
+    assert!(
+        html.contains(&format!(
+            "{image}(http://localhost:8080/organizations/acme/projects/web)</textarea>"
+        )),
+        "{html}"
+    );
+    assert!(html.contains("which only members can open"), "{html}");
+    // Viewers see no section and cannot turn it on.
+    let html = bob.page(page).await;
+    assert!(!html.contains("enable_public_page"), "{html}");
+    let response = bob.submit(page, "enable_public_page", form).await;
+    assert!(location(&response).contains("error="));
+    assert_eq!(
+        public_pages::key(&server.database, &owner, project.id)
+            .await
+            .unwrap(),
+        None
+    );
+
+    let response = alice.submit(page, "enable_public_page", form).await;
+    assert_eq!(response.status(), StatusCode::FOUND);
+    assert!(
+        location(&response).contains("notice=Public%20page%20turned%20on."),
+        "{}",
+        location(&response)
+    );
+    let key = public_pages::key(&server.database, &owner, project.id)
+        .await
+        .unwrap()
+        .expect("a key");
+    assert_ne!(key, badge);
+    let address = format!("http://localhost:8080/public/{key}");
+    let html = alice.page(page).await;
+    assert!(html.contains(&format!("href=\"{address}\"")), "{html}");
+    assert!(html.contains("action=\"/api/disable_public_page\""));
+    // The badge now links visitors to the public page.
+    assert!(
+        html.contains(&format!("{image}({address})</textarea>")),
+        "{html}"
+    );
+    assert!(
+        html.contains("links the badge to the project&#x27;s public page")
+            || html.contains("links the badge to the project's public page"),
+        "{html}"
+    );
+    assert!(!bob.page(page).await.contains(&key));
+
+    // The same section in French.
+    let french = Browser {
+        server: &server,
+        cookie: format!("{}; nanobom_locale=fr", alice.cookie),
+    };
+    let html = french.page(page).await;
+    assert!(html.contains("Page publique"), "{html}");
+
+    // A new address replaces the old one, in the badge too.
+    let response = alice
+        .submit(page, "enable_public_page", &format!("{form}&replace=1"))
+        .await;
+    assert!(location(&response).contains("notice=The%20public%20page%20has%20a%20new%20address"));
+    let replaced = public_pages::key(&server.database, &owner, project.id)
+        .await
+        .unwrap()
+        .expect("a key");
+    assert_ne!(replaced, key);
+    let html = alice.page(page).await;
+    assert!(!html.contains(&key), "{html}");
+    assert!(html.contains(&format!("{image}(http://localhost:8080/public/{replaced})")));
+
+    // Turned off: the badge links to the project page again.
+    let response = alice.submit(page, "disable_public_page", form).await;
+    assert!(location(&response).contains("notice=Public%20page%20turned%20off"));
+    let html = alice.page(page).await;
+    assert!(!html.contains(&replaced));
+    assert!(html.contains(&format!(
+        "{image}(http://localhost:8080/organizations/acme/projects/web)</textarea>"
+    )));
+}
+
+#[tokio::test]
 async fn projects_are_created_from_the_organization_page() {
     use nanobom_domain::{access::Role, memberships};
     let server = server(&[]).await;

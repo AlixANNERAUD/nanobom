@@ -79,7 +79,8 @@ To anyone with its address:
 
 Not the project's or the organization's name, the findings themselves, the components or
 anything else. The Markdown snippet of the project page links the image to the project page,
-which only members can open.
+which only members can open, or to the project's [public page](public-pages.md) while it is on.
+The badge's key never opens the public page, which has a key of its own.
 
 The key is stored in clear in the database, unlike API tokens, so the project page can show the
 snippet again. Request logs write badge paths as `/badges/…`, without the key, at debug level

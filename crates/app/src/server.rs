@@ -344,20 +344,24 @@ pub fn finding(value: nanobom_domain::findings::Finding) -> model::FindingRow {
         ignore_justification: value
             .ignore_justification
             .map(|justification| justification.as_str().to_owned()),
-        exploitation: model::Exploitation {
-            known_exploited: value.exploitation.known_exploited,
-            kev_date_added: value.exploitation.kev_date_added,
-            kev_due_date: value.exploitation.kev_due_date,
-            kev_ransomware: value.exploitation.kev_ransomware,
-            epss_score: value.exploitation.epss_score,
-            epss_percentile: value.exploitation.epss_percentile,
-            epss_date: value.exploitation.epss_date,
-        },
+        exploitation: exploitation(value.exploitation),
         introduced_via: value
             .introduced_via
             .into_iter()
             .map(dependency_component)
             .collect(),
+    }
+}
+
+pub fn exploitation(value: nanobom_domain::exploitation::Exploitation) -> model::Exploitation {
+    model::Exploitation {
+        known_exploited: value.known_exploited,
+        kev_date_added: value.kev_date_added,
+        kev_due_date: value.kev_due_date,
+        kev_ransomware: value.kev_ransomware,
+        epss_score: value.epss_score,
+        epss_percentile: value.epss_percentile,
+        epss_date: value.epss_date,
     }
 }
 
@@ -494,6 +498,70 @@ pub fn report(
                 without: counts.without,
             },
         },
+    }
+}
+
+/// A public page for the interface. `vex_url` is the address of the page's VEX document;
+/// `public_url` is the instance's address, whose host the page names.
+pub fn public_page(
+    value: nanobom_domain::public_pages::PublicPage,
+    vex_url: String,
+    public_url: &nanobom_domain::Url,
+) -> model::PublicPageData {
+    fn component(value: nanobom_domain::public_pages::Component) -> model::PublicComponent {
+        model::PublicComponent {
+            name: value.name,
+            version: value.version,
+            purl: value.purl,
+        }
+    }
+    model::PublicPageData {
+        host: public_url.host_str().unwrap_or_default().to_owned(),
+        vex_url,
+        project_name: value.project_name,
+        version: value.version,
+        latest: value.latest,
+        active: value.active,
+        uploaded_at: value.uploaded_at,
+        component_count: value.component_count,
+        components_without_purl: value.components_without_purl,
+        last_evaluation: value.last_evaluation,
+        kev_checked_at: value.kev_checked_at,
+        epss_checked_at: value.epss_checked_at,
+        stale: value.stale,
+        counts: counts(value.summary.open),
+        known_exploited: value.summary.known_exploited,
+        ignored: value.summary.ignored,
+        fixed_recently: value.summary.fixed_recently,
+        open: value
+            .open
+            .into_iter()
+            .map(|finding| model::PublicOpenFinding {
+                vulnerability_id: finding.vulnerability_id,
+                aliases: finding.aliases,
+                summary: finding.summary,
+                severity: severity(finding.severity),
+                cvss_score: finding.cvss_score,
+                component: component(finding.component),
+                fixed_versions: finding.fixed_versions,
+                exploitation: exploitation(finding.exploitation),
+                first_seen_at: finding.first_seen_at,
+            })
+            .collect(),
+        assessed: value
+            .assessed
+            .into_iter()
+            .map(|finding| model::PublicAssessedFinding {
+                vulnerability_id: finding.vulnerability_id,
+                aliases: finding.aliases,
+                severity: severity(finding.severity),
+                component: component(finding.component),
+                justification: finding
+                    .justification
+                    .map(|justification| justification.as_str().to_owned()),
+                ignored_at: finding.ignored_at,
+            })
+            .collect(),
     }
 }
 

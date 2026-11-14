@@ -15,7 +15,9 @@
 use std::collections::{BTreeSet, HashMap};
 
 use chrono::{DateTime, Duration, FixedOffset, Utc};
-use nanobom_entity::{findings as findings_entity, runs, sbom_uploads, vulnerabilities};
+use nanobom_entity::{
+    findings as findings_entity, project_versions, projects, runs, sbom_uploads, vulnerabilities,
+};
 use nanobom_osv::Vulnerability;
 use sea_orm::{
     ColumnTrait, Condition, ConnectionTrait, EntityTrait, PaginatorTrait, QueryFilter, QueryOrder,
@@ -160,15 +162,78 @@ pub async fn build(
     stale_after_days: u32,
 ) -> Result<Report> {
     let reader = reader.into();
-    let now = Utc::now().fixed_offset();
     let organization = crate::organizations::find(database, reader, organization_slug).await?;
     let project = crate::projects::find(database, reader, organization.id, project_slug).await?;
     let version = crate::versions::find(database, reader, project.id, version).await?;
-    let findings = crate::findings::list_in_version(
+    let contents = contents(database, &project, &version, stale_after_days).await?;
+
+    let violations = crate::licenses::violations_in_version(
         database,
         reader,
         project.id,
         Some(&version.name),
+        0,
+        MAXIMUM_VIOLATIONS,
+    )
+    .await?;
+    let licenses = if violations.active {
+        Licenses::Policy(violations)
+    } else {
+        Licenses::Counts(license_counts(database, version.id).await?)
+    };
+
+    Ok(Report {
+        generated_at: contents.generated_at,
+        organization_slug: organization.slug,
+        organization_name: organization.name,
+        stale: contents.stale,
+        last_evaluation: contents.last_evaluation,
+        project_slug: project.slug,
+        project_name: project.name,
+        project_last_upload_at: project.last_upload_at,
+        project_created_at: project.created_at,
+        version: version.name,
+        latest: version.latest,
+        active: version.active,
+        upload: contents.upload,
+        component_count: contents.component_count,
+        kev_checked_at: contents.kev_checked_at,
+        epss_checked_at: contents.epss_checked_at,
+        summary: contents.summary,
+        open: contents.open,
+        assessed: contents.assessed,
+        licenses,
+    })
+}
+
+/// What the report and the public page ([`crate::public_pages`]) of a version both show.
+pub(crate) struct Contents {
+    pub generated_at: DateTime<FixedOffset>,
+    pub upload: Option<Upload>,
+    pub component_count: u64,
+    pub stale: bool,
+    pub last_evaluation: Option<DateTime<FixedOffset>>,
+    pub kev_checked_at: Option<DateTime<FixedOffset>>,
+    pub epss_checked_at: Option<DateTime<FixedOffset>>,
+    pub summary: Summary,
+    pub open: Vec<OpenFinding>,
+    pub assessed: Vec<AssessedFinding>,
+}
+
+/// The findings, provenance and freshness of a version of a project, **without
+/// authorization**: [`build`] checks the reader first, and a public page's key stands for its
+/// authorization.
+pub(crate) async fn contents(
+    database: &impl ConnectionTrait,
+    project: &projects::Model,
+    version: &project_versions::Model,
+    stale_after_days: u32,
+) -> Result<Contents> {
+    let now = Utc::now().fixed_offset();
+    let findings = crate::findings::version_findings(
+        database,
+        project.clone(),
+        version,
         &Filter {
             statuses: vec![Status::Open, Status::Ignored],
             ..Filter::default()
@@ -240,49 +305,24 @@ pub async fn build(
         .filter(nanobom_entity::components::Column::VersionId.eq(version.id))
         .count(database)
         .await?;
-
-    let violations = crate::licenses::violations_in_version(
-        database,
-        reader,
-        project.id,
-        Some(&version.name),
-        0,
-        MAXIMUM_VIOLATIONS,
-    )
-    .await?;
-    let licenses = if violations.active {
-        Licenses::Policy(violations)
-    } else {
-        Licenses::Counts(license_counts(database, version.id).await?)
-    };
     let (kev_checked_at, epss_checked_at) = crate::exploitation::last_checked(database).await?;
 
-    Ok(Report {
+    Ok(Contents {
         generated_at: now,
-        organization_slug: organization.slug,
-        organization_name: organization.name,
+        upload,
+        component_count,
         stale: crate::staleness::is_stale(
             project.created_at,
             project.last_upload_at,
             now,
             stale_after_days,
         ),
-        last_evaluation: last_evaluation(database, organization.id, project.id).await?,
-        project_slug: project.slug,
-        project_name: project.name,
-        project_last_upload_at: project.last_upload_at,
-        project_created_at: project.created_at,
-        version: version.name,
-        latest: version.latest,
-        active: version.active,
-        upload,
-        component_count,
+        last_evaluation: last_evaluation(database, project.organization_id, project.id).await?,
         kev_checked_at,
         epss_checked_at,
         summary,
         open,
         assessed,
-        licenses,
     })
 }
 

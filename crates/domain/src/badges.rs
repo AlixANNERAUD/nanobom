@@ -37,10 +37,20 @@ pub enum Summary {
     Findings(OpenSummary),
 }
 
-fn generate_key() -> String {
+/// A new random key. Public pages ([`crate::public_pages`]) draw theirs the same way.
+pub(crate) fn generate_key() -> String {
     let mut bytes = [0_u8; KEY_BYTES];
     getrandom::fill(&mut bytes).expect("the operating system provides random numbers");
     crate::tokens::hexadecimal(&bytes)
+}
+
+/// Whether `key` could be a key: anything else cannot match one, which spares the database a
+/// lookup.
+pub(crate) fn well_formed(key: &str) -> bool {
+    key.len() == KEY_BYTES * 2
+        && key
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 /// The key of a project's badge, `None` while it is off. Requires
@@ -152,12 +162,7 @@ pub async fn summary(
     key: &str,
     version: Option<&str>,
 ) -> Result<Summary> {
-    // Anything that is not a key cannot match one; this spares the database a lookup.
-    let well_formed = key.len() == KEY_BYTES * 2
-        && key
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte));
-    if !well_formed {
+    if !well_formed(key) {
         return Err(Error::NotFound);
     }
     let badge = project_badges::Entity::find()

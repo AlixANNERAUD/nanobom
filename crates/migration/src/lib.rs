@@ -25,6 +25,7 @@ mod m20261109_000003_email_notifications;
 mod m20261109_000004_project_versions;
 mod m20261111_000001_project_badges;
 mod m20261111_000002_project_tokens;
+mod m20261114_000001_project_public_pages;
 
 /// Every migration of nanobom, in the order they apply; used by
 /// `nanobom_domain::database::migrate` and by the `migrate` command.
@@ -48,6 +49,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20261109_000004_project_versions::Migration),
             Box::new(m20261111_000001_project_badges::Migration),
             Box::new(m20261111_000002_project_tokens::Migration),
+            Box::new(m20261114_000001_project_public_pages::Migration),
         ]
     }
 }

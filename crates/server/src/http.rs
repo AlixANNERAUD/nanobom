@@ -50,7 +50,7 @@ fn without_strong_tag(_: StatusCode, _: Version, headers: &HeaderMap, _: &Extens
 
 /// Interface pages carry what only their viewer may see, such as a project's upload token for its
 /// admins: no browser or proxy cache keeps them after sign-out, unless the route set its own
-/// caching (the report, badges).
+/// caching (the report, badges, public pages).
 async fn no_store_pages(request: Request, next: Next) -> Response {
     let mut response = next.run(request).await;
     let html = response
@@ -70,7 +70,8 @@ fn security_header(name: HeaderName, value: &'static str) -> SetResponseHeaderLa
 }
 
 /// Logs each request once it is answered. The query string is left out: it can carry search
-/// terms and messages. Probes, metrics scrapes, badges and assets are logged at debug level.
+/// terms and messages. Probes, metrics scrapes, badges, public pages and assets are logged at
+/// debug level.
 async fn log_request(request: Request, next: Next) -> Response {
     let method = request.method().clone();
     let path = logged_path(request.uri().path());
@@ -86,10 +87,13 @@ async fn log_request(request: Request, next: Next) -> Response {
     response
 }
 
-/// The path as logged: a badge's key is its only authorization, so it is left out.
+/// The path as logged: the key of a badge or a public page is its only authorization, so it is
+/// left out.
 fn logged_path(path: &str) -> String {
     if path.starts_with("/badges/") {
         "/badges/…".to_owned()
+    } else if path.starts_with("/public/") {
+        "/public/…".to_owned()
     } else {
         path.to_owned()
     }
@@ -99,6 +103,7 @@ fn is_routine(path: &str) -> bool {
     path == "/healthz"
         || path == "/metrics"
         || path.starts_with("/badges/")
+        || path.starts_with("/public/")
         || path.starts_with("/pkg/")
         || path.starts_with("/fonts/")
         || path == "/favicon.svg"
@@ -127,5 +132,17 @@ mod tests {
         assert!(is_routine(path));
         assert_eq!(logged_path(path), "/badges/…");
         assert_eq!(logged_path("/organizations"), "/organizations");
+    }
+
+    #[test]
+    fn public_page_keys_are_not_logged() {
+        for path in [
+            "/public/0123456789abcdef0123456789abcdef",
+            "/public/0123456789abcdef0123456789abcdef/vex.json",
+        ] {
+            assert!(is_routine(path), "{path}");
+            assert_eq!(logged_path(path), "/public/…");
+        }
+        assert_eq!(logged_path("/publications"), "/publications");
     }
 }

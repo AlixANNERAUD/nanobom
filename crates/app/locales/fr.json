@@ -203,6 +203,15 @@
     "badge_version_hint": "Ajoutez ?version=<nom> à l’adresse de l’image pour montrer une autre version.",
     "badge_replace": "Nouvelle adresse",
     "badge_disable": "Désactiver",
+    "badge_links_public": "Le Markdown fait pointer le badge vers la page publique du projet.",
+    "badge_links_project": "Le Markdown fait pointer le badge vers cette page, que seuls les membres peuvent ouvrir. Activez la page publique ci-dessous pour y envoyer plutôt les visiteurs.",
+    "public_page_title": "Page publique",
+    "public_page_off": "Désactivée : seuls les membres voient les vulnérabilités de ce projet.",
+    "public_page_shows": "Toute personne qui connaît l’adresse de la page voit les vulnérabilités ouvertes et ignorées de la dernière version (une autre avec ?version=<nom>) et la justification VEX de chaque ignore, jamais les raisons écrites par les membres ni qui a fait le tri. Laissez-la désactivée pour les projets privés ou commerciaux.",
+    "public_page_enable": "Activer",
+    "public_page_on": "Activée : toute personne qui connaît cette adresse voit la page.",
+    "public_page_replace": "Nouvelle adresse",
+    "public_page_disable": "Désactiver",
     "token_title": "Jeton d’envoi",
     "token_description": "La CI envoie les SBOM de ce projet avec ce jeton. Il n’envoie que vers ce projet, et le lit.",
     "token_label": "Jeton",
@@ -341,6 +350,21 @@
     "method_checks": "nanobom vérifie le package URL de chaque composant du SBOM auprès de la base de vulnérabilités OSV, puis classe les vulnérabilités avec le catalogue des vulnérabilités exploitées de la CISA (KEV) et les scores de prédiction d’exploitation du FIRST (EPSS).",
     "method_limits": "Il ne vérifie ni les composants sans package URL, ni le code que le SBOM ne liste pas, comme du code copié ou généré.",
     "method_time": "Ce rapport reflète l’état au moment de sa génération. Les dates sont en UTC."
+  },
+  "public": {
+    "title": "Vulnérabilités",
+    "served_by": "Publié par nanobom sur {host}.",
+    "stale": "Aucun SBOM reçu pour ce projet depuis un moment : cette page peut ne pas décrire ce qui est déployé.",
+    "open_description": "Les vulnérabilités exploitées d’abord, puis par sévérité et EPSS. L’EPSS est le centile de la probabilité d’exploitation dans les 30 prochains jours.",
+    "more": {
+      "one": "Et {count} autre, non listée ici.",
+      "other": "Et {count} autres, non listées ici."
+    },
+    "assessed_title": "Évaluées par les mainteneurs",
+    "assessed_description": "Les vulnérabilités que les mainteneurs ont évaluées et ignorées. Une justification indique pourquoi le projet n’est pas affecté ; un ignore sans justification consigne un risque accepté.",
+    "ignored_on": "Ignorée le",
+    "vex": "Pour les scanners, les mêmes évaluations en document VEX CycloneDX :",
+    "method_time": "Cette page montre l’état au moment où elle est servie. Les dates sont en UTC."
   },
   "finding": {
     "title": "Vulnérabilité",
@@ -609,6 +633,9 @@
     "badge_enabled": "Badge activé.",
     "badge_replaced": "Le badge a une nouvelle adresse ; l’ancienne ne fonctionne plus.",
     "badge_disabled": "Badge désactivé ; son adresse ne fonctionne plus.",
+    "public_page_enabled": "Page publique activée.",
+    "public_page_replaced": "La page publique a une nouvelle adresse ; l’ancienne ne fonctionne plus.",
+    "public_page_disabled": "Page publique désactivée ; son adresse ne fonctionne plus.",
     "organization_created": "Organisation créée.",
     "run_started": "Analyse lancée ; actualisez la page dans un instant pour voir ses résultats.",
     "invalid_expiry": "La date d’expiration doit être une date (AAAA-MM-JJ).",

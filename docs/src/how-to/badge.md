@@ -23,9 +23,13 @@ Copy the **Markdown for a README** field into the README:
 [![vulnerabilities](https://nanobom.example.com/badges/3f6c…e1.svg)](https://nanobom.example.com/organizations/acme/projects/web)
 ```
 
-The image links to the project page, which only members can open. The addresses start with
-`NANOBOM_PUBLIC_URL` ([Configuration](../reference/configuration.md)): for a public README, that
-address must be reachable from the internet, or at least the `/badges/` path of it.
+The image links to the project page, which only members can open. For an open-source project,
+[publish a public page](public-page.md): while it is on, the snippet links to the public page
+instead, so visitors who click the badge see the findings behind the counts and how they were
+triaged. The addresses start with `NANOBOM_PUBLIC_URL`
+([Configuration](../reference/configuration.md)): for a public README, that address must be
+reachable from the internet, or at least the `/badges/` path of it (and `/public/` for the
+public page).
 
 To show another version than the latest, add `?version=` and the version's name to the image
 address:

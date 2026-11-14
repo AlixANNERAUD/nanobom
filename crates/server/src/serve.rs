@@ -24,7 +24,7 @@ use sea_orm::DatabaseConnection;
 use crate::{
     api, authentication, badges,
     command_line::ServeOptions,
-    deliveries, dependency_track, http, mcp, metrics, operations, read_api, report,
+    deliveries, dependency_track, http, mcp, metrics, operations, public_pages, read_api, report,
     runner::{self, NotificationSettings, RunRequest, Runner},
     state::AppState,
     vex,
@@ -103,6 +103,7 @@ pub fn router(state: AppState) -> Router {
             .merge(mcp::router(&state))
             .merge(operations::router())
             .merge(badges::router())
+            .merge(public_pages::router())
             .merge(interface)
             .with_state(state),
     )

@@ -8,6 +8,7 @@ mod dependency_track;
 mod interface;
 mod mcp;
 mod operations;
+mod public_pages;
 mod read_api;
 mod report;
 mod upload;

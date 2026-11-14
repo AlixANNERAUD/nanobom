@@ -13,7 +13,9 @@ use leptos_router::hooks::{use_params_map, use_query_map};
 use crate::{
     components::{Loaded, Page, PageTitle, SeverityBadge, format_date, format_time, ui::*},
     functions::load_report,
-    model::{AssessedFinding, LicenseAction, ReportData, ReportFinding, ReportLicenses},
+    model::{
+        AssessedFinding, LicenseAction, ReportData, ReportFinding, ReportLicenses, SeverityCounts,
+    },
     pages::findings::{
         changed_by, introduced_via_labels, justification_label, percent, sbom_format,
         version_label, version_query,
@@ -23,7 +25,7 @@ use crate::{
 
 /// A cell of the report's tables: long identifiers break anywhere rather than widen the table
 /// past the page, on screen and on paper.
-const CELL: &str = "px-3 py-2 align-top wrap-anywhere";
+pub(crate) const CELL: &str = "px-3 py-2 align-top wrap-anywhere";
 
 /// `?version=…` for a link to the report's version, empty for the latest one.
 fn version_suffix(report: &ReportData) -> String {
@@ -156,7 +158,7 @@ pub fn ReportBody(report: ReportData) -> impl IntoView {
 }
 
 /// A term and its description in a list of facts.
-fn fact(term: String, description: String) -> impl IntoView {
+pub(crate) fn fact(term: String, description: String) -> impl IntoView {
     view! {
         <div class="grid gap-x-4 sm:grid-cols-[16rem_minmax(0,1fr)]">
             <dt class="text-muted-foreground">{term}</dt>
@@ -165,7 +167,7 @@ fn fact(term: String, description: String) -> impl IntoView {
     }
 }
 
-fn time_or_never(time: Option<chrono::DateTime<chrono::FixedOffset>>) -> String {
+pub(crate) fn time_or_never(time: Option<chrono::DateTime<chrono::FixedOffset>>) -> String {
     time.map(format_time)
         .unwrap_or_else(|| t!("common.never").to_owned())
 }
@@ -227,9 +229,9 @@ fn provenance(report: ReportData) -> impl IntoView + use<> {
 }
 
 /// The summary sentence: whether anything of high or critical severity is open.
-fn summary_sentence(report: &ReportData) -> String {
-    let severe = report.counts.critical + report.counts.high;
-    let total = report.counts.total();
+pub(crate) fn summary_sentence(counts: &SeverityCounts) -> String {
+    let severe = counts.critical + counts.high;
+    let total = counts.total();
     if total == 0 {
         t!("report.sentence_none").to_owned()
     } else if severe == 0 {
@@ -248,7 +250,7 @@ fn summary(report: ReportData) -> impl IntoView + use<> {
             </CardHeader>
             <CardContent>
                 <div class="grid gap-3">
-                    <p class="font-medium">{summary_sentence(&report)}</p>
+                    <p class="font-medium">{summary_sentence(&report.counts)}</p>
                     <SeverityBar counts=report.counts />
                     <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
                         <p class="font-medium">{tp!("project.open_findings", report.counts.total())}</p>
@@ -343,12 +345,12 @@ fn open_row(row: ReportFinding) -> impl IntoView {
 }
 
 /// How many items of a list cut at its bound are not shown.
-fn hidden(total: u64, listed: usize) -> Option<u64> {
+pub(crate) fn hidden(total: u64, listed: usize) -> Option<u64> {
     let hidden = total.saturating_sub(u64::try_from(listed).unwrap_or(u64::MAX));
     (hidden > 0).then_some(hidden)
 }
 
-fn note(text: Option<String>) -> Option<impl IntoView + use<>> {
+pub(crate) fn note(text: Option<String>) -> Option<impl IntoView + use<>> {
     text.map(|text| view! { <p class="text-muted-foreground text-sm">{text}</p> })
 }
 
@@ -644,7 +646,7 @@ pub fn document(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{FindingRow, SeverityCounts, Status};
+    use crate::model::{FindingRow, Status};
 
     fn report() -> ReportData {
         let now = chrono::Utc::now().fixed_offset();
@@ -840,10 +842,10 @@ mod tests {
     fn the_summary_sentence_follows_the_worst_severity() {
         let mut data = report();
         data.counts = SeverityCounts::default();
-        assert_eq!(summary_sentence(&data), "No open vulnerabilities.");
+        assert_eq!(summary_sentence(&data.counts), "No open vulnerabilities.");
         data.counts.low = 2;
         assert_eq!(
-            summary_sentence(&data),
+            summary_sentence(&data.counts),
             "No open vulnerabilities of high or critical severity; 2 of lower or unknown severity."
         );
     }

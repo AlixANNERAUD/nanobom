@@ -15,6 +15,7 @@ mod lifecycle;
 mod notifications;
 mod project_tokens;
 mod project_versions;
+mod public_pages;
 mod report;
 mod staleness;
 mod tokens;
