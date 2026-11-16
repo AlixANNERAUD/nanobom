@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: jdx/mise-action@v5.2.7
+      - uses: jdx/mise-action@v5.2.8
       - uses: Swatinem/rust-cache@v2.9.3
       - run: mise run lint
       - run: mise run doc
@@ -54,7 +54,7 @@ jobs:
       NANOBOM_TEST_DATABASE_URL: postgres://nanobom:nanobom@localhost:5432/nanobom
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: jdx/mise-action@v5.2.7
+      - uses: jdx/mise-action@v5.2.8
       - uses: Swatinem/rust-cache@v2.9.3
       - run: mise run test-postgres
 
@@ -63,7 +63,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: jdx/mise-action@v5.2.7
+      - uses: jdx/mise-action@v5.2.8
       - uses: Swatinem/rust-cache@v2.9.3
         with:
           key: coverage
@@ -91,7 +91,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: jdx/mise-action@v5.2.7
+      - uses: jdx/mise-action@v5.2.8
       - run: mise run deny
 
   release-build:
@@ -99,7 +99,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: jdx/mise-action@v5.2.7
+      - uses: jdx/mise-action@v5.2.8
       - uses: Swatinem/rust-cache@v2.9.3
         with:
           key: release
