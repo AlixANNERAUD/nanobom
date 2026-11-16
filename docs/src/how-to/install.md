@@ -116,8 +116,9 @@ of your identity provider instead: see [Set up single sign-on](single-sign-on.md
 
 - [ ] TLS is terminated by a reverse proxy, and `NANOBOM_PUBLIC_URL` is its `https` address:
   [Run behind a reverse proxy](reverse-proxy.md).
-- [ ] The proxy accepts SBOMs as large as `NANOBOM_MAXIMUM_SBOM_SIZE` and lets uploads wait
-  `NANOBOM_UPLOAD_WAIT_SECONDS`.
+- [ ] The proxy accepts bodies of one and a half times `NANOBOM_MAXIMUM_SBOM_SIZE` (24 MiB by
+  default, for Dependency-Track clients) and lets uploads wait `NANOBOM_UPLOAD_WAIT_SECONDS`.
+- [ ] The commands of [Check the setup](reverse-proxy.md#check-the-setup) print what they should.
 - [ ] `NANOBOM_TRUST_FORWARDED_HEADERS=true`, so sign-in rate limiting sees client addresses.
 - [ ] `/metrics` is scraped, and reachable only by your monitoring:
   [Monitor with Prometheus](monitoring.md).
