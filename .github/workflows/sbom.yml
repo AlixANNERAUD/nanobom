@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: jdx/mise-action@v5.2.7
+      - uses: jdx/mise-action@v5.2.10
       # The server package depends on every other crate except the browser bundle, whose own
       # dependencies are almost all shared with the server. Only normal and build dependencies are
       # listed, for the runner's target (x86_64 Linux), like the released binary.
