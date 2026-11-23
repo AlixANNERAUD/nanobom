@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7.0.1
-      - uses: astral-sh/setup-uv@v10.3.3
+      - uses: astral-sh/setup-uv@v10.4.0
       # The template's default image is Alpine, whose shell is BusyBox's.
       - name: Install BusyBox
         run: sudo apt-get update --quiet && sudo apt-get install --yes --quiet busybox
